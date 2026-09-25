@@ -2,6 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+
+function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視 */ } }
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +39,7 @@ test("release: 予算停止等で消えた担当者の請求中タスクがnote�
   const body = readFileSync(join(ws, "tasks/open/t1.md"), "utf8");
   assert.match(body, /担当者終了のため解放/);
   assert.deepEqual(events.map((e) => e.taskId).sort(), ["t1", "t2"]);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("gather_context: board/done/openの生素材を読める", async () => {
@@ -66,7 +68,7 @@ test("gather_context: board/done/openの生素材を読める", async () => {
   tasks.create({ id: "t2", body: "次の仕事" });
   const ro2 = await tools.execute("gather_context", { source: "open" });
   assert.match(ro2.text, /次の仕事/);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("gather_context: limitで取得件数を絞れる(新しい方を優先)", async () => {
@@ -81,7 +83,7 @@ test("gather_context: limitで取得件数を絞れる(新しい方を優先)", 
   const r = await tools.execute("gather_context", { source: "board", limit: 2 });
   assert.doesNotMatch(r.text, /古い投稿1/);
   assert.match(r.text, /新しい投稿3/);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 // UI直操作(チャット不要のタスク管理)の土台
@@ -105,7 +107,7 @@ test("list: 状態ごとにid/担当/要約/パス付きで一覧を返す", () 
   const l2 = tasks.list();
   assert.equal(l2.done[0].id, "t1");
   assert.equal(l2.done[0].agent, "alpha");
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("releaseOne: 指定1件だけopenへ戻す。openに同名があれば壊さない", () => {
@@ -122,7 +124,7 @@ test("releaseOne: 指定1件だけopenへ戻す。openに同名があれば壊�
   tasks.create({ id: "t2", body: "手動で投入済み" });
   assert.equal(tasks.releaseOne("alpha", "t2", "note"), false);
   assert.equal(readFileSync(join(ws, "tasks/open/t2.md"), "utf8").includes("手動で投入済み"), true);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("cancel/reopen: open→中止→done、再開でopenへ。二重再開は拒否", () => {
@@ -142,7 +144,7 @@ test("cancel/reopen: open→中止→done、再開でopenへ。二重再開は�
   assert.match(readFileSync(join(ws, "tasks/open/t1.md"), "utf8"), /再開/);
   // doneからは消えているので再openはもうできない(openに同名もあるし)
   assert.equal(tasks.reopen("t1"), false);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("project: 作成時に文脈を付け、claimは文脈で絞れる(混ざらない)", () => {
@@ -161,7 +163,7 @@ test("project: 作成時に文脈を付け、claimは文脈で絞れる(混ざ�
   const l = tasks.list();
   assert.equal(l.claimed.find((t) => t.id === "a-kernel").project, "cuda");
   assert.equal(l.done.find((t) => t.id === "web-ui")?.project ?? l.claimed.find((t) => t.id === "web-ui").project, "");
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("project: 旧形式ファイル(role行のみ)も読める", () => {
@@ -172,7 +174,7 @@ test("project: 旧形式ファイル(role行のみ)も読める", () => {
   assert.equal(readMeta(join(ws, "tasks/open/t1.md")).project, "");
   const got = tasks.claim({ id: "gamma", role: "review" }, { project: "" });
   assert.equal(got.id, "t1");
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("setProject: 後から文脈を付け替え。role行は保持、不正パスは拒否", () => {
@@ -196,7 +198,7 @@ test("setProject: 後から文脈を付け替え。role行は保持、不正パ�
   // 脱出パスは拒否
   assert.equal(tasks.setProject("tasks/../../evil.md", "x"), false);
   assert.equal(tasks.setProject("tasks/open/sub/evil.md", "x"), false);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("gather_context: projectで絞り込める", async () => {
@@ -212,7 +214,7 @@ test("gather_context: projectで絞り込める", async () => {
   assert.doesNotMatch(r.text, /よそ者の本文/);
   const r2 = await tools.execute("gather_context", { source: "open", project: "nosuch" });
   assert.match(r2.text, /nosuch/);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("pushAgentLog: ログは上限件数で切り詰め、長文は圧縮", () => {

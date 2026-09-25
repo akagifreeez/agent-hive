@@ -2,6 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+
+function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視 */ } }
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,7 +54,7 @@ test("タスクのclaimは原子的: 2エージェントが同時に請求して
   assert.ok(a);
   assert.equal(b, null);
   assert.ok(existsSync(join(ws, "tasks", "claimed", "a--t1.md")));
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("claimはrole一致を優先し、無ければrole指定なしを取る", () => {
@@ -61,7 +63,7 @@ test("claimはrole一致を優先し、無ければrole指定なしを取る", (
   tasks.seed([{ id: "free", role: null, body: "誰でも" }, { id: "mine", role: "impl", body: "実装向け" }]);
   const got = tasks.claim({ id: "a", role: "impl" });
   assert.equal(got.id, "mine");
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("パス脱出の拒否: read_file がワークスペース外を指すとエラー", async () => {
@@ -71,7 +73,7 @@ test("パス脱出の拒否: read_file がワークスペース外を指すと�
   const out = await tools.execute("read_file", { path: "../outside.txt" });
   assert.equal(out.ok, false);
   assert.match(out.text, /ワークスペース外/);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("write→read→edit の一連と、editの不一致・非一意エラー", async () => {
@@ -86,7 +88,7 @@ test("write→read→edit の一連と、editの不一致・非一意エラー",
   const ok = await tools.execute("edit_file", { path: "src/a.txt", old_text: "hello world\nhello", new_text: "hi world\nhello" });
   assert.equal(ok.ok, true);
   assert.match(readFileSync(join(ws, "src", "a.txt"), "utf8"), /^hi world/);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("ループ統合: claim→write→投稿→finish が一巡する", async () => {
@@ -106,7 +108,7 @@ test("ループ統合: claim→write→投稿→finish が一巡する", async (
   assert.equal(r.ok, true);
   assert.equal(tasks.snapshot().done.includes("alpha--build.md"), true);
   assert.ok(board.posts.some((p) => p.from === "alpha" && p.text === "できました"));
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("wait_for_board は他者投稿で起床し、自分の投稿では起こされない", async () => {
@@ -120,5 +122,5 @@ test("wait_for_board は他者投稿で起床し、自分の投稿では起こ�
   board.post("beta", "他者の投稿"); // 起きる
   const out = await waitP;
   assert.match(out.text, /\[betaの投稿\]/);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });

@@ -225,6 +225,8 @@ test("usage計測: モデル応答のusageが台帳へ累積される", async ()
 
 // --- 以下テスト用ヘルパ ---
 import { mkdtempSync, rmSync } from "node:fs";
+
+function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視 */ } }
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -241,7 +243,7 @@ function makeEnv(ws) {
   return { bus, board, tasks };
 }
 function cleanup(ws) {
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 }
 function scriptedModel(script) {
   let i = 0;

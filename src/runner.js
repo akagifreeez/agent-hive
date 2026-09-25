@@ -1,6 +1,6 @@
 // シナリオ実行器: ワークスペース初期化(git blackboard化)→タスク/シード投入→
 // 発見器起動→全エージェント同時走行→最終プローブ→回収。
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { Board, Bus } from "./engine/board.js";
 import { TaskBlackboard } from "./engine/tasks.js";
@@ -31,7 +31,9 @@ export function createModelFactory(config) {
 // コントローラ { say(text, thread?), openThread, listThreads, manager } を返す。
 export async function runChat({ config, bus = new Bus(), modelFactory = null }) {
   mkdirSync(config.workspace, { recursive: true });
-  const mainBoard = new Board(bus, "__main__");
+  // チャットの永続化先(workspace/state/。git除外済み)。再起動後も会話を復帰できる
+  const stateDir = join(config.workspace, "state");
+  const mainBoard = new Board(bus, "__main__", join(stateDir, "board__main__.jsonl"));
   const tasks = new TaskBlackboard(config.workspace, bus);
   const gate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   const ledger = new UsageLedger();
@@ -75,7 +77,16 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
 
   // サブスレッド: project名=スレッド名。3ワーカー( personas: workers )が専用ボードで並行作業
   const threads = new Map();
-  const openThread = async ({ project, goal }) => {
+  const registryPath = join(stateDir, "threads.json");
+  const writeRegistry = () => {
+    try {
+      mkdirSync(stateDir, { recursive: true });
+      writeFileSync(registryPath, JSON.stringify([...threads.values()].map((t) => ({ name: t.name, goal: t.goal })), null, 1));
+    } catch {
+      // 簿記の失敗でスレッド運用を止めない
+    }
+  };
+  const openThread = async ({ project, goal }, opts = {}) => {
     const name = String(project).trim();
     if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) return { error: "project(スレッド名)は英小文字数字とハイフンで40字以内" };
     if (threads.has(name)) return { error: `スレッド ${name} は既に開いています` };
@@ -97,7 +108,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       agents: members,
       onKept: keptNotice(mainBoard),
     });
-    const threadBoard = new Board(bus, name);
+    const threadBoard = new Board(bus, name, join(stateDir, `board-${name}.jsonl`));
     const host = new ChatHost({
       mains: members,
       mainWorkspace: config.workspace,
@@ -119,10 +130,24 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     });
     host.worktreePaths = wtPaths;
     threads.set(name, { name, goal, host });
+    writeRegistry();
     bus.emit("thread.opened", { name, goal, agents: members.map((m) => ({ id: m.id, displayName: m.displayName })) });
-    host.say(`[スレッド開始] project: ${name}\n目標: ${goal}\n\nタスクは claim_next_task で project: ${name} を指定して請求してください。`);
+    // 復元(silent)時はキックオフせず静かに開く。ユーザーが投稿したときにワーカーが起きる
+    if (!opts.silent) {
+      host.say(`[スレッド開始] project: ${name}\n目標: ${goal}\n\nタスクは claim_next_task で project: ${name} を指定して請求してください。`);
+    }
     return { ok: true, id: name };
   };
+
+  // 前回実行で開いていたスレッドを無音で復元(ボード・メモリ・タブが復帰する)
+  try {
+    const registry = JSON.parse(readFileSync(registryPath, "utf8"));
+    for (const t of Array.isArray(registry) ? registry : []) {
+      await openThread({ project: t.name, goal: t.goal ?? "" }, { silent: true });
+    }
+  } catch {
+    // registryが無ければ初回起動
+  }
 
   // リーダー(メインチャットに1体)。壁打ち→計画→open_thread
   const leadDef = config.agents.find((a) => a.id === (config.chat?.lead ?? "lead")) ?? {};

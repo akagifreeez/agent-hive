@@ -131,11 +131,18 @@ export async function ensureGitRepo(workspace, exec = runCommand) {
     await exec({ command: "git init -b main", cwd: workspace, outputLimit: 2000 });
     writeFileSync(join(workspace, ".gitignore"), "tasks/\ntmp/\nnode_modules/\n");
   }
-  // distillマーカーはエンジン管理の簿記なのでgitに乗せない(テンプレートに無い時代の分も担保)
+  // distillマーカーとチャットstate(ボードログ/会話メモリ)は簿記なのでgitに乗せない
   const giPath = join(workspace, ".gitignore");
   if (existsSync(giPath)) {
-    const gi = readFileSync(giPath, "utf8");
-    if (!gi.includes(DISTILL_MARKER)) writeFileSync(giPath, gi.replace(/\s*$/, "") + "\n" + DISTILL_MARKER + "\n");
+    let gi = readFileSync(giPath, "utf8");
+    let dirty = false;
+    for (const line of [DISTILL_MARKER, "state/"]) {
+      if (!gi.includes(line)) {
+        gi = gi.replace(/\s*$/, "") + "\n" + line + "\n";
+        dirty = true;
+      }
+    }
+    if (dirty) writeFileSync(giPath, gi);
   }
   await exec({ command: "git add -A && (git diff --cached --quiet || git -c user.name=hive -c user.email=hive@local commit -m 'baseline')", cwd: workspace, outputLimit: 2000 });
   const tag = await exec({ command: "git rev-parse -q --verify reviewed", cwd: workspace, outputLimit: 500 });

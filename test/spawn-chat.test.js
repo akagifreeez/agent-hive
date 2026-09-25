@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
-function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視(一時ディレクトリ) */ } }
+function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視(一時ディレクトリ) */ } }
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,7 +45,7 @@ function scriptedModel(script, received = []) {
 async function waitUntil(fn, ms = 8000) {
   const start = Date.now();
   while (Date.now() - start < ms) {
-    if (fn()) return true;
+    if (await fn()) return true;
     await new Promise((r) => setTimeout(r, 100));
   }
   return fn();
@@ -234,8 +234,10 @@ test("クリーン終了(マージ済み)ならworktreeとブランチを掃除�
   const r = await manager.spawn({ parent: main, brief: "クリーンな作業", role: "impl" });
   assert.ok(await waitUntil(() => manager.snapshot()[r.id]?.status === "done"));
   assert.ok(await waitUntil(() => !existsSync(join(root, r.id)), 8000)); // 掃除済み
-  const br = await runCommand({ command: "git branch --list agent/" + r.id, cwd: ws, outputLimit: 500 });
-  assert.ok(!br.text.includes("agent/" + r.id));
+  assert.ok(await waitUntil(async () => {
+    const br = await runCommand({ command: "git branch --list agent/" + r.id, cwd: ws, outputLimit: 500 });
+    return !br.text.includes("agent/" + r.id);
+  }));
   rmTree(ws, { recursive: true, force: true });
   rmTree(root, { recursive: true, force: true });
 });

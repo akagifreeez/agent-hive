@@ -1,13 +1,15 @@
 // v6: リーダー(壁打ち/計画)→open_thread→サブスレッドで3ワーカー並行、の検証
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Board, Bus } from "../src/engine/board.js";
 import { TaskBlackboard } from "../src/engine/tasks.js";
 import { ChatHost } from "../src/engine/chat.js";
 import { runChat } from "../src/runner.js";
+
+function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ } }
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-th-"));
@@ -122,6 +124,6 @@ test("v6統合: リーダーがopen_threadすると3ワーカーがprojectタス
     15000
   );
   assert.ok(claimed, "demo-alpha/beta/gammaの誰かがt1を請求している");
-  rmSync(ws, { recursive: true, force: true });
-  rmSync(`${ws}-wt`, { recursive: true, force: true });
+  rmTree(ws);
+  rmTree(`${ws}-wt`);
 });
