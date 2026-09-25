@@ -4,11 +4,12 @@
 import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, join, dirname, sep } from "node:path";
 import { runCommand, detectShell } from "./exec.js";
+import { mergeAgentWork } from "./worktree.js";
 
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
-export function createTools({ agent, workspace, board, tasks, bus, gate = null, maxBashMs = 30000 }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, maxBashMs = 30000 }) {
   const specs = [
     {
       name: "claim_next_task",
@@ -19,6 +20,20 @@ export function createTools({ agent, workspace, board, tasks, bus, gate = null, 
       name: "finish_task",
       description: "自分が請求中のタスクを完了として確定する。task_idはclaim_next_taskの返値に示されたもの。",
       parameters: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false },
+    },
+    {
+      name: "create_task",
+      description: "新しい仕事をタスクボードへ投入する。レビュー指摘の修正など後続の仕事を生んだときに使う。task_idは英小文字数字とハイフン。",
+      parameters: {
+        type: "object",
+        properties: {
+          task_id: { type: "string" },
+          role: { type: "string", description: "担当ロール(impl/review/lead等)。省略で誰でも可" },
+          body: { type: "string", description: "具体的な指示(何を/どう確認するか/完了条件)" },
+        },
+        required: ["task_id", "body"],
+        additionalProperties: false,
+      },
     },
     {
       name: "list_files",
@@ -73,9 +88,36 @@ export function createTools({ agent, workspace, board, tasks, bus, gate = null, 
         return { ok: true, text: `タスク ${t.id} を請求しました。\n\n${t.body}` };
       }
       case "finish_task": {
-        const done = tasks.finish(agent, String(args.task_id ?? ""));
-        if (!done) return { ok: false, text: "そのタスクは請求していません(task_idを確認)。" };
-        return { ok: true, text: `タスク ${args.task_id} を完了にしました。` };
+        const taskId = String(args.task_id ?? "");
+        if (!tasks.claimedBy(agent.id).some((t) => t.id === taskId)) {
+          return { ok: false, text: "そのタスクは請求していません(task_idを確認)。" };
+        }
+        // worktree運用時はmainへ自動マージしてから完了確定
+        if (mainWorkspace) {
+          const m = await mergeAgentWork({ mainWorkspace, worktreePath: workspace, agent, taskId });
+          if (m.conflict) {
+            bus.emit("merge.conflict", { agent: agent.id, taskId });
+            return {
+              ok: false,
+              text: `マージが競合しました。あなたの作業ディレクトリで \`git merge main\` を実行し、競合ファイルを編集して解決 → \`git add -A && git commit\` → 再度 finish_task してください。\n\ngitの出力:\n${m.text.slice(0, 1500)}`,
+            };
+          }
+          if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
+          bus.emit("merge.completed", { agent: agent.id, taskId });
+          board.post("system", `[マージ] ${agent.displayName}(${agent.id}) がタスク ${taskId} の成果を main へ取り込みました。`);
+        }
+        const done = tasks.finish(agent, taskId);
+        if (!done) return { ok: false, text: "タスクの完了確定に失敗しました。" };
+        return { ok: true, text: `タスク ${taskId} を完了にしました。` };
+      }
+      case "create_task": {
+        const id = String(args.task_id ?? "").trim();
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
+          return { ok: false, text: "task_idは英小文字数字とハイフンで付けてください。" };
+        }
+        const created = tasks.create({ id, role: args.role ? String(args.role) : null, body: String(args.body ?? "") });
+        if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
+        return { ok: true, text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"})。` };
       }
       case "list_files": {
         const files = listWorkspaceFiles(safePath(args.path ?? "."));

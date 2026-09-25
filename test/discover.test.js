@@ -54,13 +54,14 @@ test("既にfixタスクがある間は二重生成しない", async () => {
   rmSync(ws, { recursive: true, force: true });
 });
 
-test("diff検出→reviewタスク生成、レビュー完了→チェックポイントコミット", async () => {
+test("diff検出(reviewed..main)→reviewタスク生成、レビュー完了→タグ前進", async () => {
   const ws = makeWorkspace();
   const { bus, tasks } = makeEnv(ws);
-  // 実gitリポジトリ+実コマンドで統合的に
   await ensureGitRepo(ws);
   const { writeFileSync: wf } = await import("node:fs");
+  const { runCommand } = await import("../src/engine/exec.js");
   wf(join(ws, "src.txt"), "成果物");
+  await runCommand({ command: "git add -A && git -c user.name=t -c user.email=t@t commit -m 'feature'", cwd: ws, outputLimit: 1000 });
   const d = startDiscovery({ workspace: ws, tasks, bus, intervalSec: 3600, testCommand: null });
 
   await d.tick();
@@ -68,16 +69,29 @@ test("diff検出→reviewタスク生成、レビュー完了→チェックポ�
   const body = readFileSync(join(ws, "tasks", "open", "review-changes.md"), "utf8");
   assert.match(body, /src\.txt/);
 
-  // ベータが請求して完了した想定 → task.finished でコミットが打たれる
+  // ベータが請求して完了した想定 → reviewedタグがmainまで前進する
   tasks.claim({ id: "beta", role: "review" });
   const claimed = tasks.snapshot().claimed.find((f) => f.includes("review-changes"));
   assert.ok(claimed);
   const id = claimed.replace(/\.md$/, "").split("--").slice(1).join("--");
   tasks.finish({ id: "beta" }, id);
-  await new Promise((r) => setTimeout(r, 300)); // コミットは非同期
-  const { runCommand } = await import("../src/engine/exec.js");
-  const log = await runCommand({ command: "git log --oneline", cwd: ws, outputLimit: 2000 });
-  assert.match(log.text, /checkpoint: 変更をレビュー済み/);
+  await new Promise((r) => setTimeout(r, 400)); // タグ移動は非同期
+  const tag = await runCommand({ command: "git rev-parse reviewed", cwd: ws, outputLimit: 500 });
+  const main = await runCommand({ command: "git rev-parse main", cwd: ws, outputLimit: 500 });
+  assert.equal(tag.text.trim(), main.text.trim());
+  d.stop();
+  rmSync(ws, { recursive: true, force: true });
+});
+
+test("impl等の通常タスクが残っている間はテスト失敗を仕事化しない", async () => {
+  const ws = makeWorkspace();
+  const { bus, tasks } = makeEnv(ws);
+  tasks.seed([{ id: "impl-something", role: "impl", body: "作業中" }]);
+  const fakeExec = async () => ({ ok: false, text: "exit=1\nfail" });
+  const d = startDiscovery({ workspace: ws, tasks, bus, intervalSec: 3600, testCommand: "node --test tests/", exec: fakeExec });
+  await d.tick();
+  assert.equal(tasks.existsOpenOrClaimed("fix-test-failures"), false);
+  assert.equal(tasks.existsOpenOrClaimed("impl-something"), true);
   d.stop();
   rmSync(ws, { recursive: true, force: true });
 });

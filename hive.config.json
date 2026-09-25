@@ -9,13 +9,15 @@
     "timeoutMs": 180000
   },
   "workspace": "workspace",
+  "worktrees": { "dir": "worktrees" },
   "agents": [
     { "id": "alpha", "displayName": "アルファ", "role": "impl", "persona": "agents/alpha.md" },
+    { "id": "delta", "displayName": "デルタ", "role": "impl", "persona": "agents/delta.md" },
     { "id": "beta", "displayName": "ベータ", "role": "review", "persona": "agents/beta.md" },
     { "id": "gamma", "displayName": "ガンマ", "role": "lead", "persona": "agents/gamma.md" }
   ],
   "loop": { "maxTurns": 40 },
-  "runner": { "timeoutSec": 480 },
+  "runner": { "timeoutSec": 900 },
   "discovery": {
     "intervalSec": 30,
     "testCommand": "node --test tests/*.test.mjs 2>&1"
@@ -27,27 +29,36 @@
   },
   "ui": { "port": 7789 },
   "scenario": {
-    "name": "counter-cli",
+    "name": "stringutil",
     "seedFiles": [
       {
         "path": "package.json",
         "content": "{ \"name\": \"hive-workspace\", \"private\": true, \"type\": \"module\", \"scripts\": { \"test\": \"node --test tests/*.test.mjs\" } }\n"
       },
       {
-        "path": "tests/counter.test.mjs",
-        "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { createCounter } from \"../src/counter.js\";\n\ntest(\"初期値は0\", () => {\n  const c = createCounter();\n  assert.equal(c.getValue(), 0);\n});\n\ntest(\"incrementで1ずつ増える\", () => {\n  const c = createCounter();\n  c.increment();\n  c.increment();\n  assert.equal(c.getValue(), 2);\n});\n\ntest(\"decrementで減る(マイナスも可)\", () => {\n  const c = createCounter();\n  c.decrement();\n  assert.equal(c.getValue(), -1);\n});\n\ntest(\"resetで0に戻る\", () => {\n  const c = createCounter();\n  c.increment();\n  c.increment();\n  c.reset();\n  assert.equal(c.getValue(), 0);\n});\n\ntest(\"増減後もresetが効く\", () => {\n  const c = createCounter();\n  c.decrement();\n  c.increment();\n  c.increment();\n  c.reset();\n  c.increment();\n  assert.equal(c.getValue(), 1);\n});\n"
+        "path": "tests/upper.test.mjs",
+        "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { toUpperSnake } from \"../src/upper.js\";\n\ntest(\"toUpperSnake: 空文字は空文字\", () => {\n  assert.equal(toUpperSnake(\"\"), \"\");\n});\n\ntest(\"toUpperSnake: スペース区切りは_で繋ぐ\", () => {\n  assert.equal(toUpperSnake(\"hello world\"), \"HELLO_WORLD\");\n});\n\ntest(\"toUpperSnake: ハイフンとキャメルも分割する\", () => {\n  assert.equal(toUpperSnake(\"foo-barBaz\"), \"FOO_BAR_BAZ\");\n});\n\ntest(\"toUpperSnake: 連続区切りは潰す\", () => {\n  assert.equal(toUpperSnake(\"a--b  c\"), \"A_B_C\");\n});\n"
+      },
+      {
+        "path": "tests/pad.test.mjs",
+        "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { padCenter } from \"../src/pad.js\";\n\ntest(\"padCenter: 中央寄せ(偶数余り)\", () => {\n  assert.equal(padCenter(\"ab\", 6), \"  ab  \");\n});\n\ntest(\"padCenter: 長さ超過ならそのまま\", () => {\n  assert.equal(padCenter(\"abcdef\", 3), \"abcdef\");\n});\n\ntest(\"padCenter: 奇数余りは左側が少ない\", () => {\n  assert.equal(padCenter(\"a\", 4), \" a  \");\n});\n"
       }
     ],
     "tasks": [
       {
-        "id": "impl-counter",
+        "id": "impl-upper",
         "role": "impl",
-        "body": "src/counter.js を実装する。\n- ESM。createCounter() が { increment, decrement, reset, getValue } を返す。仕様は tests/counter.test.mjs を読んで決める(テストが仕様書である)。\n- `node --test tests/` を実行して全件通ることを確認し、実行結果をボードへ報告する。\n- 完了したら finish_task。その後、発見器が生成する review-changes タスクの指摘がボードに届いたら、修正すべきものは対応して報告する。"
+        "body": "src/upper.js を実装する。仕様は tests/upper.test.mjs が決める(テストが仕様書)。\n- ESM。`node --test tests/upper.test.mjs` を通すこと。\n- 実行結果をボードへ報告し、finish_task(自動でmainへマージされる)。"
       },
       {
-        "id": "summarize-counter",
+        "id": "impl-pad",
+        "role": "impl",
+        "body": "src/pad.js を実装する。仕様は tests/pad.test.mjs が決める(テストが仕様書)。\n- ESM。`node --test tests/pad.test.mjs` を通すこと。\n- 実行結果をボードへ報告し、finish_task(自動でmainへマージされる)。"
+      },
+      {
+        "id": "summarize-stringutil",
         "role": "lead",
-        "body": "レビュー投稿とテストの状態を wait_for_board で待つ。\n- 自分でも `node --test tests/` を実行して通ることを確認する。\n- 全体のまとめ(何が作られたか/テスト・レビューの結果/残課題)をボードへ投稿し、finish_task。"
+        "body": "両implタスクのマージとレビュー状況を wait_for_board で待つ。\n- 自分の作業ディレクトリで `git merge main` してから `node --test tests/*.test.mjs` を実行し、全体が通ることを確認。\n- 全体まとめ(何が作られたか/テスト・レビュー結果/残課題)をボードへ投稿し、finish_task。"
       }
     ]
   }

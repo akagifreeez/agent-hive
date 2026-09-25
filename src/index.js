@@ -38,6 +38,8 @@ function wireConsoleLog(bus) {
   bus.on("agent.status", (p) => console.log(`● ${p.agent}: ${p.status}`));
   bus.on("agent.error", (p) => console.error(`✖ ${p.agent} (turn ${p.turn}): ${p.error}`));
   bus.on("task.created", (p) => console.log(`➕ タスク投入: ${p.taskId}`));
+  bus.on("merge.completed", (p) => console.log(`🔀 ${p.agent} が ${p.taskId} をmainへマージ`));
+  bus.on("merge.conflict", (p) => console.warn(`⚠ ${p.agent} の ${p.taskId} はマージ競合(解決ループへ)`));
   bus.on("discovery.created", (p) => console.log(`🔍 発見器が仕事を検出: ${p.taskId}`));
   bus.on("discovery.resolved", (p) => console.log(`🔍 発見器が自動解決: ${p.taskId}`));
   bus.on("permission.request", (p) => console.warn(`🔐 承認要求 #${p.id}: ${p.command.slice(0, 100)} (UIまたはタイムアウト待ち)`));

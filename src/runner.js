@@ -1,14 +1,16 @@
 // シナリオ実行器: ワークスペース初期化(git blackboard化)→タスク/シード投入→
 // 発見器起動→全エージェント同時走行→最終プローブ→回収。
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { Board, Bus } from "./engine/board.js";
 import { TaskBlackboard } from "./engine/tasks.js";
 import { createTools } from "./engine/tools.js";
 import { runAgentLoop } from "./engine/loop.js";
 import { PermissionGate } from "./engine/permissions.js";
 import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
+import { setupWorktrees } from "./engine/worktree.js";
 import { runCommand } from "./engine/exec.js";
+import { ROOT } from "./config.js";
 
 export async function runScenario({ config, modelFactory, bus = new Bus() }) {
   mkdirSync(config.workspace, { recursive: true });
@@ -26,6 +28,11 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
   tasks.seed(config.scenario.tasks);
   bus.emit("scenario.started", { name: config.scenario.name, tasks: config.scenario.tasks.map((t) => t.id) });
 
+  // v3: エージェント別worktree(作業の隔離)
+  const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
+  const worktreePaths = await setupWorktrees({ mainWorkspace: config.workspace, worktreeRoot, agents: config.agents });
+  bus.emit("worktrees.ready", { paths: Object.values(worktreePaths) });
+
   const discovery = startDiscovery({
     workspace: config.workspace,
     tasks,
@@ -36,7 +43,15 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
 
   const runs = config.agents.map((agent) => (async () => {
     const model = modelFactory();
-    const tools = createTools({ agent, workspace: config.workspace, board, tasks, bus, gate });
+    const tools = createTools({
+      agent,
+      workspace: worktreePaths[agent.id],
+      mainWorkspace: config.workspace,
+      board,
+      tasks,
+      bus,
+      gate,
+    });
     const shellKind = await tools.detectShell();
     const agentWithCtx = { ...agent, scenarioName: config.scenario.name };
     return runAgentLoop({ agent: agentWithCtx, model, tools, board, tasks, bus, maxTurns: config.loop.maxTurns, shellKind });
