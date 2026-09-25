@@ -127,6 +127,8 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       thresholdPercent: config.compact?.thresholdPercent,
       memoryFn,
       staggerMs: config.chat?.staggerMs ?? 3000,
+      project: name,
+      autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
     });
     host.worktreePaths = wtPaths;
     threads.set(name, { name, goal, host });
@@ -184,6 +186,8 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     thresholdPercent: config.compact?.thresholdPercent,
     memoryFn,
     staggerMs: config.chat?.staggerMs ?? 3000,
+    project: null, // リーダーは請求しないので自動継続は実質発火しない
+    autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
   });
   leadHost.worktreePaths = leadWt;
   bus.emit("thread.opened", { name: "__main__", goal: "メインチャット(壁打ちと計画)", agents: [{ id: lead.id, displayName: lead.displayName }] });
