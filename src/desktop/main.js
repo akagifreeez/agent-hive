@@ -6,10 +6,12 @@ import { writeFileSync } from "node:fs";
 import { loadConfig } from "../config.js";
 import { OpenAIModel } from "../model/openai.js";
 import { startUi } from "../ui/server.js";
+import { runChat } from "../runner.js";
 import { Bus } from "../engine/board.js";
 import { wireConsoleLog } from "../log.js";
 
 const SMOKE = process.argv.includes("--smoke");
+const SCENARIO = process.argv.includes("--scenario"); // 既定はchatモード(v5)。--scenarioで従来のバッチ実行
 let win = null;
 let tray = null;
 let quitting = false;
@@ -35,12 +37,11 @@ async function bootstrap() {
   const config = loadConfig();
   const bus = new Bus();
   wireConsoleLog(bus);
-  const modelFactory = () => new OpenAIModel(config.model);
 
-  // smokeモードではシナリオを走らせず、サーバーの立ち上がりだけを確認する
-  await startUi({ config, modelFactory, bus, autoStart: !SMOKE });
-
+  // smokeモード: chat配線とサーバーの立ち上がりだけ確認し、窓も出さず終了する
   if (SMOKE) {
+    const controller = await runChat({ config, bus });
+    await startUi({ config, bus, autoStart: false, onSay: (text) => controller.say(text) });
     const resultFile = process.env.HIVE_SMOKE_FILE ?? "smoke-result.txt";
     try {
       const res = await fetch(`http://localhost:${config.ui.port}/api/state`);
@@ -58,6 +59,14 @@ async function bootstrap() {
     notify("シナリオ完了", `「${config.scenario.name}」が終了しました。ボードを確認してください。`));
   bus.on("permission.request", (p) =>
     notify(`承認要求 #${p.id}`, `コマンドの承認待ち: ${p.command.slice(0, 80)}`));
+
+  if (SCENARIO) {
+    await startUi({ config, modelFactory: () => new OpenAIModel(config.model), bus, autoStart: true });
+  } else {
+    // 既定: メインチャット常駐モード
+    const controller = await runChat({ config, bus });
+    await startUi({ config, bus, autoStart: false, onSay: (text) => controller.say(text) });
+  }
 
   win = new BrowserWindow({
     width: 1440,

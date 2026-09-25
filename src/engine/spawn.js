@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { createWorktree } from "./worktree.js";
 import { createTools } from "./tools.js";
 import { runAgentLoop, buildSystemPrompt } from "./loop.js";
+import { runCommand } from "./exec.js";
 
 const WORKER_PERSONA = (displayName, role) => `# ${displayName}(スポーンされた作業エージェント/ロール: ${role})
 
@@ -100,17 +101,42 @@ export class SpawnManager {
       { role: "system", content: buildSystemPrompt(agent, shellKind) },
       { role: "user", content: `親(${agent.parent})からのブリーフです。これに従って作業してください:\n\n${brief}` },
     ];
-    const r = await runAgentLoop({
+    const loopOpts = {
       agent, model, tools,
       board: this.board, tasks: this.tasks, bus: this.bus,
       ledger: this.ledger, budget: this.budget,
       maxTurns: this.maxTurns, shellKind,
       contextWindow: this.contextWindow, thresholdPercent: this.thresholdPercent,
       messages,
-    });
+    };
+    let r = await runAgentLoop(loopOpts);
+    // ターン上限での中断は1回だけ自動継続(同じworktree・同じ記憶で)
+    if (r.endedBy === "turn-limit") {
+      messages.push({ role: "user", content: "[システム] ターン上限で中断しました。請求中のタスクがあれば続きを完了し、finish_task まで進めてください。" });
+      r = await runAgentLoop(loopOpts);
+    }
     const e = this.live.get(agent.id);
     if (e) e.status = r.ok ? "done" : `ended:${r.endedBy ?? "error"}`;
     this.bus.emit("agent.exited", { agent: agent.id, ok: r.ok, endedBy: r.endedBy ?? r.error });
+    await this.cleanupOrKeep(agent, worktreePath, r);
+  }
+
+  // 終了後のworktree後始末: 未コミット/未マージがゼロなら掃除、あるなら保持してボードに告知
+  async cleanupOrKeep(agent, worktreePath, r) {
+    try {
+      const status = await runCommand({ command: "git status --porcelain", cwd: worktreePath, outputLimit: 2000 });
+      const unmerged = await runCommand({ command: `git log main..agent/${agent.id} --oneline`, cwd: this.mainWorkspace, outputLimit: 2000 });
+      const dirty = status.text.split("\n").slice(1).some((l) => l.trim());
+      const hasCommits = unmerged.text.split("\n").slice(1).some((l) => l.trim());
+      if (dirty || hasCommits) {
+        this.board.post("system", `[保持] ${agent.displayName}(${agent.id}) のworktreeに未反映の作業があります(worktrees/${agent.id})。引き継ぐ場合はそちらから。`);
+        return;
+      }
+      await runCommand({ command: `git worktree remove --force '${worktreePath}'`, cwd: this.mainWorkspace, outputLimit: 1000 });
+      await runCommand({ command: `git branch -D agent/${agent.id} 2>/dev/null || true`, cwd: this.mainWorkspace, outputLimit: 1000 });
+    } catch (err) {
+      this.bus.emit("scenario.warn", { message: `worktreeの後始末に失敗(${agent.id}): ${err.message}` });
+    }
   }
 
   snapshot() {

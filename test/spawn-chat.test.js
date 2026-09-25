@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視(一時ディレクトリ) */ } }
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,7 @@ import { TaskBlackboard } from "../src/engine/tasks.js";
 import { SpawnManager } from "../src/engine/spawn.js";
 import { ChatHost } from "../src/engine/chat.js";
 import { ensureGitRepo } from "../src/engine/discover.js";
+import { runCommand } from "../src/engine/exec.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PERSONA = join(ROOT, "agents", "alpha.md");
@@ -77,9 +79,9 @@ test("spawn: depth上限と同時数上限で拒否され、正常時はworktree
   const t2 = await tight.spawn({ parent: main, brief: "2体目" });
   assert.ok(t2.error);
   assert.ok(await waitUntil(() => manager.snapshot()[r1.id]?.status === "done"));
-  rmSync(ws, { recursive: true, force: true });
-  rmSync(root, { recursive: true, force: true });
-  rmSync(`${root}-2`, { recursive: true, force: true });
+  rmTree(ws, { recursive: true, force: true });
+  rmTree(root, { recursive: true, force: true });
+  rmTree(`${root}-2`, { recursive: true, force: true });
 });
 
 test("spawn: スポーンされたエージェントはbriefで駆動し、成果は自分のworktree→finishでmainへ", async () => {
@@ -100,8 +102,8 @@ test("spawn: スポーンされたエージェントはbriefで駆動し、成�
   assert.equal(readFileSync(join(ws, "out.txt"), "utf8"), "サブの成果");
   assert.ok(tasks.snapshot().done.some((f) => f.includes(`spawn-${r.id}`)));
   assert.ok(board.posts.some((p) => p.from === "system" && p.text.includes("スポーン")));
-  rmSync(ws, { recursive: true, force: true });
-  rmSync(root, { recursive: true, force: true });
+  rmTree(ws, { recursive: true, force: true });
+  rmTree(root, { recursive: true, force: true });
 });
 
 test("ChatHost: ユーザー入力で全メインが応答し、記憶が次ラウンドに続く。@呼び出しは該当者だけ起きる", async () => {
@@ -164,5 +166,76 @@ test("ChatHost: ユーザー入力で全メインが応答し、記憶が次ラ�
   const alphaAfter = receivedBy.alpha.length;
   await new Promise((r) => setTimeout(r, 500));
   assert.equal(receivedBy.alpha.length, alphaAfter);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws, { recursive: true, force: true });
+});
+
+// --- v5残課題対応: 継続ラウンドとworktree後始末 ---
+test("継続ラウンド: ターン上限で中断しても1回だけ自動継続し、記憶を引き継いで完了できる", async () => {
+  const { ws, root, bus, board, tasks } = makeEnv();
+  await ensureGitRepo(ws);
+  const received = [];
+  const manager = new SpawnManager({
+    mainWorkspace: ws, worktreeRoot: root, board, tasks, bus,
+    hierarchy: { maxDepth: 2, maxConcurrent: 6 },
+    maxTurns: 2,
+    modelFactory: (agent) => scriptedModel([
+      { toolCalls: [{ name: "write_file", args: { path: "w.txt", content: "途中まで" } }] },
+      { text: "継続ラウンドで完了しました" },
+    ], received),
+  });
+  const main = { id: "alpha", displayName: "アルファ", depth: 0 };
+  const r = await manager.spawn({ parent: main, brief: "長めの作業", role: "impl" });
+  assert.ok(await waitUntil(() => manager.snapshot()[r.id]?.status === "done"));
+  // 2回目の呼び出し(messages)に継続ノートが入っている
+  const secondCallContents = received[1]?.map((m) => m.content) ?? [];
+  assert.ok(secondCallContents.some((c) => String(c).includes("ターン上限で中断")));
+  // 未コミットの作業があるためworktreeは保持される
+  assert.ok(board.posts.some((p) => p.text.includes("[保持]")));
+  rmTree(ws, { recursive: true, force: true });
+  rmTree(root, { recursive: true, force: true });
+});
+
+test("継続もターン上限なら諦めモード: worktree保持+[保持]告知", async () => {
+  const { ws, root, bus, board, tasks } = makeEnv();
+  await ensureGitRepo(ws);
+  const manager = new SpawnManager({
+    mainWorkspace: ws, worktreeRoot: root, board, tasks, bus,
+    hierarchy: { maxDepth: 2, maxConcurrent: 6 },
+    maxTurns: 1,
+    modelFactory: () => scriptedModel([
+      { toolCalls: [{ name: "write_file", args: { path: "w.txt", content: "まだ途中" } }] },
+      { toolCalls: [{ name: "write_file", args: { path: "w.txt", content: "それでも途中" } }] },
+    ]),
+  });
+  const main = { id: "alpha", displayName: "アルファ", depth: 0 };
+  const r = await manager.spawn({ parent: main, brief: "終わらない作業", role: "impl" });
+  assert.ok(await waitUntil(() => (manager.snapshot()[r.id]?.status ?? "").startsWith("ended")));
+  assert.equal(manager.snapshot()[r.id].status, "ended:turn-limit");
+  const wt = join(root, r.id);
+  assert.ok(existsSync(wt)); // 保持される
+  assert.ok(board.posts.some((p) => p.text.includes("[保持]") && p.text.includes(r.id)));
+  rmTree(ws, { recursive: true, force: true });
+  rmTree(root, { recursive: true, force: true });
+});
+
+test("クリーン終了(マージ済み)ならworktreeとブランチを掃除する", async () => {
+  const { ws, root, bus, board, tasks } = makeEnv();
+  await ensureGitRepo(ws);
+  const manager = new SpawnManager({
+    mainWorkspace: ws, worktreeRoot: root, board, tasks, bus,
+    hierarchy: { maxDepth: 2, maxConcurrent: 6 },
+    modelFactory: (agent) => scriptedModel([
+      { toolCalls: [{ name: "write_file", args: { path: "done.txt", content: "成果" } }] },
+      { toolCalls: [{ name: "finish_task", args: { task_id: `spawn-${agent.id}` } }] },
+      { text: "完了しました" },
+    ]),
+  });
+  const main = { id: "alpha", displayName: "アルファ", depth: 0 };
+  const r = await manager.spawn({ parent: main, brief: "クリーンな作業", role: "impl" });
+  assert.ok(await waitUntil(() => manager.snapshot()[r.id]?.status === "done"));
+  assert.ok(await waitUntil(() => !existsSync(join(root, r.id)), 8000)); // 掃除済み
+  const br = await runCommand({ command: "git branch --list agent/" + r.id, cwd: ws, outputLimit: 500 });
+  assert.ok(!br.text.includes("agent/" + r.id));
+  rmTree(ws, { recursive: true, force: true });
+  rmTree(root, { recursive: true, force: true });
 });

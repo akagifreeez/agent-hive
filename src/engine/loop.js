@@ -170,5 +170,5 @@ export async function runAgentLoop({
   }
 
   bus.emit("agent.status", { agent: agent.id, status: "turn-limit" });
-  return { ok: false, error: `ターン上限(${maxTurns})に達しました` };
+  return { ok: false, endedBy: "turn-limit", error: `ターン上限(${maxTurns})に達しました` };
 }
