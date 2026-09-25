@@ -80,6 +80,8 @@ npm run desktop # デスクトップアプリ(v4): 窓+トレイ常駐+ネイテ
 
 エージェントの追加: `hive.config.json` の `agents` に `{id, displayName, role, persona}` を足し、`agents/<id>.md` に人格を書く。仕事の追加は `scenario.tasks` へ。ロールが一致するタスクを優先請求する。
 
+UIの見た目: [docs/ui-preview.png](docs/ui-preview.png)(ダミー状態を流したプレビュー。`node scripts/preview-ui.mjs` で実シナリオなしでUIだけ確認できる)。
+
 ## 実証済みのこと(実走)
 
 **v1(2026-09-24)**: wordcount CLIシナリオ。実装→レビュー(実バグ1件を「箇所+原因+修正案+検証済み」で指摘)→修正→独立再検証→総括、全タスクdone。
