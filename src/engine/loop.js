@@ -30,6 +30,23 @@ const COMMON_RULES = `
 - bashで拒否されたコマンドは、理由を読んで安全な別手段に切り替えること(再試行しない)。
 `;
 
+// 暴走検知(ZCode runtime/helpers/model-anomaly.ts の移植): 同一ツール+同一引数の
+// 連続呼び出しを検知してリマインダを注入する。回数での打ち切りより先に効く保険。
+export const REPEAT_CALL_WARN_THRESHOLD = 3;
+export const MAX_REPEAT_CALL_WARNINGS_PER_TURN = 3;
+// rapid-refillブレーカー(ZCode runtime/methods/turn-loop-state.ts の移植):
+// 圧縮後3ターン未満でまた圧縮が要る状態が3連続なら、圧縮が追いついていないとして打ち切る。
+export const RAPID_REFILL_TOOL_TURN_THRESHOLD = 3;
+export const MAX_CONSECUTIVE_RAPID_REFILLS = 3;
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${stableJson(value[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
 export function buildSystemPrompt(agent, shellKind = "bash") {
   const persona = agent.personaText ?? readFileSync(agent.personaPath, "utf8").trim();
   return `${persona}\n${COMMON_RULES}\n## このマシンの環境\n- シェルは ${shellKind}。bashならPOSIXコマンド、cmdならWindows構文で書くこと。`;
@@ -75,6 +92,10 @@ export async function runAgentLoop({
   let autocompactFailures = 0;
   let lastPromptTokens = 0;
   let runTokens = 0; // このラン(ループ実行)自体の消費。予算判定はラン単位(セッション累積だと常駐chatが使い切りで brick する)
+  let lastToolSig = null; // 暴走検知: 直前のツール呼び出しシグネチャ
+  let repeatStreak = 0;
+  let toolTurnsSinceCompact = 0; // 最終圧縮からのツール実行ターン数
+  let rapidRefills = 0;
   bus.emit("agent.status", { agent: agent.id, status: "working" });
 
   // 担当者不在になる終わり方のとき、請求中タスクをopenへ戻す(凍結防止)
@@ -127,6 +148,8 @@ export async function runAgentLoop({
     if (res.toolCalls.length > 0) {
       // GLM/OpenRouterはcontent:nullのassistantメッセージを拒むため文字列に正規化
       messages.push({ role: "assistant", content: res.raw.content ?? "", tool_calls: res.raw.tool_calls });
+      const reminders = []; // 暴走検知のリマインダ(全ツール結果の後にまとめて注入)
+      let warningsThisTurn = 0;
       for (const tc of res.toolCalls) {
         bus.emit("tool.call", { agent: agent.id, tool: tc.name, args: tc.arguments });
         let out;
@@ -141,13 +164,23 @@ export async function runAgentLoop({
         if (tc.name === "claim_next_task") {
           claimMisses = out.claimMiss ? claimMisses + 1 : 0;
         }
+        // 暴走検知: 同一ツール+同一引数(ZCode model-anomaly.ts)。しきい値に達した瞬間だけ警告し、
+        // ツール結果とassistantの間に挟まないよう全ツール結果の後にまとめて注入する
+        const sig = `${JSON.stringify(tc.name)}:${stableJson(tc.arguments ?? {})}`;
+        if (sig === lastToolSig) repeatStreak += 1; else { lastToolSig = sig; repeatStreak = 1; }
+        if (repeatStreak === REPEAT_CALL_WARN_THRESHOLD && warningsThisTurn < MAX_REPEAT_CALL_WARNINGS_PER_TURN) {
+          warningsThisTurn += 1;
+          reminders.push({ role: "user", content: `[システム] 同じ入力で ${tc.name} を${repeatStreak}回連続呼び出しました。毎回同じ結果になるだけです。得られた結果を使って次の手を変えるか、行き詰まりを post_to_board で相談してください。` });
+        }
       }
+      messages.push(...reminders.splice(0));
       if (claimMisses >= 3) {
         releaseClaims("idle待機終了");
         board.post(agent.id, `[待機終了] 請求できるタスクが3回連続で無かったため終了します。`);
         bus.emit("agent.status", { agent: agent.id, status: "done" });
         return { ok: true, endedBy: "idle", seenBoard: seen };
       }
+      toolTurnsSinceCompact += 1;
       continue;
     }
 
@@ -171,6 +204,20 @@ export async function runAgentLoop({
         messages.push(...compacted);
         autocompactFailures = 0;
         bus.emit("compact.auto", { agent: agent.id, tokensBefore: ac.tokens, threshold: ac.threshold });
+        // rapid-refillブレーカー(ZCode turn-loop-state.ts): 圧縮後まもなくまた溢れる状態が
+        // 連続したら、圧縮が追いついていないとしてループを打ち切る
+        if (toolTurnsSinceCompact < RAPID_REFILL_TOOL_TURN_THRESHOLD) {
+          rapidRefills += 1;
+        } else {
+          rapidRefills = 0;
+        }
+        toolTurnsSinceCompact = 0;
+        if (rapidRefills >= MAX_CONSECUTIVE_RAPID_REFILLS) {
+          releaseClaims("コンテキスト圧縮が追いつかない");
+          board.post(agent.id, `[停止] 圧縮してもコンテキストが肥大し続けるため終了します。作業状態は保持されています。`);
+          bus.emit("agent.status", { agent: agent.id, status: "compact-loop" });
+          return { ok: false, endedBy: "compact-rapid-refill", seenBoard: seen };
+        }
       } catch (err) {
         autocompactFailures += 1;
         bus.emit("compact.failed", { agent: agent.id, error: err.message, failures: autocompactFailures });
