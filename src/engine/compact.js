@@ -70,8 +70,8 @@ export const COMPACT_SYSTEM_PROMPT = `あなたは会話の要約器です。ツ
 // タスク文脈を渡すと読み取り時キュレーション(JIT memory, arXiv:2609.27334)に切り替える:
 // 圧縮の瞬間には遂行中タスクが判明しているので、「何を残すか」を汎用に決めず
 // 現在タスクを条件に取捨選択する。文脈が無い(=タスク外の会話)場合は従来どおり汎用要約。
-export function buildCompactRequest(messages, { taskContext = null } = {}) {
-  const system = taskContext
+export function buildCompactRequest(messages, { taskContext = null, hasMemory = false } = {}) {
+  let system = taskContext
     ? `${COMPACT_SYSTEM_PROMPT}
 読み取り時キュレーション: この要約は、下記の遂行中タスクが判明した状態で読まれます。
 --- 遂行中のタスク ---
@@ -79,6 +79,11 @@ ${taskContext}
 --- ここまで ---
 上記の遂行に不要な細部(無関係な探索・失敗した試行の詳細)は短くしてよい。逆に遂行に必要な要素(対象ファイル・制約・決定事項・現在の進捗)は必ず残すこと。`
     : COMPACT_SYSTEM_PROMPT;
+  // 権威分離(hermes-agentの規律): 永続記憶はシステムプロンプトに常に生きたまま注入されるので、
+  // 要約に複製すると二重管理になり、食い違い時にどちらが正か分からなくなる。
+  if (hasMemory) {
+    system += `\n権威分離: workspace/memory/ の永続記憶はシステムプロンプトに常に注入されるため、要約に複製しないこと。要約は記憶に無い、この会話固有の経過・進捗・決定に集中せよ。`;
+  }
   return [
     { role: "system", content: system },
     { role: "user", content: "以下の会話履歴を要約してください:\n\n" + messages.map((m) => `${m.role}: ${typeof m.content === "string" ? m.content.slice(0, 4000) : ""}`).join("\n---\n") },

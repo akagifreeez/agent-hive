@@ -58,10 +58,12 @@ export async function runAgentLoop({
   contextWindow = 200000, thresholdPercent,
   messages = null, // 常駐エージェント(chat)は外部で保持した記憶を渡す
   seenBoard = null, // 前回までの既読位置(chat常駐時はホストが保持。nullならラウンド開始時点まで既読)
+  memory = null, // 永続記憶(memory/の権威ファイル)の注入文脈。無ければnull
 }) {
   if (!messages) {
+    const sys = buildSystemPrompt(agent, shellKind);
     messages = [
-      { role: "system", content: buildSystemPrompt(agent, shellKind) },
+      { role: "system", content: memory ? `${sys}\n\n${memory}` : sys },
       { role: "user", content: buildKickoff(agent, agent.scenarioName ?? "default") },
     ];
   }
@@ -144,7 +146,7 @@ export async function runAgentLoop({
     });
     if (ac.should && autocompactFailures < AUTOCOMPACT_FAILURE_LIMIT) {
       try {
-        const summary = await model.chat({ messages: buildCompactRequest(messages, { taskContext: currentTaskContext(tasks, agent, messages) }) });
+        const summary = await model.chat({ messages: buildCompactRequest(messages, { taskContext: currentTaskContext(tasks, agent, messages), hasMemory: Boolean(memory) }) });
         if (ledger) ledger.add(agent.id, summary.usage);
         const text = (summary.content ?? "").trim();
         if (!text) throw new Error("要約が空でした");

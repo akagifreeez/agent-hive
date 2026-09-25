@@ -15,6 +15,7 @@ export class ChatHost {
     ledger = null, budget = null,
     maxTurnsPerRound = 12, contextWindow = 200000, thresholdPercent,
     shellKind = "bash", staggerMs = 3000,
+    memoryFn = null, // () => 永続記憶の注入文脈。ラウンド開始ごとに読み直す(distill反映のため)
   }) {
     this.mains = mains;
     this.mainWorkspace = mainWorkspace;
@@ -30,6 +31,7 @@ export class ChatHost {
     this.thresholdPercent = thresholdPercent;
     this.shellKind = shellKind;
     this.staggerMs = staggerMs;
+    this.memoryFn = memoryFn;
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
     this.memories = new Map(); // id => messages配列(ラウンド間で保持)
     this.seen = new Map(); // id => ボード既読位置(ラウンド間で保持。配信はボード注入の1経路のみ)
@@ -80,6 +82,11 @@ export class ChatHost {
     const run = async () => {
       if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
       const messages = this.memory(main);
+      // ラウンド開始ごとにシステムプロンプトを張り直す(永続記憶がdistillで更新されても次ラウンドから反映)
+      if (this.memoryFn) {
+        const mem = this.memoryFn();
+        messages[0] = { role: "system", content: mem ? `${buildSystemPrompt(main, this.shellKind)}\n\n${mem}` : buildSystemPrompt(main, this.shellKind) };
+      }
       messages.push({ role: "user", content: kickoffText });
       try {
         const r = await runAgentLoop({
@@ -97,6 +104,7 @@ export class ChatHost {
           thresholdPercent: this.thresholdPercent,
           messages,
           seenBoard: this.seen.get(main.id) ?? null,
+          memory: this.memoryFn?.() ?? null, // 圧縮時の権威分離判定に使う
         });
         // 既読位置をラウンド間で保持(同じ入力の二重配信を防ぐ)
         if (typeof r.seenBoard === "number") this.seen.set(main.id, r.seenBoard);

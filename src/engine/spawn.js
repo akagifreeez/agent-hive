@@ -23,6 +23,7 @@ export class SpawnManager {
     mainWorkspace, worktreeRoot, board, tasks, bus, gate = null, ledger = null, budget = null,
     hierarchy = { maxDepth: 2, maxConcurrent: 6 }, modelFactory, maxTurns = 40,
     contextWindow = 200000, thresholdPercent,
+    memoryFn = null, // () => 永続記憶の注入文脈
   }) {
     this.mainWorkspace = mainWorkspace;
     this.worktreeRoot = worktreeRoot;
@@ -37,6 +38,7 @@ export class SpawnManager {
     this.maxTurns = maxTurns;
     this.contextWindow = contextWindow;
     this.thresholdPercent = thresholdPercent;
+    this.memoryFn = memoryFn;
     this.live = new Map(); // id => {displayName, depth, parent, status}
     this.counter = 0;
   }
@@ -97,8 +99,9 @@ export class SpawnManager {
       spawner: this,
     });
     const shellKind = await tools.detectShell();
+    const mem = this.memoryFn?.() ?? "";
     const messages = [
-      { role: "system", content: buildSystemPrompt(agent, shellKind) },
+      { role: "system", content: mem ? `${buildSystemPrompt(agent, shellKind)}\n\n${mem}` : buildSystemPrompt(agent, shellKind) },
       { role: "user", content: `親(${agent.parent})からのブリーフです。これに従って作業してください:\n\n${brief}` },
     ];
     const loopOpts = {
@@ -108,6 +111,7 @@ export class SpawnManager {
       maxTurns: this.maxTurns, shellKind,
       contextWindow: this.contextWindow, thresholdPercent: this.thresholdPercent,
       messages,
+      memory: mem || null, // 圧縮時の権威分離判定に使う
     };
     let r = await runAgentLoop(loopOpts);
     // ターン上限での中断は1回だけ自動継続(同じworktree・同じ記憶で)
