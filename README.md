@@ -70,6 +70,16 @@
 - **再開**: doneのタスクを再度openへ
 - 行クリックでタスク本文を表示。一覧は要約(本文の先頭行)付き。`GET /api/state` に `taskList`、`POST /api/tasks` に `action: create|release|cancel|reopen`
 
+### タスクに文脈(project)を導入(v5.6・別取り組みの混ざりの解消)
+
+タスクファイルに `project:` メタ行を持たせ、**取り組みごとにタスクを分離**できるようにした:
+
+- **作成時に文脈を付ける**: `create_task`ツール/UI投入フォーム/`POST /api/tasks` すべてで `project` を指定可。無ければ「未分類」
+- **請求の絞込**: `claim_next_task {project}` はその文脈のタスクだけを対象にする——CUDA案件を進めている間に、前の案件の残タスクを誰かが拾ってしまう混線が起きない。`spawn_agent {project}` なら労働者のブリーフに文脈が渡り、追加請求もその文脈に絞られる
+- **素材の絞込**: `gather_context {project}` で done/open の生素材も文脈内だけに限定できる
+- **UI**: タスクパネルはprojectごとのグループ表示(未分類は最後)+「すべて/各プロジェクト/未分類」の絞込セレクタ+[移動]ボタンで後から付け替え(`action: "reproject"`)
+- 旧形式(role行のみ)のタスクファイルもそのまま読める(移行不要)
+
 ## 設計の核: Gitリポジトリ=blackboard
 
 - `workspace/tasks/open/*.md` に仕事(Issue相当)がファイルで転がる
