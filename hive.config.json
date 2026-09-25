@@ -6,8 +6,12 @@
     "model": "z-ai/glm-5.3-flash",
     "temperature": 0.7,
     "maxTokens": 4000,
-    "timeoutMs": 180000
+    "timeoutMs": 180000,
+    "contextWindow": 200000,
+    "reasoningEffort": "low"
   },
+  "budget": { "maxTokensPerRun": 2000000 },
+  "compact": { "thresholdPercent": 90 },
   "workspace": "workspace",
   "worktrees": { "dir": "worktrees" },
   "agents": [

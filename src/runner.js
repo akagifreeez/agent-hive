@@ -10,6 +10,8 @@ import { PermissionGate } from "./engine/permissions.js";
 import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
 import { setupWorktrees } from "./engine/worktree.js";
 import { runCommand } from "./engine/exec.js";
+import { UsageLedger } from "./engine/usage.js";
+import { OpenAIModel } from "./model/openai.js";
 import { ROOT } from "./config.js";
 
 export async function runScenario({ config, modelFactory, bus = new Bus() }) {
@@ -40,9 +42,20 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
     intervalSec: config.discovery?.intervalSec ?? 30,
     testCommand: config.discovery?.testCommand,
   });
+  // マージでmainが動くたびに即時プローブ(レビュータスクの立ち遅れ防止)
+  bus.on("merge.completed", () => void discovery.tick());
+
+  const ledger = new UsageLedger();
 
   const runs = config.agents.map((agent) => (async () => {
-    const model = modelFactory();
+    // エージェント別モデル上書き(agents[].model / agents[].reasoningEffort)
+    const model = modelFactory
+      ? modelFactory(agent)
+      : new OpenAIModel({
+          ...config.model,
+          model: agent.model ?? config.model.model,
+          reasoningEffort: agent.reasoningEffort ?? config.model.reasoningEffort,
+        });
     const tools = createTools({
       agent,
       workspace: worktreePaths[agent.id],
@@ -54,7 +67,13 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
     });
     const shellKind = await tools.detectShell();
     const agentWithCtx = { ...agent, scenarioName: config.scenario.name };
-    return runAgentLoop({ agent: agentWithCtx, model, tools, board, tasks, bus, maxTurns: config.loop.maxTurns, shellKind });
+    return runAgentLoop({
+      agent: agentWithCtx, model, tools, board, tasks, bus,
+      ledger, budget: config.budget,
+      maxTurns: config.loop.maxTurns, shellKind,
+      contextWindow: config.model.contextWindow ?? 200000,
+      thresholdPercent: config.compact?.thresholdPercent,
+    });
   })());
 
   const timeoutMs = config.runner.timeoutSec * 1000;
@@ -70,7 +89,9 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
   if (unfinished.length) {
     bus.emit("scenario.warn", { message: `完了せず残った請求タスク: ${unfinished.join(", ")}` });
   }
-  const snapshot = { board: board.posts, tasks: tasks.snapshot(), results };
+  const usage = { byAgent: ledger.snapshot(), totals: ledger.totals() };
+  bus.emit("usage.summary", usage);
+  const snapshot = { board: board.posts, tasks: tasks.snapshot(), results, usage };
   bus.emit("scenario.finished", snapshot);
   return snapshot;
 }

@@ -24,6 +24,14 @@ export async function startUi({ config, modelFactory, bus, autoStart = true }) {
     "agent.status": (p) => { live.agents[p.agent] = { ...live.agents[p.agent], status: p.status }; },
     "agent.turn": (p) => { live.agents[p.agent] = { ...live.agents[p.agent], turn: p.turn }; },
     "tool.call": (p) => { live.agents[p.agent] = { ...live.agents[p.agent], lastTool: `${p.tool}` }; },
+    "usage": (p) => {
+      const a = live.agents[p.usage ? p.agent : p.agent];
+      const u = p.usage;
+      if (a && u) {
+        a.tokens = (a.tokens ?? 0) + (u.promptTokens ?? 0) + (u.completionTokens ?? 0);
+        a.costUsd = (a.costUsd ?? 0) + (u.costUsd ?? 0);
+      }
+    },
     "board": (p) => { live.board.push(p); },
     "permission.request": (p) => { live.requests.push({ ...p, state: "pending" }); },
     "permission.resolved": (p) => {

@@ -1,6 +1,16 @@
 // エージェントループ: model→tools→model…を回し、ボードの新着を都度注入する。
 // 仕事の発見と請求(claim)はAI自身が claim_next_task ツールで行う。
+// コンテキスト管理はZCode compact/準拠: microcompact(全ターン)→autocompact(閾値超過時)。
+// 予算(トークン)超過と idle(連続請求失敗)はエンジンが強制終了する。
 import { readFileSync } from "node:fs";
+import {
+  microcompact,
+  shouldAutocompact,
+  estimateMessagesTokens,
+  buildCompactRequest,
+  applyCompaction,
+  AUTOCOMPACT_FAILURE_LIMIT,
+} from "./compact.js";
 
 const COMMON_RULES = `
 ## あなたの働き方(全エージェント共通)
@@ -28,7 +38,12 @@ export function buildKickoff(agent, scenarioName) {
   return `シナリオ「${scenarioName}」を開始します。あなた(=${agent.displayName}/ロール:${agent.role})の仕事を claim_next_task で確認し、着手してください。`;
 }
 
-export async function runAgentLoop({ agent, model, tools, board, tasks, bus, maxTurns = 30, shellKind = "bash" }) {
+export async function runAgentLoop({
+  agent, model, tools, board, tasks, bus,
+  ledger = null, budget = null,
+  maxTurns = 30, shellKind = "bash",
+  contextWindow = 200000, thresholdPercent,
+}) {
   const messages = [
     { role: "system", content: buildSystemPrompt(agent, shellKind) },
     { role: "user", content: buildKickoff(agent, agent.scenarioName ?? "default") },
@@ -36,15 +51,30 @@ export async function runAgentLoop({ agent, model, tools, board, tasks, bus, max
   let seenBoard = board.lastId();
   let nudged = false;
   let emptyStreak = 0;
+  let claimMisses = 0;
+  let autocompactFailures = 0;
+  let lastPromptTokens = 0;
   bus.emit("agent.status", { agent: agent.id, status: "working" });
 
   for (let turn = 1; turn <= maxTurns; turn++) {
+    // 予算ブレーキ: ラン全体のトークンが上限を超えたら終了
+    if (ledger && budget?.maxTokensPerRun && ledger.totals().promptTokens + ledger.totals().completionTokens > budget.maxTokensPerRun) {
+      board.post(agent.id, `[予算停止] ラン全体のトークン予算(${budget.maxTokensPerRun})に達したため終了します。`);
+      bus.emit("agent.status", { agent: agent.id, status: "budget-stop" });
+      return { ok: false, endedBy: "budget" };
+    }
+
+    // ボード新着の注入
     const fresh = board.since(seenBoard).filter((p) => p.from !== agent.id);
     if (fresh.length) {
       seenBoard = fresh[fresh.length - 1].id;
       const text = fresh.map((p) => `${p.from}: ${p.text}`).join("\n---\n");
-      messages.push({ role: "user", content: `[ボード新着]\n${text}` });
+      messages.push({ role: "user", content: `[ボード新着]\n${text.slice(0, 6000)}` });
     }
+
+    // microcompact(ZCode移植): 古いツール結果をプレースホルダへ(LLM不要)
+    const mc = microcompact(messages, { contextWindow });
+    if (mc.changed) bus.emit("compact.micro", { agent: agent.id, savingsTokens: mc.savingsTokens });
 
     let res;
     try {
@@ -54,6 +84,11 @@ export async function runAgentLoop({ agent, model, tools, board, tasks, bus, max
       bus.emit("agent.error", { agent: agent.id, turn, error: err.message });
       return { ok: false, error: err.message };
     }
+    if (ledger) {
+      ledger.add(agent.id, res.usage);
+      bus.emit("usage", { agent: agent.id, usage: res.usage });
+    }
+    lastPromptTokens = res.usage?.promptTokens ?? 0;
     bus.emit("agent.turn", { agent: agent.id, turn, content: res.content ?? "" });
 
     if (res.toolCalls.length > 0) {
@@ -69,13 +104,48 @@ export async function runAgentLoop({ agent, model, tools, board, tasks, bus, max
         }
         bus.emit("tool.result", { agent: agent.id, tool: tc.name, ok: out.ok, brief: out.text.slice(0, 120) });
         messages.push({ role: "tool", tool_call_id: tc.id, content: out.text.slice(0, 12000) });
+        // idle強制終了: 連続3回の請求失敗はプロンプトでなくエンジンが数える
+        if (tc.name === "claim_next_task") {
+          claimMisses = out.claimMiss ? claimMisses + 1 : 0;
+        }
+      }
+      if (claimMisses >= 3) {
+        board.post(agent.id, `[待機終了] 請求できるタスクが3回連続で無かったため終了します。`);
+        bus.emit("agent.status", { agent: agent.id, status: "done" });
+        return { ok: true, endedBy: "idle" };
       }
       continue;
     }
 
+    // autocompact(ZCode移植): provider usage優先で閾値判定→要約で履歴を置換
+    const ac = shouldAutocompact({
+      providerPromptTokens: lastPromptTokens,
+      estimatedTokens: estimateMessagesTokens(messages),
+      contextWindow,
+      maxOutputTokens: model.maxTokens,
+      thresholdPercent,
+    });
+    if (ac.should && autocompactFailures < AUTOCOMPACT_FAILURE_LIMIT) {
+      try {
+        const summary = await model.chat({ messages: buildCompactRequest(messages) });
+        if (ledger) ledger.add(agent.id, summary.usage);
+        const text = (summary.content ?? "").trim();
+        if (!text) throw new Error("要約が空でした");
+        const compacted = applyCompaction(messages, text);
+        messages.length = 0;
+        messages.push(...compacted);
+        autocompactFailures = 0;
+        bus.emit("compact.auto", { agent: agent.id, tokensBefore: ac.tokens, threshold: ac.threshold });
+      } catch (err) {
+        autocompactFailures += 1;
+        bus.emit("compact.failed", { agent: agent.id, error: err.message, failures: autocompactFailures });
+      }
+      continue; // 圧縮したので次のターンで作業を続ける
+    }
+
     const finalText = (res.content ?? "").trim();
     // 空応答(思考トークン消費など)は終了ではなく続行を促す
-    if (!res.toolCalls.length && !finalText) {
+    if (!finalText) {
       emptyStreak += 1;
       if (emptyStreak > 3) {
         bus.emit("agent.status", { agent: agent.id, status: "empty-loop" });
@@ -85,13 +155,13 @@ export async function runAgentLoop({ agent, model, tools, board, tasks, bus, max
       continue;
     }
     // 請求中タスクが残っているのに終わろうとしたら1回だけ促す
-    if (finalText && tasks && !nudged && tasks.claimedBy(agent.id).length > 0) {
+    if (tasks && !nudged && tasks.claimedBy(agent.id).length > 0) {
       nudged = true;
       const ids = tasks.claimedBy(agent.id).map((t) => t.id).join(", ");
       messages.push({ role: "user", content: `[システム] 請求中のタスク(${ids})が未完了です。完了していれば finish_task を呼んでください。まだ継続なら作業を続けてください。` });
       continue;
     }
-    if (finalText) board.post(agent.id, finalText);
+    board.post(agent.id, finalText);
     bus.emit("agent.status", { agent: agent.id, status: "done" });
     return { ok: true, finalText };
   }

@@ -50,7 +50,8 @@ function renderState(state) {
   for (const [id, a] of Object.entries(state.live.agents)) {
     const div = document.createElement("div");
     div.className = "card " + (a.status ?? "");
-    div.innerHTML = `<span class="name">${names[id] ?? id}</span><span class="st">${a.status ?? "idle"} / turn ${a.turn ?? 0} ${a.lastTool ? "/ " + a.lastTool : ""}</span>`;
+    div.innerHTML = `<span class="name">${names[id] ?? id}</span><span class="st">${a.status ?? "idle"} / turn ${a.turn ?? 0} ${a.lastTool ? "/ " + a.lastTool : ""}</span>` +
+      `<div style="font-size:11px;color:#9aa4b1;margin-top:3px;">${a.tokens ? `tokens ${a.tokens.toLocaleString()} / $${(a.costUsd ?? 0).toFixed(4)}` : ""}</div>`;
     agentsEl.appendChild(div);
   }
   document.getElementById("tasks").textContent =

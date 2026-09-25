@@ -2,7 +2,23 @@
 
 複数エージェントが**同一ワークスペースで同時に作業**し、**共有ボードで横につながり**ながらコーディングするハーネス。単一エージェントでは起きない「見逃し」を、実装→レビュー→修正→独立再検証の複数視点で拾うために作る。
 
-最終更新: 2026-09-25。現況: v4実装済み(Electron殻によるデスクトップアプリ化)。実走デモ3回+デスクトップshell動作確認(SMOKE OK)。テスト16件通過。
+最終更新: 2026-09-25。現況: v4.5実装済み(コスト削減パック: usage計測+ZCode式コンテキスト管理+idle強制終了+予算ブレーキ)。デスクトップshell動作確認済み。テスト25件通過。実測: 4エージェントのシナリオ完走が**$0.0056**(39呼び出し/prompt約10万トークン)。
+
+## コスト削減(v4.5・AIの扱いはZCode準拠)
+
+設計はZCode OSS(`apps/zcode-cli/packages/core/src/compact/`)の移植が基本。Codex/OpenCodeは参考調査元。
+
+| 仕組み | 内容 | 出典 |
+|---|---|---|
+| **usage計測** | OpenRouterの`usage`(prompt/completion/**reasoning_tokens**/**cost実費**)を全呼び出しで収集。エージェント別累積をUI表示+終了サマリ出力 | ZCode provider usage優先方式 |
+| **microcompact** | 直近5件のツール結果だけ残し、古いものはプレースホルダに置換。**LLM呼び出しなし**。発火は文脈推定が窓の90%超えたとき、最低削減256トークン | ZCode microcompact.ts(定数ごと移植) |
+| **autocompact** | provider usage(優先)/推定が「窓−出力予約(21Kキャップ)」の90%超えたら、モデルに構造化要約させて履歴を `[system, 要約, 直近4件]` に置換。連続3回失敗でサーキットブレーク | ZCode compact/policy.ts+prompt.ts |
+| **idle強制終了** | claim_next_taskの連続3回失敗を**エンジンが数えて**打ち切り(待ち専用エージェントの無駄呼び出しとウォールタイムを削る) | hive固有(v3実走の教訓) |
+| **reasoning_effort** | `model.reasoningEffort: "low"`をリクエストに付与(思考トークンは課金対象) | Codexのmodel_reasoning_effort |
+| **エージェント別モデル** | `agents[].model` / `agents[].reasoningEffort`で上書き可 | OpenCodeのマルチモデル流 |
+| **予算ブレーキ** | `budget.maxTokensPerRun`超過でグレースフル停止(ボードに予算停止を告知) | discord-agentsのbudget文化 |
+
+実測(2026-09-25, stringutilシナリオ): **39呼び出し / prompt 100,246 / completion 1,764 / 思考175 / $0.0056**。`reasoningEffort: low`により思考トークンはほぼゼロ化。短いシナリオではmicrocompact/autocompactは不発(発火条件はユニットテストで検証済み、長時間ランの保険)。
 
 ## 設計の核: Gitリポジトリ=blackboard
 
@@ -22,7 +38,7 @@
 ```
 src/
 ├─ engine/loop.js    エージェントループ(model→tools→…、ボード新着の注入、
-│                    未完了請求へのナッジ、空応答の継続処理)
+│                    microcompact/autocompact、idle強制終了、予算ブレーキ)
 ├─ engine/tools.js   10ツール: claim/finish_task/create_task, read/write/edit_file,
 │                    list_files, bash(ゲート通過後Git Bashで実行),
 │                    post_to_board, wait_for_board
@@ -33,11 +49,14 @@ src/
 ├─ engine/discover.js 発見器: テスト失敗→タスク化/復旧→自動解決、
 │                    diff(reviewed..main)→レビュータスク化、タグ前進
 ├─ engine/permissions.js 承認制ゲート(deny即拒否/askはUI承認・タイムアウト拒否)
+├─ engine/compact.js コンテキスト管理(ZCode移植: microcompact/autocompact)
+├─ engine/usage.js   トークン/コスト台帳(provider usageの実費集計)
 ├─ engine/exec.js    シェル実行の共用層(WindowsはGit Bash自動検出)
-├─ model/openai.js   OpenAI互換アダプタ(GLM等。依存ゼロ)
+├─ model/openai.js   OpenAI互換アダプタ(GLM等。usage/reasoning_effort対応。依存ゼロ)
 ├─ runner.js         シナリオ実行器(git blackboard化→worktree→同時走行→最終プローブ)
-├─ ui/server.js      localhost UI(node:http+SSE。依存ゼロ。承認ボタン込み)
-└─ ui/public/        ボード/エージェント状態/タスク/承認要求/ファイルビューア
+├─ ui/server.js      localhost UI(node:http+SSE。依存ゼロ。承認ボタン/usage表示込み)
+├─ ui/public/        ボード/エージェント状態(トークン・コスト)/タスク/承認要求/ファイル
+└─ desktop/main.js   Electron殻(v4): トレイ常駐/ネイティブ通知/単一インスタンス
 ```
 
 モデルは [OpenRouter](https://openrouter.ai) のGLMで実証(既定 `z-ai/glm-5.3-flash`)。キーは環境変数 `OPENROUTER_API_KEY` か `hive.config.json` の `apiKeyFile`。

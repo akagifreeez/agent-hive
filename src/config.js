@@ -9,7 +9,7 @@ export function loadConfig(configPath) {
   const p = configPath ? resolve(ROOT, configPath) : resolve(ROOT, "hive.config.json");
   const raw = JSON.parse(readFileSync(p, "utf8"));
   const cfg = {
-    model: { temperature: 0.7, maxTokens: 2000, timeoutMs: 120000, ...(raw.model ?? {}) },
+    model: { temperature: 0.7, maxTokens: 2000, timeoutMs: 120000, contextWindow: 200000, reasoningEffort: null, ...(raw.model ?? {}) },
     workspace: resolve(ROOT, raw.workspace ?? "workspace"),
     agents: (raw.agents ?? []).map((a) => ({ ...a, personaPath: resolve(ROOT, a.persona ?? `agents/${a.id}.md`) })),
     loop: { maxTurns: 30, ...(raw.loop ?? {}) },
@@ -20,6 +20,8 @@ export function loadConfig(configPath) {
       askTimeoutSec: 120,
       ...(raw.permissions ?? {}),
     },
+    budget: { maxTokensPerRun: 2000000, ...(raw.budget ?? {}) },
+    compact: { thresholdPercent: 90, keepRecentToolResults: 5, ...(raw.compact ?? {}) },
     scenario: { seedFiles: [], ...raw.scenario },
   };
   cfg.model.apiKey = resolveApiKey(cfg.model);

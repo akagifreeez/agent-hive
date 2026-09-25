@@ -84,7 +84,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     switch (name) {
       case "claim_next_task": {
         const t = tasks.claim(agent);
-        if (!t) return { ok: true, text: "請求できるタスクはありません。" };
+        if (!t) return { ok: true, claimMiss: true, text: "請求できるタスクはありません。" };
         return { ok: true, text: `タスク ${t.id} を請求しました。\n\n${t.body}` };
       }
       case "finish_task": {

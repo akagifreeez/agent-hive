@@ -1,7 +1,9 @@
 // OpenAI互換(chat/completions)アダプタ。GLM(Z.AI/OpenRouter)等を想定。
 // 依存ゼロ(node内蔵fetch)。
+// usage(prompt/completion/reasoning/cost)を返し、コスト計測とコンテキスト管理の
+// 判定ソース(provider usage優先: ZCode compact/policy.tsと同方針)に使う。
 export class OpenAIModel {
-  constructor({ baseUrl, apiKey, model, temperature = 0.7, maxTokens = 2000, timeoutMs = 120000 }) {
+  constructor({ baseUrl, apiKey, model, temperature = 0.7, maxTokens = 2000, timeoutMs = 120000, reasoningEffort = null }) {
     if (!apiKey) throw new Error("APIキーが未設定です(環境変数か apiKeyFile を設定してください)");
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
@@ -9,6 +11,7 @@ export class OpenAIModel {
     this.temperature = temperature;
     this.maxTokens = maxTokens;
     this.timeoutMs = timeoutMs;
+    this.reasoningEffort = reasoningEffort;
   }
 
   async chat({ messages, tools }) {
@@ -18,6 +21,9 @@ export class OpenAIModel {
       temperature: this.temperature,
       max_tokens: this.maxTokens,
     };
+    if (this.reasoningEffort) {
+      body.reasoning = { effort: this.reasoningEffort };
+    }
     if (tools?.length) {
       body.tools = tools.map((t) => ({ type: "function", function: t }));
       body.tool_choice = "auto";
@@ -50,8 +56,19 @@ export class OpenAIModel {
         arguments: safeParseArgs(tc.function.arguments),
       })),
       raw: msg,
+      usage: extractUsage(data.usage),
     };
   }
+}
+
+export function extractUsage(u) {
+  if (!u) return { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+  return {
+    promptTokens: u.prompt_tokens ?? 0,
+    completionTokens: u.completion_tokens ?? 0,
+    reasoningTokens: u.completion_tokens_details?.reasoning_tokens ?? 0,
+    costUsd: u.cost ?? 0,
+  };
 }
 
 function safeParseArgs(s) {
