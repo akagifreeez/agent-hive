@@ -5,206 +5,350 @@
 <title>agent-hive</title>
 <script src="/markdown.js"></script>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    --bg: #0f1216; --panel: #14181e; --panel2: #1a2028; --line: #242c37;
+    --text: #d8dce2; --sub: #8b96a5; --accent: #4f8ef7; --accent2: #7fb5ff;
+    --green: #8fd6a5; --amber: #ffd479; --red: #ff7a7a; --violet: #c8a7ff;
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Meiryo", "Yu Gothic", sans-serif; background: #14171c; color: #d8dce2; display: flex; height: 100vh; }
-  #board { flex: 1.2; overflow-y: auto; padding: 16px; border-right: 1px solid #262b33; }
-  #side { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
-  h1 { font-size: 15px; margin: 0 0 4px; color: #9fb3c8; }
-  .post { background: #1b2028; border: 1px solid #2a313b; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; white-space: pre-wrap; word-break: break-word; }
-  .post .from { font-weight: bold; color: #7fb5ff; margin-bottom: 4px; }
-  .post.gamma .from { color: #ffd479; }
-  .post.beta .from { color: #8fd6a5; }
-  .post.delta .from { color: #d8a7ff; }
-  .post.system .from { color: #9aa4b1; }
-  .post.you { background: #232a35; border-color: #3a4453; }
-  .post.you .from { color: #e8ecf2; }
-  .post { white-space: normal; }
-  .post h1, .post h2, .post h3, .post h4 { margin: 8px 0 4px; font-size: 14px; color: #cfe3ff; }
-  .post p { margin: 4px 0; }
-  .post ul, .post ol { margin: 4px 0; padding-left: 20px; }
-  .post blockquote { border-left: 3px solid #3a4453; margin: 4px 0; padding: 2px 10px; color: #aab4c0; }
-  .post code { background: #10131a; border: 1px solid #2a313b; border-radius: 3px; padding: 0 4px; font-size: 12px; }
-  .post pre { background: #10131a; border: 1px solid #2a313b; border-radius: 6px; padding: 8px; overflow-x: auto; font-size: 12px; }
-  .post pre code { border: none; padding: 0; background: none; }
-  .post table { border-collapse: collapse; margin: 6px 0; font-size: 12px; }
-  .post th, .post td { border: 1px solid #2a313b; padding: 3px 8px; text-align: left; }
-  .post a { color: #7fb5ff; }
-  .post hr { border: none; border-top: 1px solid #2a313b; margin: 8px 0; }
-  .meta { font-size: 11px; color: #9aa4b1; margin-top: 2px; }
-  #saybar { display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid #262b33; position: sticky; bottom: 0; background: #14171c; }
-  #saybar input { flex: 1; background: #1b2028; border: 1px solid #2a313b; color: #d8dce2; border-radius: 6px; padding: 8px 10px; }
-  #saybar button { background: #2b6cb0; border: none; color: #fff; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
-  .card { background: #1b2028; border: 1px solid #2a313b; border-radius: 8px; padding: 10px 12px; margin: 8px 12px; }
-  .card .name { font-weight: bold; }
-  .card .st { float: right; font-size: 12px; color: #9aa4b1; }
-  .card.working .st { color: #ffd479; }
-  .card.done .st { color: #8fd6a5; }
-  .card.error .st { color: #ff7a7a; }
-  .sec { padding: 0 12px; font-size: 12px; color: #9aa4b1; }
-  pre { background: #10131a; border: 1px solid #2a313b; border-radius: 6px; padding: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
-  #fileview { flex: 1; overflow: auto; padding: 8px 12px; }
-  ul.files { list-style: none; padding: 0; margin: 4px 0; font-size: 12px; }
-  ul.files li { cursor: pointer; padding: 2px 6px; border-radius: 4px; }
-  ul.files li:hover { background: #232a35; }
-  .phase { font-size: 12px; color: #9aa4b1; margin-bottom: 10px; }
-  #tabs { margin: 4px 0 8px; display: flex; flex-wrap: wrap; gap: 6px; }
-  .tab { padding: 4px 12px; border-radius: 14px; cursor: pointer; font-size: 12px; background: #1b2028; border: 1px solid #2a313b; color: #aab4c0; }
-  .tab:hover { border-color: #3a4453; }
-  .tab.active { background: #2b6cb0; border-color: #2b6cb0; color: #fff; }
+  body {
+    margin: 0; height: 100vh; overflow: hidden;
+    font-family: "Meiryo", "Yu Gothic", sans-serif;
+    background: var(--bg); color: var(--text);
+    display: grid; grid-template-columns: 230px 1fr 360px;
+  }
+  h1 { font-size: 15px; margin: 0; }
+
+  /* ============ 左: ナビ ============ */
+  #nav { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 12px 10px; gap: 4px; }
+  #nav .logo { padding: 4px 8px 12px; color: var(--accent2); font-weight: bold; font-size: 16px; }
+  .navlabel { font-size: 11px; color: var(--sub); padding: 10px 8px 4px; text-transform: none; }
+  .room { padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; position: relative; }
+  .room:hover { background: var(--panel2); }
+  .room.active { background: var(--accent); color: #fff; }
+  .room .sub { display: block; font-size: 11px; color: var(--sub); margin-top: 2px; }
+  .room.active .sub { color: #dbe7ff; }
+  .badge { position: absolute; right: 8px; top: 8px; background: var(--red); color: #fff; border-radius: 9px; font-size: 10px; padding: 1px 6px; }
+  #nav .foot { margin-top: auto; font-size: 11px; color: var(--sub); padding: 8px; }
+
+  /* ============ 中央: 会話 ============ */
+  #chat { display: flex; flex-direction: column; min-width: 0; }
+  #roomhead { border-bottom: 1px solid var(--line); padding: 10px 18px; background: var(--panel); }
+  #room-title { font-size: 15px; font-weight: bold; }
+  #room-goal { font-size: 12px; color: var(--sub); margin-top: 2px; }
+  #room-members { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .member { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 14px; padding: 3px 10px; cursor: pointer; }
+  .member:hover { border-color: var(--accent); }
+  .member.sel { border-color: var(--accent); background: #1c2c44; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sub); }
+  .dot.working { background: var(--amber); }
+  .dot.done { background: var(--green); }
+  .dot.error, .dot.budget-stop { background: var(--red); }
+  #permzone { padding: 0 18px; }
+  .permcard { background: #2a1c1c; border: 1px solid var(--red); border-radius: 8px; padding: 8px 12px; margin-top: 10px; font-size: 12px; }
+  .permcard .cmd { font-family: Consolas, monospace; color: var(--amber); margin: 4px 0 8px; word-break: break-all; }
+  .permcard button { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 4px 14px; margin-right: 6px; cursor: pointer; }
+  .permcard button.ok { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  #stream { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 82%; border-radius: 10px; padding: 8px 12px; font-size: 13px; background: var(--panel2); border: 1px solid var(--line); }
+  .msg .who { font-size: 11px; color: var(--accent2); margin-bottom: 3px; font-weight: bold; }
+  .msg .who.beta { color: var(--green); }
+  .msg .who.gamma { color: var(--amber); }
+  .msg .who.system { color: var(--sub); }
+  .msg p { margin: 4px 0; }
+  .msg h1, .msg h2, .msg h3, .msg h4 { margin: 8px 0 4px; font-size: 13px; color: #cfe3ff; }
+  .msg ul, .msg ol { margin: 4px 0; padding-left: 20px; }
+  .msg blockquote { border-left: 3px solid var(--line); margin: 4px 0; padding: 2px 10px; color: var(--sub); }
+  .msg code { background: #10131a; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; font-size: 12px; }
+  .msg pre { background: #10131a; border: 1px solid var(--line); border-radius: 6px; padding: 8px; overflow-x: auto; font-size: 12px; }
+  .msg pre code { border: none; padding: 0; background: none; }
+  .msg table { border-collapse: collapse; margin: 6px 0; font-size: 12px; }
+  .msg th, .msg td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; }
+  .msg a { color: var(--accent2); }
+  .msg hr { border: none; border-top: 1px solid var(--line); margin: 8px 0; }
+  .msg.mine { align-self: flex-end; background: #233246; border-color: #33475f; }
+  .msg.mine .who { color: #e8ecf2; text-align: right; }
+  .sysline { align-self: center; font-size: 11px; color: var(--sub); background: none; border: 1px dashed var(--line); border-radius: 12px; padding: 2px 12px; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #composer { border-top: 1px solid var(--line); padding: 10px 18px 14px; background: var(--panel); }
+  #composer .row { display: flex; gap: 8px; }
+  #saytext { flex: 1; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 9px 12px; font-size: 13px; }
+  #saybtn { background: var(--accent); border: none; color: #fff; border-radius: 8px; padding: 9px 18px; cursor: pointer; font-size: 13px; }
+  #composer .hint { font-size: 11px; color: var(--sub); margin-top: 5px; }
+
+  /* ============ 右: 状況パネル ============ */
+  #ctx { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  #ctx-tabs { display: flex; border-bottom: 1px solid var(--line); }
+  #ctx-tabs .ct { flex: 1; text-align: center; padding: 10px 0; font-size: 12px; color: var(--sub); cursor: pointer; border-bottom: 2px solid transparent; }
+  #ctx-tabs .ct.active { color: var(--text); border-bottom-color: var(--accent); }
+  #ctx-body { flex: 1; overflow-y: auto; padding: 12px; }
+  .sec { font-size: 11px; color: var(--sub); margin: 10px 0 4px; }
+  .sec:first-child { margin-top: 0; }
+  .proj { font-size: 12px; color: var(--accent2); margin: 8px 0 2px; }
   .taskrow { display: flex; align-items: baseline; gap: 6px; padding: 3px 4px; border-radius: 4px; font-size: 12px; }
-  .taskrow:hover { background: #232a35; }
-  .taskrow .tid { color: #7fb5ff; cursor: pointer; white-space: nowrap; }
-  .taskrow .tsum { flex: 1; color: #aab4c0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .taskrow .tag { font-size: 10px; color: #9aa4b1; white-space: nowrap; }
-  .taskrow button { background: #2a313b; border: 1px solid #3a4453; color: #d8dce2; border-radius: 4px; font-size: 11px; padding: 1px 7px; cursor: pointer; }
-  .taskrow button:hover { background: #3a4453; }
-  .tsec { margin: 8px 0 2px; font-size: 11px; color: #9aa4b1; }
-  #newtask { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
-  #newtask input, #newtask textarea { background: #10131a; border: 1px solid #2a313b; color: #d8dce2; border-radius: 4px; padding: 4px 6px; font-size: 12px; }
+  .taskrow:hover { background: var(--panel2); }
+  .taskrow .tid { color: var(--accent2); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 52%; flex-shrink: 0; }
+  .taskrow .tsum { flex: 1; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .taskrow button { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 4px; font-size: 11px; padding: 1px 7px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+  .taskrow button:hover { background: var(--line); }
+  #newtask { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+  #newtask input, #newtask textarea { background: #10131a; border: 1px solid var(--line); color: var(--text); border-radius: 4px; padding: 4px 6px; font-size: 12px; }
   #newtask textarea { min-height: 44px; resize: vertical; }
-  #newtask button { align-self: flex-end; background: #2b6cb0; border: none; color: #fff; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
-  .card.clickable { cursor: pointer; }
-  .card.clickable:hover { border-color: #3a4453; }
-  .card.open-agent { border-color: #2b6cb0; }
-  .alog { margin-top: 8px; max-height: 340px; overflow-y: auto; background: #10131a; border: 1px solid #2a313b; border-radius: 6px; padding: 6px 8px; font-size: 12px; }
-  .alog .entry { padding: 3px 0; border-bottom: 1px solid #1b2028; white-space: pre-wrap; word-break: break-word; }
+  #newtask button { align-self: flex-end; background: var(--accent); border: none; color: #fff; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+
+  .agentcard { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; font-size: 12px; }
+  .agentcard:hover { border-color: var(--accent); }
+  .agentcard.sel { border-color: var(--accent); background: #1c2c44; }
+  .agentcard .nm { font-weight: bold; }
+  .agentcard .st { float: right; color: var(--sub); font-size: 11px; }
+  .agentcard .st.working { color: var(--amber); }
+  .agentcard .st.done { color: var(--green); }
+  .agentcard .st.error, .agentcard .st.budget-stop { color: var(--red); }
+  .agentcard .meta { color: var(--sub); font-size: 11px; margin-top: 3px; }
+
+  .alog { max-height: 46vh; overflow-y: auto; background: #10131a; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+  .alog .entry { padding: 3px 0; border-bottom: 1px solid var(--panel); white-space: pre-wrap; word-break: break-word; }
   .alog .entry:last-child { border-bottom: none; }
-  .alog .entry .k { color: #9aa4b1; margin-right: 4px; }
-  .alog .entry.think .txt { color: #9aa4b1; }
-  .alog .entry.say .txt { color: #d8dce2; }
+  .alog .entry .k { color: var(--sub); margin-right: 4px; }
+  .alog .entry.think .txt { color: var(--sub); }
+  .alog .entry.say .txt { color: var(--text); }
   .alog .entry.tool .txt, .alog .entry.result .txt { font-family: Consolas, monospace; font-size: 11px; color: #8fb8d8; }
   .alog .entry.result .txt { color: #7fa88f; }
-  .alog .entry.compact .txt { color: #c8a7ff; font-size: 11px; }
-  .alog .hint { color: #9aa4b1; font-size: 11px; padding: 4px 0; }
+  .alog .entry.compact .txt { color: var(--violet); font-size: 11px; }
+  .hint { color: var(--sub); font-size: 12px; padding: 6px 2px; }
+  ul.files { list-style: none; padding: 0; margin: 4px 0; font-size: 12px; }
+  ul.files li { cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+  ul.files li:hover { background: var(--panel2); }
+  pre.fileview { background: #10131a; border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
 </style>
 </head>
 <body>
-  <div id="board"><h1>agent-hive</h1><div id="tabs"></div><div class="phase" id="phase"></div><div id="permreq"></div><div id="posts"></div>
-    <div id="saybar"><input id="saytext" placeholder="表示中のスレッドへ指示(メイン=リーダーと壁打ち。スレッド=3ワーカー全員に届く)"><button id="saybtn">送信</button></div>
-  </div>
-  <div id="side">
-    <div id="agents"></div>
-    <div class="card"><div class="name">タスク(UIから直接操作・チャット不要)</div>
-      <div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:#9aa4b1;">
-        <span>文脈:</span>
-        <select id="projfilter" style="background:#10131a;border:1px solid #2a313b;color:#d8dce2;border-radius:4px;padding:2px 6px;font-size:12px;"></select>
+  <aside id="nav">
+    <div class="logo">agent-hive</div>
+    <div class="navlabel">スレッド</div>
+    <div id="nav-rooms"></div>
+    <div class="foot" id="nav-foot"></div>
+  </aside>
+
+  <main id="chat">
+    <header id="roomhead">
+      <div id="room-title"></div>
+      <div id="room-goal"></div>
+      <div id="room-members"></div>
+    </header>
+    <div id="permzone"></div>
+    <div id="stream"></div>
+    <div id="composer">
+      <div class="row">
+        <input id="saytext" placeholder="メッセージ">
+        <button id="saybtn">送信</button>
       </div>
-      <div id="tasks"></div>
-      <div id="newtask">
-        <input id="nt-id" placeholder="task_id(空欄で自動採番)">
-        <input id="nt-project" placeholder="文脈(project)(任意、例: cuda-compress)">
-        <input id="nt-role" placeholder="role(impl/review等、空欄で誰でも)">
-        <textarea id="nt-body" placeholder="何を / どう確認するか / 完了条件"></textarea>
-        <button id="nt-add">タスク投入(ボードへ直接)</button>
-      </div>
+      <div class="hint" id="composer-hint"></div>
     </div>
-    <div class="card"><div class="name">ワークスペースのファイル(クリックで表示)</div><ul class="files" id="files"></ul></div>
-    <div id="fileview"></div>
-  </div>
+  </main>
+
+  <aside id="ctx">
+    <div id="ctx-tabs">
+      <div class="ct active" data-tab="tasks">タスク</div>
+      <div class="ct" data-tab="agents">エージェント</div>
+      <div class="ct" data-tab="files">ファイル</div>
+    </div>
+    <div id="ctx-body"></div>
+  </aside>
+
 <script>
-const agentsEl = document.getElementById("agents");
-const postsEl = document.getElementById("posts");
-let agentOrder = [];
-let expandedAgent = null;
+/* ================= 状態 ================= */
 let selectedThread = "__main__";
-
-// スレッドタブ: メイン(リーダーと1:1)と各サブスレッド(3ワーカー)を切り替える
-function renderTabs(threads) {
-  const el = document.getElementById("tabs");
-  el.innerHTML = "";
-  const tabs = [
-    { id: "__main__", label: "🤝 メイン(壁打ち)" },
-    ...(threads ?? []).filter((t) => t.name !== "__main__").map((t) => ({ id: t.name, label: "🧵 " + t.name, title: t.goal })),
-  ];
-  for (const t of tabs) {
-    const b = document.createElement("span");
-    b.className = "tab" + (selectedThread === t.id ? " active" : "");
-    b.textContent = t.label;
-    if (t.title) b.title = t.goal ?? t.title;
-    b.onclick = () => {
-      selectedThread = t.id;
-      if (t.id !== "__main__") projectFilter = t.id; // タスク絞込もスレッドに追従
-      refresh();
-    };
-    el.appendChild(b);
-  }
-}
-
-function renderState(state) {
-  renderTabs(state.live.threads);
-  const names = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ", delta: "デルタ", system: "システム", lead: "リーダー" };
-  agentsEl.innerHTML = "";
-  for (const [id, a] of Object.entries(state.live.agents).filter(([id, a]) => (a.thread ?? "__main__") === selectedThread)) {
-    const div = document.createElement("div");
-    const isOpen = expandedAgent === id;
-    div.className = "card clickable " + (a.status ?? "") + (isOpen ? " open-agent" : "");
-    const label = a.displayName ?? names[id] ?? id;
-    const hier = a.depth ? `depth ${a.depth}${a.parent ? ` / 親:${names[a.parent] ?? a.parent}` : ""}` : "メイン";
-    div.innerHTML = `<span class="name">${label}</span><span class="st">${a.status ?? "idle"} / turn ${a.turn ?? 0} ${a.lastTool ? "/ " + a.lastTool : ""}</span>` +
-      `<div class="meta">${hier}${a.tokens ? ` / tokens ${a.tokens.toLocaleString()} / $${(a.costUsd ?? 0).toFixed(4)}` : ""}${a.log?.length ? ` / ログ${a.log.length}件` : ""} — クリックで${isOpen ? "閉じる" : "思考と活動"}</div>`;
-    div.onclick = () => { expandedAgent = isOpen ? null : id; refresh(); };
-    agentsEl.appendChild(div);
-    if (isOpen) div.appendChild(renderAgentLog(a));
-  }
-  renderTasks(state.taskList);
-  document.getElementById("phase").textContent = state.live.scenario ? `シナリオ: ${state.live.scenario.name} [${state.live.scenario.phase}]` : "";
-  renderFiles();
-}
-
-// タスクパネル: 文脈(project)ごとにグループ化して表示+絞込+UI直操作。
-// 「すべて」は文脈の混ざりを見る用、絞り込めばその取り組みだけが見える。
+let selectedAgent = null;
+let ctxTab = "tasks";
 let projectFilter = "";
-function renderTasks(list) {
-  const el = document.getElementById("tasks");
-  const all = [...(list.open ?? []), ...(list.claimed ?? []), ...(list.done ?? [])];
-  // 文脈一覧(未分類は最後に)
-  const projects = [...new Set(all.map((t) => t.project || "").filter((p) => p !== ""))].sort();
-  const sel = document.getElementById("projfilter");
-  const opts = ["", ...projects, "__none__"];
-  if (sel.dataset.sig !== opts.join("|")) {
-    sel.dataset.sig = opts.join("|");
-    sel.innerHTML = "";
+const unread = {}; // thread => 件数
+let lastState = null;
+const NAMES = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ", delta: "デルタ", system: "システム", you: "あなた", lead: "リーダー" };
+const threadOf = (a) => a?.thread ?? "__main__";
+const $ = (id) => document.getElementById(id);
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+/* ================= 左ナビ ================= */
+function renderNav(threads) {
+  const el = $("nav-rooms");
+  el.innerHTML = "";
+  const rooms = [
+    { id: "__main__", label: "🤝 メイン", sub: "リーダーと壁打ち・計画" },
+    ...(threads ?? []).filter((t) => t.name !== "__main__").map((t) => ({ id: t.name, label: "🧵 " + t.name, sub: t.goal })),
+  ];
+  for (const t of rooms) {
+    const d = document.createElement("div");
+    d.className = "room" + (selectedThread === t.id ? " active" : "");
+    d.innerHTML = `${escapeHtml(t.label)}<span class="sub">${escapeHtml(t.sub ?? "")}</span>`;
+    if (unread[t.id]) {
+      const b = document.createElement("span");
+      b.className = "badge";
+      b.textContent = unread[t.id];
+      d.appendChild(b);
+    }
+    d.onclick = () => {
+      selectedThread = t.id;
+      unread[t.id] = 0;
+      selectedAgent = null;
+      projectFilter = t.id === "__main__" ? "" : t.id;
+      renderAll();
+    };
+    el.appendChild(d);
+  }
+}
+
+/* ================= 中央: 会話 ================= */
+function currentMembers(state) {
+  return Object.entries(state.live.agents).filter(([id, a]) => threadOf(a) === selectedThread);
+}
+
+function renderRoomHead(state) {
+  const th = (state.live.threads ?? []).find((t) => t.name === selectedThread);
+  if (selectedThread === "__main__") {
+    $("room-title").textContent = "🤝 メイン(壁打ち)";
+    $("room-goal").textContent = "リーダーと計画を固める。実行はサブスレッドへ";
+  } else {
+    $("room-title").textContent = "🧵 " + selectedThread;
+    $("room-goal").textContent = th?.goal ?? "";
+  }
+  const mem = $("room-members");
+  mem.innerHTML = "";
+  for (const [id, a] of currentMembers(state)) {
+    const chip = document.createElement("span");
+    chip.className = "member" + (selectedAgent === id ? " sel" : "");
+    chip.innerHTML = `<span class="dot ${(a.status ?? "idle").replace(/\s/g, "")}"></span>${escapeHtml(a.displayName ?? NAMES[id] ?? id)}`;
+    chip.title = `${a.status ?? "idle"} / turn ${a.turn ?? 0} — クリックで思考と活動`;
+    chip.onclick = () => { selectedAgent = selectedAgent === id ? null : id; ctxTab = "agents"; renderAll(); };
+    mem.appendChild(chip);
+  }
+  const hint = $("composer-hint");
+  hint.textContent = selectedThread === "__main__"
+    ? "このメッセージは リーダー に届きます"
+    : `このメッセージは ${selectedThread} のメンバー全員に届きます`;
+  $("saytext").placeholder = selectedThread === "__main__" ? "リーダーへメッセージ" : `${selectedThread} のメンバーへメッセージ`;
+}
+
+function renderStream(state) {
+  const stream = $("stream");
+  const nearBottom = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 120;
+  stream.innerHTML = "";
+  for (const p of state.live.board) {
+    if ((p.thread ?? "__main__") !== selectedThread) continue;
+    if (p.from === "system") {
+      const d = document.createElement("div");
+      d.className = "sysline";
+      d.textContent = "⚙ " + p.text.replace(/^\[[^\]]+\]\s*/, "");
+      d.title = p.text;
+      stream.appendChild(d);
+      continue;
+    }
+    const mine = p.from === "you";
+    const d = document.createElement("div");
+    d.className = "msg" + (mine ? " mine" : "");
+    const who = document.createElement("div");
+    who.className = "who " + p.from;
+    who.textContent = (mine ? "あなた" : (NAMES[p.from] ?? p.from)) + (mine ? "" : ` #${p.id}`);
+    const body = document.createElement("div");
+    body.innerHTML = renderMarkdown(p.text);
+    d.append(who, body);
+    stream.appendChild(d);
+  }
+  if (nearBottom) stream.scrollTop = stream.scrollHeight;
+}
+
+function renderPerms(requests) {
+  const el = $("permzone");
+  el.innerHTML = "";
+  for (const r of (requests ?? []).filter((x) => x.state === "pending")) {
+    const d = document.createElement("div");
+    d.className = "permcard";
+    d.innerHTML = `<b>🔐 コマンドの承認要求 #${r.id}</b><div class="cmd">${escapeHtml(r.command)}</div>`;
+    const ok = document.createElement("button");
+    ok.className = "ok";
+    ok.textContent = "承認";
+    ok.onclick = () => decide(r.id, true);
+    const no = document.createElement("button");
+    no.textContent = "拒否";
+    no.onclick = () => decide(r.id, false);
+    d.append(ok, no);
+    el.appendChild(d);
+  }
+}
+
+/* ================= 右: 状況パネル ================= */
+function renderCtx(state) {
+  for (const b of document.querySelectorAll("#ctx-tabs .ct")) {
+    b.classList.toggle("active", b.dataset.tab === ctxTab);
+  }
+  const body = $("ctx-body");
+  body.innerHTML = "";
+  if (ctxTab === "tasks") renderTasksTab(body, state);
+  if (ctxTab === "agents") renderAgentsTab(body, state);
+  if (ctxTab === "files") renderFilesTab(body);
+}
+
+function renderTasksTab(body, state) {
+  const list = state.taskList ?? { open: [], claimed: [], done: [] };
+  const inThread = selectedThread !== "__main__";
+  const all = [...list.open, ...list.claimed, ...list.done].filter((t) => !inThread || (t.project || "") === selectedThread);
+  const projects = [...new Set(all.map((t) => t.project || ""))].sort();
+
+  if (inThread) {
+    const s = document.createElement("div");
+    s.className = "sec";
+    s.textContent = `このスレッド(${selectedThread})のタスク`;
+    body.appendChild(s);
+  } else {
+    const sel = document.createElement("select");
+    sel.id = "projfilter";
+    sel.style.cssText = "width:100%;background:#10131a;border:1px solid var(--line);color:var(--text);border-radius:4px;padding:4px 6px;font-size:12px;";
+    const opts = ["", ...projects, "__none__"];
+    const cur = projectFilter;
     for (const p of opts) {
       const o = document.createElement("option");
       o.value = p;
-      o.textContent = p === "" ? "すべて" : p === "__none__" ? "(未分類)" : p;
+      o.textContent = p === "" ? "すべてのプロジェクト" : p === "__none__" ? "(未分類)" : p;
       sel.appendChild(o);
     }
-    sel.value = projectFilter;
-    if (!opts.includes(projectFilter)) { projectFilter = ""; sel.value = ""; }
+    sel.value = cur;
+    if (!opts.includes(cur)) { projectFilter = ""; sel.value = ""; }
+    sel.onchange = (e) => { projectFilter = e.target.value; renderCtx(lastState); };
+    body.appendChild(sel);
   }
-  el.innerHTML = "";
+
+  const visible = all.filter((t) => inThread || projectFilter === "" || (projectFilter === "__none__" ? !t.project : (t.project || "") === projectFilter));
+  const groups = inThread ? [["", ""]] : [...projects.map((p) => [p, p]), ["", "(未分類)"]];
   const secs = [
     ["open", "未着手", () => ({ label: "中止", action: "cancel" })],
     ["claimed", "作業中", () => ({ label: "解放", action: "release" })],
     ["done", "完了", () => ({ label: "再開", action: "reopen" })],
   ];
-  // 表示順: 「すべて」はprojectごとにグループ化(未分類は最後)、絞込中はその文脈だけ
-  const groups = projectFilter === ""
-    ? [...projects.map((p) => [p, p]), ["", "(未分類)"]]
-    : [[projectFilter === "__none__" ? "" : projectFilter, projectFilter === "__none__" ? "(未分類)" : projectFilter]];
   for (const [proj, label] of groups) {
-    const inProj = all.filter((t) => (t.project || "") === proj);
+    const inProj = visible.filter((t) => (t.project || "") === proj);
     if (!inProj.length) continue;
-    const head = document.createElement("div");
-    head.className = "tsec";
-    head.style.color = proj ? "#7fb5ff" : "#9aa4b1";
-    head.textContent = `◆ ${label}`;
-    el.appendChild(head);
-    for (const [state, stateLabel, btn] of secs) {
-      const rows = inProj.filter((t) => t.state === state);
+    const ph = document.createElement("div");
+    ph.className = "proj";
+    ph.textContent = "◆ " + label;
+    body.appendChild(ph);
+    for (const [st, stLabel, btn] of secs) {
+      const rows = inProj.filter((t) => t.state === st);
       if (!rows.length) continue;
       const sh = document.createElement("div");
-      sh.className = "tsec";
-      sh.textContent = `${stateLabel}(${rows.length})`;
-      el.appendChild(sh);
+      sh.className = "sec";
+      sh.textContent = `${stLabel}(${rows.length})`;
+      body.appendChild(sh);
       for (const t of rows) {
         const row = document.createElement("div");
         row.className = "taskrow";
         const id = document.createElement("span");
         id.className = "tid";
-        id.textContent = t.id + (t.agent && t.agent !== "auto" && t.agent !== "you" ? ` @${t.agent}` : "");
+        id.textContent = t.id + (t.agent && !["auto", "you"].includes(t.agent) ? ` @${t.agent}` : "");
         id.title = t.summary;
         id.onclick = () => showTaskBody(t);
         const sum = document.createElement("span");
@@ -213,10 +357,10 @@ function renderTasks(list) {
         sum.onclick = () => showTaskBody(t);
         const mv = document.createElement("button");
         mv.textContent = "移動";
-        mv.title = "文脈(project)を付け替える";
+        mv.title = "プロジェクトを付け替える";
         mv.onclick = async (e) => {
           e.stopPropagation();
-          const p = prompt(`文脈(project)を入力(空欄で未分類):`, t.project || "");
+          const p = prompt(`プロジェクト名(空欄で未分類):`, t.project || "");
           if (p === null) return;
           await taskAction({ action: "reproject", path: t.path, project: p });
         };
@@ -225,41 +369,48 @@ function renderTasks(list) {
         b.textContent = spec.label;
         b.onclick = (e) => { e.stopPropagation(); taskAction({ action: spec.action, id: t.id, agent: t.agent }); };
         row.append(id, sum, mv, b);
-        el.appendChild(row);
+        body.appendChild(row);
       }
     }
   }
+
+  const form = document.createElement("div");
+  form.id = "newtask";
+  form.innerHTML = `
+    <div class="sec">新しいタスクを投入${inThread ? `(project: ${escapeHtml(selectedThread)})` : ""}</div>
+    <input id="nt-id" placeholder="task_id(空欄で自動採番)">
+    ${inThread ? "" : '<input id="nt-project" placeholder="project(任意、例: cuda-compress)">'}
+    <input id="nt-role" placeholder="role(impl/review等、空欄で誰でも)">
+    <textarea id="nt-body" placeholder="何を / どう確認するか / 完了条件"></textarea>
+    <button id="nt-add">投入(トークン消費なし)</button>`;
+  body.appendChild(form);
+  form.querySelector("#nt-add").onclick = createTask;
 }
 
-async function showTaskBody(t) {
-  const r = await (await fetch("/api/file?path=" + encodeURIComponent(t.path))).json();
-  document.getElementById("fileview").innerHTML =
-    `<div class="tsec">${escapeHtml(t.id)} の本文(<code>${escapeHtml(t.path)}</code>)</div>` +
-    `<div class="post">${renderMarkdown(r.content ?? "")}</div>`;
+function renderAgentsTab(body, state) {
+  const members = currentMembers(state);
+  const sel = document.createElement("div");
+  sel.className = "sec";
+  sel.textContent = "このスレッドのエージェント(クリックで思考ログ)";
+  body.appendChild(sel);
+  for (const [id, a] of members) {
+    const card = document.createElement("div");
+    card.className = "agentcard" + (selectedAgent === id ? " sel" : "");
+    const label = a.displayName ?? NAMES[id] ?? id;
+    card.innerHTML = `<span class="nm">${escapeHtml(label)}</span><span class="st ${(a.status ?? "idle").replace(/\s/g, "")}">${escapeHtml(a.status ?? "idle")}</span>` +
+      `<div class="meta">turn ${a.turn ?? 0}${a.lastTool ? ` / ${escapeHtml(a.lastTool)}` : ""}${a.tokens ? ` / ${a.tokens.toLocaleString()}tok / $${(a.costUsd ?? 0).toFixed(4)}` : ""}</div>`;
+    card.onclick = () => { selectedAgent = selectedAgent === id ? null : id; renderCtx(lastState); };
+    body.appendChild(card);
+    if (selectedAgent === id) body.appendChild(renderAgentLog(a));
+  }
+  if (!members.length) {
+    const h = document.createElement("div");
+    h.className = "hint";
+    h.textContent = "このスレッドにはまだエージェントがいません。";
+    body.appendChild(h);
+  }
 }
 
-async function taskAction(payload) {
-  const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })).json();
-  if (r.error) alert(r.error);
-  refresh();
-}
-
-async function createTask() {
-  const id = document.getElementById("nt-id").value.trim();
-  const project = document.getElementById("nt-project").value.trim();
-  const role = document.getElementById("nt-role").value.trim();
-  const body = document.getElementById("nt-body").value.trim();
-  if (!body) { alert("本文(何を/完了条件)を書いてください"); return; }
-  const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, project, role, body }) })).json();
-  if (r.error) { alert(r.error); return; }
-  document.getElementById("nt-id").value = "";
-  document.getElementById("nt-project").value = "";
-  document.getElementById("nt-role").value = "";
-  document.getElementById("nt-body").value = "";
-  refresh();
-}
-
-// エージェントの思考と活動ログ(時系列・末尾が最新。開いている間は自動で最下部へ)
 function renderAgentLog(a) {
   const wrap = document.createElement("div");
   wrap.className = "alog";
@@ -267,7 +418,7 @@ function renderAgentLog(a) {
   if (!a.log?.length) {
     const h = document.createElement("div");
     h.className = "hint";
-    h.textContent = "まだ活動がありません。稼働すると思考(💭)・発言(💬)・ツール実行(🔧)・その結果(↳)がここに流れます。";
+    h.textContent = "まだ活動がありません。稼働すると思考(💭)・発言(💬)・ツール(🔧)・結果(↳)が流れます。";
     wrap.appendChild(h);
   }
   for (const e of a.log ?? []) {
@@ -286,54 +437,64 @@ function renderAgentLog(a) {
   return wrap;
 }
 
-async function renderFiles() {
-  const state = await (await fetch("/api/state")).json();
-  const files = state.files ?? [];
-  const ul = document.getElementById("files");
-  ul.innerHTML = "";
+async function renderFilesTab(body) {
+  const files = lastState?.files ?? [];
+  const ul = document.createElement("ul");
+  ul.className = "files";
   for (const f of files) {
     const li = document.createElement("li");
     li.textContent = f;
     li.onclick = async () => {
       const r = await (await fetch("/api/file?path=" + encodeURIComponent(f))).json();
-      document.getElementById("fileview").innerHTML = `<pre>${escapeHtml(r.content ?? "")}</pre>`;
+      let pre = body.querySelector("pre.fileview");
+      if (pre) pre.remove();
+      pre = document.createElement("pre");
+      pre.className = "fileview";
+      pre.textContent = r.content ?? "";
+      body.appendChild(pre);
     };
     ul.appendChild(li);
   }
+  body.appendChild(ul);
+  const h = document.createElement("div");
+  h.className = "hint";
+  h.textContent = "ファイル名をクリックすると内容が下に表示されます。";
+  body.appendChild(h);
 }
 
-function addPost(p) {
-  const div = document.createElement("div");
-  div.className = "post " + p.from;
-  const names = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ", delta: "デルタ", system: "システム", you: "あなた" };
-  div.innerHTML = `<div class="from">${names[p.from] ?? p.from} #${p.id}</div>` + renderMarkdown(p.text);
-  postsEl.appendChild(div);
-  document.getElementById("board").scrollTop = document.getElementById("board").scrollHeight;
+async function showTaskBody(t) {
+  const r = await (await fetch("/api/file?path=" + encodeURIComponent(t.path))).json();
+  ctxTab = "tasks";
+  const body = $("ctx-body");
+  let pre = body.querySelector("pre.fileview");
+  if (pre) pre.remove();
+  pre = document.createElement("pre");
+  pre.className = "fileview";
+  pre.textContent = `# ${t.id}\n\n` + (r.content ?? "");
+  body.appendChild(pre);
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+/* ================= アクション ================= */
+async function taskAction(payload) {
+  const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })).json();
+  if (r.error) alert(r.error);
+  refresh();
 }
 
-function renderRequests(requests) {
-  const el = document.getElementById("permreq");
-  el.innerHTML = "";
-  for (const r of requests.filter((x) => x.state === "pending")) {
-    const div = document.createElement("div");
-    div.className = "post";
-    div.innerHTML = `<div class="from" style="color:#ff9a9a">承認要求 #${r.id}</div><pre>${escapeHtml(r.command)}</pre>`;
-    const row = document.createElement("div");
-    const yes = document.createElement("button");
-    yes.textContent = "承認";
-    yes.onclick = () => decide(r.id, true);
-    const no = document.createElement("button");
-    no.textContent = "拒否";
-    no.onclick = () => decide(r.id, false);
-    row.append(yes, no);
-    div.appendChild(row);
-    el.appendChild(div);
-  }
-  if (el.childElementCount) document.getElementById("board").scrollTop = 0;
+async function createTask() {
+  const id = $("nt-id")?.value.trim() ?? "";
+  const projectInput = $("nt-project");
+  const project = projectInput ? projectInput.value.trim() : selectedThread === "__main__" ? "" : selectedThread;
+  const role = $("nt-role").value.trim();
+  const body = $("nt-body").value.trim();
+  if (!body) { alert("本文(何を/完了条件)を書いてください"); return; }
+  const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, project, role, body }) })).json();
+  if (r.error) { alert(r.error); return; }
+  $("nt-id").value = "";
+  if (projectInput) projectInput.value = "";
+  $("nt-role").value = "";
+  $("nt-body").value = "";
+  refresh();
 }
 
 async function decide(id, approve) {
@@ -341,47 +502,61 @@ async function decide(id, approve) {
   refresh();
 }
 
-async function refresh() {
-  const state = await (await fetch("/api/state")).json();
-  postsEl.innerHTML = "";
-  for (const p of state.live.board) {
-    if ((p.thread ?? "__main__") !== selectedThread) continue;
-    addPost(p);
-  }
-  renderRequests(state.live.requests ?? []);
-  renderState(state);
+async function sendSay() {
+  const el = $("saytext");
+  const text = el.value.trim();
+  if (!text) return;
+  el.value = "";
+  await fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, thread: selectedThread === "__main__" ? null : selectedThread }) });
 }
 
-const es = new EventSource("/events");
-// 活動イベントは高頻度なので纏めて更新(0.6秒デバウンス)
+/* ================= 全体描画 ================= */
+function renderAll() {
+  if (!lastState) return;
+  renderNav(lastState.live.threads);
+  renderRoomHead(lastState);
+  renderStream(lastState);
+  renderPerms(lastState.live.requests);
+  renderCtx(lastState);
+  $("nav-foot").textContent = lastState.live.scenario ? `${lastState.live.scenario.name} [${lastState.live.scenario.phase}]` : "";
+}
+
+async function refresh() {
+  lastState = await (await fetch("/api/state")).json();
+  renderAll();
+}
+
 let refreshQueued = false;
 function refreshSoon() {
   if (refreshQueued) return;
   refreshQueued = true;
   setTimeout(() => { refreshQueued = false; refresh(); }, 600);
 }
+
+/* ================= イベント配線 ================= */
+const es = new EventSource("/events");
 es.onmessage = (e) => {
   const { type, payload } = JSON.parse(e.data);
   if (type === "board") {
-    if ((payload.thread ?? "__main__") === selectedThread) addPost(payload);
+    const th = payload.thread ?? "__main__";
+    if (th === selectedThread) {
+      refreshSoon(); // デバウンス付きで全再描画(ストリームは毎回全件から組み直す)
+    } else {
+      unread[th] = (unread[th] ?? 0) + 1;
+      if (lastState) renderNav(lastState.live.threads);
+    }
+    return;
   }
-  if (type === "agent.spawned") refresh();
-  if (type === "scenario.started" || type === "scenario.finished") refresh();
-  if (type === "task.claimed" || type === "task.finished" || type === "task.created" || type === "task.released" || type === "task.cancelled" || type === "task.autoResolved") refresh();
-  if (type === "agent.turn" || type === "tool.call" || type === "tool.result" || type === "agent.status") refreshSoon();
+  if (["agent.turn", "tool.call", "tool.result", "agent.status", "agent.spawned", "thread.opened",
+       "task.claimed", "task.finished", "task.created", "task.released", "task.cancelled", "task.autoResolved",
+       "scenario.started", "scenario.finished"].includes(type)) {
+    refreshSoon();
+  }
 };
-document.getElementById("nt-add").onclick = createTask;
-document.getElementById("projfilter").onchange = (e) => { projectFilter = e.target.value; refresh(); };
-document.getElementById("saybtn").onclick = sendSay;
-document.getElementById("saytext").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) sendSay();
-});
-async function sendSay() {
-  const el = document.getElementById("saytext");
-  const text = el.value.trim();
-  if (!text) return;
-  el.value = "";
-  await fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, thread: selectedThread === "__main__" ? null : selectedThread }) });
+$("saybtn").onclick = sendSay;
+$("saytext").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) sendSay(); });
+for (const b of document.querySelectorAll("#ctx-tabs .ct")) {
+  b.onclick = () => { ctxTab = b.dataset.tab; renderCtx(lastState); };
 }
 refresh();
 setInterval(refresh, 5000);
