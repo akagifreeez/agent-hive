@@ -45,11 +45,12 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
     background: var(--bg); color: var(--label);
     display: grid; grid-template-columns: 230px 1fr 360px;
+    grid-template-rows: minmax(0, 1fr); /* 行をコンテンツサイズに任せると縦が無限に伸びてスクロール不能になる */
     font-size: 15px;
   }
 
   /* ============ 左: ナビ ============ */
-  #nav { background: var(--bg-elevated); border-right: 1px solid var(--separator); display: flex; flex-direction: column; padding: 14px 10px; gap: 2px; }
+  #nav { background: var(--bg-elevated); border-right: 1px solid var(--separator); display: flex; flex-direction: column; padding: 14px 10px; gap: 2px; min-height: 0; overflow-y: auto; }
   #nav .logo { padding: 2px 8px 14px; color: var(--label); font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
   .navlabel { font-size: 12px; color: var(--label-secondary); padding: 12px 8px 4px; }
   .room { padding: 8px 10px; border-radius: var(--radius-control); cursor: pointer; font-size: 13px; position: relative; transition: background var(--duration) var(--ease); }
@@ -61,7 +62,7 @@
   #nav .foot { margin-top: auto; font-size: 12px; color: var(--label-tertiary); padding: 8px; }
 
   /* ============ 中央: 会話 ============ */
-  #chat { display: flex; flex-direction: column; min-width: 0; }
+  #chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   #roomhead { border-bottom: 1px solid var(--separator); padding: 12px 18px; background: var(--bg-elevated); }
   #room-title { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
   #room-goal { font-size: 12px; color: var(--label-secondary); margin-top: 2px; }
