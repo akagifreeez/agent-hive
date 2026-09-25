@@ -10,6 +10,16 @@ import { listWorkspaceFiles } from "../engine/tools.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
 
+// エージェントごとの活動ログ(思考/発言/ツール/状態)。UIの詳細パネル用。
+// 1エージェントあたり直近LOG_LIMIT件だけ保持(長時間ランでの肥大止め)。
+export const AGENT_LOG_LIMIT = 120;
+export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
+  if (!agentState) return;
+  if (!agentState.log) agentState.log = [];
+  agentState.log.push({ ts, kind, text: String(text ?? "").slice(0, 2000) });
+  if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
+}
+
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null }) {
   const live = {
     agents: Object.fromEntries(config.agents.map((a) => [a.id, { status: "idle", turn: 0, lastTool: null }])),
@@ -21,9 +31,25 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   const clients = new Set();
 
   const record = {
-    "agent.status": (p) => { live.agents[p.agent] = { ...live.agents[p.agent], status: p.status }; },
-    "agent.turn": (p) => { live.agents[p.agent] = { ...live.agents[p.agent], turn: p.turn }; },
-    "tool.call": (p) => { live.agents[p.agent] = { ...live.agents[p.agent], lastTool: `${p.tool}` }; },
+    "agent.status": (p) => {
+      live.agents[p.agent] = { ...live.agents[p.agent], status: p.status };
+      pushAgentLog(live.agents[p.agent], "status", p.status);
+    },
+    "agent.turn": (p) => {
+      live.agents[p.agent] = { ...live.agents[p.agent], turn: p.turn };
+      if (p.reasoning) pushAgentLog(live.agents[p.agent], "think", p.reasoning);
+      if (p.content) pushAgentLog(live.agents[p.agent], "say", p.content);
+    },
+    "tool.call": (p) => {
+      live.agents[p.agent] = { ...live.agents[p.agent], lastTool: `${p.tool}` };
+      pushAgentLog(live.agents[p.agent], "tool", `${p.tool} ${JSON.stringify(p.args ?? {}).slice(0, 300)}`);
+    },
+    "tool.result": (p) => {
+      pushAgentLog(live.agents[p.agent], "result", `${p.tool} → ${p.brief ?? ""}`);
+    },
+    "compact.auto": (p) => pushAgentLog(live.agents[p.agent], "compact", `自動圧縮(tokens=${p.tokensBefore}/閾値=${p.threshold})`),
+    "compact.micro": (p) => pushAgentLog(live.agents[p.agent], "compact", `microcompact(-${p.savingsTokens}tok)`),
+    "compact.failed": (p) => pushAgentLog(live.agents[p.agent], "compact", `圧縮失敗(${p.failures}回目): ${p.error}`),
     "agent.spawned": (p) => {
       live.agents[p.agent.id] = { status: "working", turn: 0, displayName: p.agent.displayName, depth: p.agent.depth, parent: p.agent.parent };
     },

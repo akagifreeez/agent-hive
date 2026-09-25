@@ -60,6 +60,19 @@
   #newtask input, #newtask textarea { background: #10131a; border: 1px solid #2a313b; color: #d8dce2; border-radius: 4px; padding: 4px 6px; font-size: 12px; }
   #newtask textarea { min-height: 44px; resize: vertical; }
   #newtask button { align-self: flex-end; background: #2b6cb0; border: none; color: #fff; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+  .card.clickable { cursor: pointer; }
+  .card.clickable:hover { border-color: #3a4453; }
+  .card.open-agent { border-color: #2b6cb0; }
+  .alog { margin-top: 8px; max-height: 340px; overflow-y: auto; background: #10131a; border: 1px solid #2a313b; border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+  .alog .entry { padding: 3px 0; border-bottom: 1px solid #1b2028; white-space: pre-wrap; word-break: break-word; }
+  .alog .entry:last-child { border-bottom: none; }
+  .alog .entry .k { color: #9aa4b1; margin-right: 4px; }
+  .alog .entry.think .txt { color: #9aa4b1; }
+  .alog .entry.say .txt { color: #d8dce2; }
+  .alog .entry.tool .txt, .alog .entry.result .txt { font-family: Consolas, monospace; font-size: 11px; color: #8fb8d8; }
+  .alog .entry.result .txt { color: #7fa88f; }
+  .alog .entry.compact .txt { color: #c8a7ff; font-size: 11px; }
+  .alog .hint { color: #9aa4b1; font-size: 11px; padding: 4px 0; }
 </style>
 </head>
 <body>
@@ -89,18 +102,22 @@
 const agentsEl = document.getElementById("agents");
 const postsEl = document.getElementById("posts");
 let agentOrder = [];
+let expandedAgent = null;
 
 function renderState(state) {
   const names = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ", delta: "デルタ", system: "システム" };
   agentsEl.innerHTML = "";
   for (const [id, a] of Object.entries(state.live.agents)) {
     const div = document.createElement("div");
-    div.className = "card " + (a.status ?? "");
+    const isOpen = expandedAgent === id;
+    div.className = "card clickable " + (a.status ?? "") + (isOpen ? " open-agent" : "");
     const label = a.displayName ?? names[id] ?? id;
     const hier = a.depth ? `depth ${a.depth}${a.parent ? ` / 親:${names[a.parent] ?? a.parent}` : ""}` : "メイン";
     div.innerHTML = `<span class="name">${label}</span><span class="st">${a.status ?? "idle"} / turn ${a.turn ?? 0} ${a.lastTool ? "/ " + a.lastTool : ""}</span>` +
-      `<div class="meta">${hier}${a.tokens ? ` / tokens ${a.tokens.toLocaleString()} / $${(a.costUsd ?? 0).toFixed(4)}` : ""}</div>`;
+      `<div class="meta">${hier}${a.tokens ? ` / tokens ${a.tokens.toLocaleString()} / $${(a.costUsd ?? 0).toFixed(4)}` : ""}${a.log?.length ? ` / ログ${a.log.length}件` : ""} — クリックで${isOpen ? "閉じる" : "思考と活動"}</div>`;
+    div.onclick = () => { expandedAgent = isOpen ? null : id; refresh(); };
     agentsEl.appendChild(div);
+    if (isOpen) div.appendChild(renderAgentLog(a));
   }
   renderTasks(state.taskList);
   document.getElementById("phase").textContent = state.live.scenario ? `シナリオ: ${state.live.scenario.name} [${state.live.scenario.phase}]` : "";
@@ -214,6 +231,33 @@ async function createTask() {
   refresh();
 }
 
+// エージェントの思考と活動ログ(時系列・末尾が最新。開いている間は自動で最下部へ)
+function renderAgentLog(a) {
+  const wrap = document.createElement("div");
+  wrap.className = "alog";
+  const icons = { think: "💭", say: "💬", tool: "🔧", result: "↳", status: "●", compact: "🗜" };
+  if (!a.log?.length) {
+    const h = document.createElement("div");
+    h.className = "hint";
+    h.textContent = "まだ活動がありません。稼働すると思考(💭)・発言(💬)・ツール実行(🔧)・その結果(↳)がここに流れます。";
+    wrap.appendChild(h);
+  }
+  for (const e of a.log ?? []) {
+    const d = document.createElement("div");
+    d.className = "entry " + e.kind;
+    const k = document.createElement("span");
+    k.className = "k";
+    k.textContent = icons[e.kind] ?? "•";
+    const t = document.createElement("span");
+    t.className = "txt";
+    t.textContent = e.text;
+    d.append(k, t);
+    wrap.appendChild(d);
+  }
+  requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
+  return wrap;
+}
+
 async function renderFiles() {
   const state = await (await fetch("/api/state")).json();
   const files = state.files ?? [];
@@ -278,12 +322,20 @@ async function refresh() {
 }
 
 const es = new EventSource("/events");
+// 活動イベントは高頻度なので纏めて更新(0.6秒デバウンス)
+let refreshQueued = false;
+function refreshSoon() {
+  if (refreshQueued) return;
+  refreshQueued = true;
+  setTimeout(() => { refreshQueued = false; refresh(); }, 600);
+}
 es.onmessage = (e) => {
   const { type, payload } = JSON.parse(e.data);
   if (type === "board") addPost(payload);
   if (type === "agent.spawned") refresh();
   if (type === "scenario.started" || type === "scenario.finished") refresh();
   if (type === "task.claimed" || type === "task.finished" || type === "task.created" || type === "task.released" || type === "task.cancelled" || type === "task.autoResolved") refresh();
+  if (type === "agent.turn" || type === "tool.call" || type === "tool.result" || type === "agent.status") refreshSoon();
 };
 document.getElementById("nt-add").onclick = createTask;
 document.getElementById("projfilter").onchange = (e) => { projectFilter = e.target.value; refresh(); };
