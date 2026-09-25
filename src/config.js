@@ -22,6 +22,8 @@ export function loadConfig(configPath) {
     },
     budget: { maxTokensPerRun: 2000000, ...(raw.budget ?? {}) },
     compact: { thresholdPercent: 90, keepRecentToolResults: 5, ...(raw.compact ?? {}) },
+    hierarchy: { maxDepth: 2, maxConcurrent: 6, ...(raw.hierarchy ?? {}) },
+    chat: { mains: ["alpha", "beta", "gamma"], maxTurnsPerRound: 12, ...(raw.chat ?? {}) },
     scenario: { seedFiles: [], ...raw.scenario },
   };
   cfg.model.apiKey = resolveApiKey(cfg.model);

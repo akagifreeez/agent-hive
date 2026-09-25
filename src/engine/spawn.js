@@ -1,0 +1,119 @@
+// スポーン管理(v5): エージェントが spawn_agent ツールで他エージェントを立てる。
+// 階層(メイン→サブ→作業員)は「仕事の組織化」だけに使い、コミュニケーションは
+// 全レベルが同じボードで合流する(報告は必ずボード/親への秘密チャネルは作らない)。
+import { join, resolve } from "node:path";
+import { createWorktree } from "./worktree.js";
+import { createTools } from "./tools.js";
+import { runAgentLoop, buildSystemPrompt } from "./loop.js";
+
+const WORKER_PERSONA = (displayName, role) => `# ${displayName}(スポーンされた作業エージェント/ロール: ${role})
+
+あなたはハイブで働く作業エージェントです。親エージェントからのブリーフ(最初の指示)に従って作業します。
+
+## 方針
+- ブリーフに書かれたことだけを確実にやる。範囲を広げすぎない。
+- 作ったら必ず自分で実行・確認し、結果をボードへ報告する。
+- 追加の仕事が必要になったら create_task で起票し、ボードでも告知する。
+- 困ったらボードで質問する(親に直接ではなく全員に見える形で)。
+`;
+
+export class SpawnManager {
+  constructor({
+    mainWorkspace, worktreeRoot, board, tasks, bus, gate = null, ledger = null, budget = null,
+    hierarchy = { maxDepth: 2, maxConcurrent: 6 }, modelFactory, maxTurns = 40,
+    contextWindow = 200000, thresholdPercent,
+  }) {
+    this.mainWorkspace = mainWorkspace;
+    this.worktreeRoot = worktreeRoot;
+    this.board = board;
+    this.tasks = tasks;
+    this.bus = bus;
+    this.gate = gate;
+    this.ledger = ledger;
+    this.budget = budget;
+    this.hierarchy = hierarchy;
+    this.modelFactory = modelFactory;
+    this.maxTurns = maxTurns;
+    this.contextWindow = contextWindow;
+    this.thresholdPercent = thresholdPercent;
+    this.live = new Map(); // id => {displayName, depth, parent, status}
+    this.counter = 0;
+  }
+
+  // ツールから呼ばれる。呼び出し元は待たせないので、ループは非同期で走らせる。
+  async spawn({ parent, displayName, role, brief }) {
+    const depth = (parent.depth ?? 0) + 1;
+    if (depth > this.hierarchy.maxDepth) {
+      return { error: `深さの上限(${this.hierarchy.maxDepth})に達しています。あなたの配下には作れません。` };
+    }
+    if (this.live.size >= this.hierarchy.maxConcurrent) {
+      return { error: `同時エージェント数の上限(${this.hierarchy.maxConcurrent})に達しています。既存の作業の完了を待ってください。` };
+    }
+    if (!brief || !brief.trim()) {
+      return { error: "briefが空です。何を/どう確認するかを書いてください。" };
+    }
+    const n = ++this.counter;
+    const id = `${role ?? "worker"}-${n}`;
+    const dn = displayName?.trim() || `${role ?? "worker"}-${n}`;
+    let worktreePath;
+    try {
+      worktreePath = await createWorktree({
+        mainWorkspace: this.mainWorkspace,
+        worktreeRoot: this.worktreeRoot,
+        agentId: id,
+      });
+    } catch (err) {
+      return { error: `worktreeの作成に失敗: ${err.message}` };
+    }
+    const agent = {
+      id, displayName: dn,
+      role: role ?? "impl",
+      depth, parent: parent.id,
+      personaText: WORKER_PERSONA(dn, role ?? "impl"),
+      scenarioName: "chat",
+    };
+    this.live.set(id, { displayName: dn, depth, parent: parent.id, status: "working" });
+    // ブリーフ=このエージェントの請求済みタスク。finish_taskで完了→main自動マージまで繋がる
+    this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, body: `スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
+    this.bus.emit("agent.spawned", { agent: { id, displayName: dn, depth, parent: parent.id, role: agent.role } });
+    this.board.post("system", `[スポーン] ${parent.displayName} が作業エージェント ${dn}(${id}) を作成しました。`);
+
+    // 呼び出し元をブロックしない(縦の待ちを作らない)
+    void this.runAgent(agent, worktreePath, brief.trim());
+    return { id, displayName: dn };
+  }
+
+  async runAgent(agent, worktreePath, brief) {
+    const model = this.modelFactory(agent);
+    const tools = createTools({
+      agent,
+      workspace: worktreePath,
+      mainWorkspace: this.mainWorkspace,
+      board: this.board,
+      tasks: this.tasks,
+      bus: this.bus,
+      gate: this.gate,
+      spawner: this,
+    });
+    const shellKind = await tools.detectShell();
+    const messages = [
+      { role: "system", content: buildSystemPrompt(agent, shellKind) },
+      { role: "user", content: `親(${agent.parent})からのブリーフです。これに従って作業してください:\n\n${brief}` },
+    ];
+    const r = await runAgentLoop({
+      agent, model, tools,
+      board: this.board, tasks: this.tasks, bus: this.bus,
+      ledger: this.ledger, budget: this.budget,
+      maxTurns: this.maxTurns, shellKind,
+      contextWindow: this.contextWindow, thresholdPercent: this.thresholdPercent,
+      messages,
+    });
+    const e = this.live.get(agent.id);
+    if (e) e.status = r.ok ? "done" : `ended:${r.endedBy ?? "error"}`;
+    this.bus.emit("agent.exited", { agent: agent.id, ok: r.ok, endedBy: r.endedBy ?? r.error });
+  }
+
+  snapshot() {
+    return Object.fromEntries([...this.live].map(([id, v]) => [id, v]));
+  }
+}

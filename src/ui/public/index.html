@@ -16,6 +16,12 @@
   .post.beta .from { color: #8fd6a5; }
   .post.delta .from { color: #d8a7ff; }
   .post.system .from { color: #9aa4b1; }
+  .post.you { background: #232a35; border-color: #3a4453; }
+  .post.you .from { color: #e8ecf2; }
+  .meta { font-size: 11px; color: #9aa4b1; margin-top: 2px; }
+  #saybar { display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid #262b33; position: sticky; bottom: 0; background: #14171c; }
+  #saybar input { flex: 1; background: #1b2028; border: 1px solid #2a313b; color: #d8dce2; border-radius: 6px; padding: 8px 10px; }
+  #saybar button { background: #2b6cb0; border: none; color: #fff; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
   .card { background: #1b2028; border: 1px solid #2a313b; border-radius: 8px; padding: 10px 12px; margin: 8px 12px; }
   .card .name { font-weight: bold; }
   .card .st { float: right; font-size: 12px; color: #9aa4b1; }
@@ -32,7 +38,9 @@
 </style>
 </head>
 <body>
-  <div id="board"><h1>共有ボード</h1><div class="phase" id="phase"></div><div id="permreq"></div><div id="posts"></div></div>
+  <div id="board"><h1>共有ボード</h1><div class="phase" id="phase"></div><div id="permreq"></div><div id="posts"></div>
+    <div id="saybar"><input id="saytext" placeholder="メインチャットへ指示(全メインに届く。@アルファ で個別呼び出し)"><button id="saybtn">送信</button></div>
+  </div>
   <div id="side">
     <div id="agents"></div>
     <div class="card"><div class="name">タスク</div><pre id="tasks"></pre></div>
@@ -50,8 +58,10 @@ function renderState(state) {
   for (const [id, a] of Object.entries(state.live.agents)) {
     const div = document.createElement("div");
     div.className = "card " + (a.status ?? "");
-    div.innerHTML = `<span class="name">${names[id] ?? id}</span><span class="st">${a.status ?? "idle"} / turn ${a.turn ?? 0} ${a.lastTool ? "/ " + a.lastTool : ""}</span>` +
-      `<div style="font-size:11px;color:#9aa4b1;margin-top:3px;">${a.tokens ? `tokens ${a.tokens.toLocaleString()} / $${(a.costUsd ?? 0).toFixed(4)}` : ""}</div>`;
+    const label = a.displayName ?? names[id] ?? id;
+    const hier = a.depth ? `depth ${a.depth}${a.parent ? ` / 親:${names[a.parent] ?? a.parent}` : ""}` : "メイン";
+    div.innerHTML = `<span class="name">${label}</span><span class="st">${a.status ?? "idle"} / turn ${a.turn ?? 0} ${a.lastTool ? "/ " + a.lastTool : ""}</span>` +
+      `<div class="meta">${hier}${a.tokens ? ` / tokens ${a.tokens.toLocaleString()} / $${(a.costUsd ?? 0).toFixed(4)}` : ""}</div>`;
     agentsEl.appendChild(div);
   }
   document.getElementById("tasks").textContent =
@@ -79,7 +89,8 @@ async function renderFiles() {
 function addPost(p) {
   const div = document.createElement("div");
   div.className = "post " + p.from;
-  div.innerHTML = `<div class="from">${p.from} #${p.id}</div>${escapeHtml(p.text)}`;
+  const names = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ", delta: "デルタ", system: "システム", you: "あなた" };
+  div.innerHTML = `<div class="from">${names[p.from] ?? p.from} #${p.id}</div>${escapeHtml(p.text)}`;
   postsEl.appendChild(div);
   document.getElementById("board").scrollTop = document.getElementById("board").scrollHeight;
 }
@@ -126,9 +137,21 @@ const es = new EventSource("/events");
 es.onmessage = (e) => {
   const { type, payload } = JSON.parse(e.data);
   if (type === "board") addPost(payload);
+  if (type === "agent.spawned") refresh();
   if (type === "scenario.started" || type === "scenario.finished") refresh();
-  if (type === "task.claimed" || type === "task.finished") refresh();
+  if (type === "task.claimed" || type === "task.finished" || type === "task.created") refresh();
 };
+document.getElementById("saybtn").onclick = sendSay;
+document.getElementById("saytext").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) sendSay();
+});
+async function sendSay() {
+  const el = document.getElementById("saytext");
+  const text = el.value.trim();
+  if (!text) return;
+  el.value = "";
+  await fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+}
 refresh();
 setInterval(refresh, 5000);
 </script>

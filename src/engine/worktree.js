@@ -16,17 +16,22 @@ function queueMerge(fn) {
 export async function setupWorktrees({ mainWorkspace, worktreeRoot, agents, exec = runCommand }) {
   const paths = {};
   for (const agent of agents) {
-    const path = resolve(join(worktreeRoot, agent.id));
-    const branch = `agent/${agent.id}`;
-    if (existsSync(path)) {
-      await exec({ command: `git worktree remove --force '${path}'`, cwd: mainWorkspace, outputLimit: 1000 });
-    }
-    await exec({ command: `git branch -D ${branch} 2>/dev/null || true`, cwd: mainWorkspace, outputLimit: 1000 });
-    const r = await exec({ command: `git worktree add -b ${branch} '${path}' main`, cwd: mainWorkspace, outputLimit: 2000 });
-    if (!r.ok) throw new Error(`worktree作成失敗(${agent.id}): ${r.text.slice(0, 300)}`);
-    paths[agent.id] = path;
+    paths[agent.id] = await createWorktree({ mainWorkspace, worktreeRoot, agentId: agent.id, exec });
   }
   return paths;
+}
+
+// 1エージェント分のworktreeを動的に作る(v5: スポーンされるエージェント向け)
+export async function createWorktree({ mainWorkspace, worktreeRoot, agentId, exec = runCommand }) {
+  const path = resolve(join(worktreeRoot, agentId));
+  const branch = `agent/${agentId}`;
+  if (existsSync(path)) {
+    await exec({ command: `git worktree remove --force '${path}'`, cwd: mainWorkspace, outputLimit: 1000 });
+  }
+  await exec({ command: `git branch -D ${branch} 2>/dev/null || true`, cwd: mainWorkspace, outputLimit: 1000 });
+  const r = await exec({ command: `git worktree add -b ${branch} '${path}' main`, cwd: mainWorkspace, outputLimit: 2000 });
+  if (!r.ok) throw new Error(`worktree作成失敗(${agentId}): ${r.text.slice(0, 300)}`);
+  return path;
 }
 
 export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exec = runCommand }) {
@@ -49,6 +54,6 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
       await exec({ command: "git merge --abort", cwd: mainWorkspace, outputLimit: 1000 });
       return { ok: false, conflict: true, text: m.text };
     }
-    return { ok: true, text: m.text };
+    return { ok: true, merged: !/already up to date/i.test(m.text), text: m.text };
   });
 }

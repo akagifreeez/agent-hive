@@ -28,6 +28,14 @@ export class TaskBlackboard {
     return true;
   }
 
+  // スポーンなどで最初から請求済みとしてタスクを投入する(ブリーフ=そのエージェントの担当)
+  assign({ agentId, taskId, body }) {
+    const f = join(this.claimed, `${agentId}--${taskId}.md`);
+    if (existsSync(f)) return false;
+    writeFileSync(f, `${body ?? ""}\n`);
+    return true;
+  }
+
   // 指定idのタスクがopen/claimedのどこかに存在するか(自動仕事の二重生成防止)
   existsOpenOrClaimed(id) {
     if (existsSync(join(this.open, `${id}.md`))) return true;

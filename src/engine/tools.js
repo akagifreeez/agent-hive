@@ -9,7 +9,7 @@ import { mergeAgentWork } from "./worktree.js";
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, maxBashMs = 30000 }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000 }) {
   const specs = [
     {
       name: "claim_next_task",
@@ -32,6 +32,20 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           body: { type: "string", description: "具体的な指示(何を/どう確認するか/完了条件)" },
         },
         required: ["task_id", "body"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "spawn_agent",
+      description: "作業用のサブエージェントを新規にスポーンする。briefに具体的な指示(何を/どこまで/どう確認するか)を書く。進捗はボードに流れるので、呼んだあとはボードを見ること。",
+      parameters: {
+        type: "object",
+        properties: {
+          display_name: { type: "string", description: "短い表示名(例: pad実装係)" },
+          role: { type: "string", description: "ロール(impl/review/lead等)" },
+          brief: { type: "string", description: "初期ブリーフ。スポーン後の追加指示はボード経由になるため、必要なことはすべてここに書く" },
+        },
+        required: ["brief"],
         additionalProperties: false,
       },
     },
@@ -118,6 +132,17 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const created = tasks.create({ id, role: args.role ? String(args.role) : null, body: String(args.body ?? "") });
         if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
         return { ok: true, text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"})。` };
+      }
+      case "spawn_agent": {
+        if (!spawner) return { ok: false, text: "このエージェントにはスポーン権限がありません。" };
+        const r = await spawner.spawn({
+          parent: agent,
+          displayName: args.display_name ? String(args.display_name) : undefined,
+          role: args.role ? String(args.role) : undefined,
+          brief: String(args.brief ?? ""),
+        });
+        if (r.error) return { ok: false, text: `スポーンできません: ${r.error}` };
+        return { ok: true, text: `サブエージェント ${r.id}(${r.displayName}) をスポーンしました。進捗はボードに流れます。` };
       }
       case "list_files": {
         const files = listWorkspaceFiles(safePath(args.path ?? "."));

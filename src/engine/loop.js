@@ -30,7 +30,7 @@ const COMMON_RULES = `
 `;
 
 export function buildSystemPrompt(agent, shellKind = "bash") {
-  const persona = readFileSync(agent.personaPath, "utf8").trim();
+  const persona = agent.personaText ?? readFileSync(agent.personaPath, "utf8").trim();
   return `${persona}\n${COMMON_RULES}\n## このマシンの環境\n- シェルは ${shellKind}。bashならPOSIXコマンド、cmdならWindows構文で書くこと。`;
 }
 
@@ -43,11 +43,14 @@ export async function runAgentLoop({
   ledger = null, budget = null,
   maxTurns = 30, shellKind = "bash",
   contextWindow = 200000, thresholdPercent,
+  messages = null, // 常駐エージェント(chat)は外部で保持した記憶を渡す
 }) {
-  const messages = [
-    { role: "system", content: buildSystemPrompt(agent, shellKind) },
-    { role: "user", content: buildKickoff(agent, agent.scenarioName ?? "default") },
-  ];
+  if (!messages) {
+    messages = [
+      { role: "system", content: buildSystemPrompt(agent, shellKind) },
+      { role: "user", content: buildKickoff(agent, agent.scenarioName ?? "default") },
+    ];
+  }
   let seenBoard = board.lastId();
   let nudged = false;
   let emptyStreak = 0;

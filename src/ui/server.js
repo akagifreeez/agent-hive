@@ -10,7 +10,7 @@ import { listWorkspaceFiles } from "../engine/tools.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
 
-export async function startUi({ config, modelFactory, bus, autoStart = true }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null }) {
   const live = {
     agents: Object.fromEntries(config.agents.map((a) => [a.id, { status: "idle", turn: 0, lastTool: null }])),
     board: [],
@@ -24,6 +24,12 @@ export async function startUi({ config, modelFactory, bus, autoStart = true }) {
     "agent.status": (p) => { live.agents[p.agent] = { ...live.agents[p.agent], status: p.status }; },
     "agent.turn": (p) => { live.agents[p.agent] = { ...live.agents[p.agent], turn: p.turn }; },
     "tool.call": (p) => { live.agents[p.agent] = { ...live.agents[p.agent], lastTool: `${p.tool}` }; },
+    "agent.spawned": (p) => {
+      live.agents[p.agent.id] = { status: "working", turn: 0, displayName: p.agent.displayName, depth: p.agent.depth, parent: p.agent.parent };
+    },
+    "agent.exited": (p) => {
+      if (live.agents[p.agent]) live.agents[p.agent] = { ...live.agents[p.agent], status: p.ok ? "done" : "error" };
+    },
     "usage": (p) => {
       const a = live.agents[p.usage ? p.agent : p.agent];
       const u = p.usage;
@@ -58,6 +64,21 @@ export async function startUi({ config, modelFactory, bus, autoStart = true }) {
         return;
       }
       if (url.pathname === "/api/state") return json(res, { live, tasks: tasks.snapshot(), files: listWorkspaceFiles(config.workspace) });
+      if (url.pathname === "/api/say" && req.method === "POST" && onSay) {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const { text } = JSON.parse(body);
+            if (!text || !String(text).trim()) throw new Error("空の入力です");
+            onSay(String(text).trim());
+            json(res, { ok: true });
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/permission" && req.method === "POST") {
         let body = "";
         req.on("data", (d) => (body += d));

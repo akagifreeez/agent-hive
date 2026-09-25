@@ -12,7 +12,88 @@ import { setupWorktrees } from "./engine/worktree.js";
 import { runCommand } from "./engine/exec.js";
 import { UsageLedger } from "./engine/usage.js";
 import { OpenAIModel } from "./model/openai.js";
+import { SpawnManager } from "./engine/spawn.js";
+import { ChatHost } from "./engine/chat.js";
 import { ROOT } from "./config.js";
+
+export function createModelFactory(config) {
+  return (agent = {}) =>
+    new OpenAIModel({
+      ...config.model,
+      model: agent.model ?? config.model.model,
+      reasoningEffort: agent.reasoningEffort ?? config.model.reasoningEffort,
+    });
+}
+
+// メインチャット常駐モード(v5): メイン3体+スポーンされるサブ/作業員。
+// コントローラ { say, manager } を返す(UIの入力欄からsayが呼ばれる)。
+export async function runChat({ config, bus = new Bus() }) {
+  mkdirSync(config.workspace, { recursive: true });
+  const board = new Board(bus);
+  const tasks = new TaskBlackboard(config.workspace, bus);
+  const gate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
+  const ledger = new UsageLedger();
+
+  // chat用の最小シード(package.jsonのみ)。scenarioのseedFiles/tasksは持ち込まない
+  const p = join(config.workspace, "package.json");
+  if (!existsSync(p)) {
+    writeFileSync(p, '{ "name": "hive-workspace", "private": true, "type": "module", "scripts": { "test": "node --test tests/*.test.mjs" } }\n');
+  }
+  await ensureGitRepo(config.workspace);
+
+  const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
+  const mains = config.agents
+    .filter((a) => (config.chat?.mains ?? config.agents.map((x) => x.id)).includes(a.id))
+    .map((a) => ({ ...a, depth: 0 }));
+  const worktreePaths = await setupWorktrees({ mainWorkspace: config.workspace, worktreeRoot, agents: mains });
+
+  const discovery = startDiscovery({
+    workspace: config.workspace, tasks, bus,
+    intervalSec: config.discovery?.intervalSec ?? 30,
+    testCommand: config.discovery?.testCommand,
+  });
+  bus.on("merge.completed", () => void discovery.tick());
+
+  const manager = new SpawnManager({
+    mainWorkspace: config.workspace,
+    worktreeRoot,
+    board, tasks, bus, gate, ledger,
+    budget: config.budget,
+    hierarchy: config.hierarchy,
+    modelFactory: createModelFactory(config),
+    maxTurns: config.loop.maxTurns,
+    contextWindow: config.model.contextWindow ?? 200000,
+    thresholdPercent: config.compact?.thresholdPercent,
+  });
+  const toolsFactory = (main) =>
+    createTools({
+      agent: main,
+      workspace: worktreePaths[main.id],
+      mainWorkspace: config.workspace,
+      board, tasks, bus, gate,
+      spawner: manager,
+    });
+
+  const host = new ChatHost({
+    mains,
+    mainWorkspace: config.workspace,
+    modelFactory: createModelFactory(config),
+    toolsFactory,
+    board, tasks, bus, ledger,
+    budget: config.budget,
+    maxTurnsPerRound: config.chat?.maxTurnsPerRound ?? 12,
+    contextWindow: config.model.contextWindow ?? 200000,
+    thresholdPercent: config.compact?.thresholdPercent,
+  });
+  host.worktreePaths = worktreePaths;
+
+  bus.emit("scenario.started", { name: `chat:${config.scenario.name}`, tasks: [] });
+  return {
+    say: (text) => host.say(text),
+    manager,
+    bus,
+  };
+}
 
 export async function runScenario({ config, modelFactory, bus = new Bus() }) {
   mkdirSync(config.workspace, { recursive: true });

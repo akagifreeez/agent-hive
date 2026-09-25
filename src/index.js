@@ -1,6 +1,6 @@
 import { loadConfig } from "./config.js";
 import { OpenAIModel } from "./model/openai.js";
-import { runScenario } from "./runner.js";
+import { runScenario, runChat } from "./runner.js";
 import { Bus } from "./engine/board.js";
 import { startUi } from "./ui/server.js";
 import { wireConsoleLog } from "./log.js";
@@ -9,7 +9,8 @@ function usage() {
   console.log(`agent-hive — 複数エージェントが同一ワークスペースで同時作業するハーネス
 
   node src/index.js --run     ヘッドレス実行(UI無し。結果をコンソールへ)
-  node src/index.js --serve   UI付き実行(localhost、シナリオは自動開始)`);
+  node src/index.js --serve   UI付き実行(localhost、シナリオは自動開始)
+  node src/index.js --chat    メインチャット常駐モード(UIの入力欄から指示。シナリオ自動開始なし)`);
 }
 
 async function main() {
@@ -20,6 +21,12 @@ async function main() {
   wireConsoleLog(bus);
 
   const modelFactory = () => new OpenAIModel(config.model);
+
+  if (args.includes("--chat")) {
+    const controller = await runChat({ config, bus });
+    await startUi({ config, bus, autoStart: false, onSay: (text) => controller.say(text) });
+    return;
+  }
 
   if (args.includes("--serve")) {
     await startUi({ config, modelFactory, bus });
