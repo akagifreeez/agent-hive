@@ -131,7 +131,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
     });
     host.worktreePaths = wtPaths;
-    threads.set(name, { name, goal, host });
+    threads.set(name, { name, goal, host, board: threadBoard });
     writeRegistry();
     bus.emit("thread.opened", { name, goal, agents: members.map((m) => ({ id: m.id, displayName: m.displayName })) });
     // 復元(silent)時はキックオフせず静かに開く。ユーザーが投稿したときにワーカーが起きる
@@ -150,6 +150,17 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   } catch {
     // registryが無ければ初回起動
   }
+
+  // スレッドを閉じる: 一覧から外し、ボードに告知。成果物・ログは残り、再openすれば履歴ごと戻る
+  const closeThread = ({ project }) => {
+    const name = String(project).trim();
+    const t = threads.get(name);
+    if (!t) return { error: `スレッド ${name} は開いていません` };
+    threads.delete(name);
+    writeRegistry();
+    t.board.post("system", `[スレッド終了] ${name} を閉じました。成果物とログは保持されています(再open時は履歴ごと戻ります)。`);
+    return { ok: true };
+  };
 
   // リーダー(メインチャットに1体)。壁打ち→計画→open_thread
   const leadDef = config.agents.find((a) => a.id === (config.chat?.lead ?? "lead")) ?? {};
@@ -178,6 +189,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       board: mainBoard, tasks, bus, gate,
       spawner: manager,
       threadOpener: openThread,
+      threadCloser: closeThread,
     }),
     board: mainBoard, tasks, bus, ledger,
     budget: config.budget,
@@ -200,6 +212,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       return leadHost.say(text);
     },
     openThread,
+    closeThread,
     listThreads: () => [...threads.keys()],
     manager,
     bus,

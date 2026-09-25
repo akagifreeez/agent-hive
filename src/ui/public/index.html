@@ -251,13 +251,25 @@ function renderRoomHead(state) {
   }
   const mem = $("room-members");
   mem.innerHTML = "";
+  let sumTokens = 0;
+  let sumCost = 0;
   for (const [id, a] of currentMembers(state)) {
+    sumTokens += a.tokens ?? 0;
+    sumCost += a.costUsd ?? 0;
     const chip = document.createElement("span");
     chip.className = "member" + (selectedAgent === id ? " sel" : "");
     chip.innerHTML = `<span class="dot ${(a.status ?? "idle").replace(/\s/g, "")}"></span>${escapeHtml(a.displayName ?? NAMES[id] ?? id)}`;
     chip.title = `${a.status ?? "idle"} / turn ${a.turn ?? 0} — クリックで思考と活動`;
     chip.onclick = () => { selectedAgent = selectedAgent === id ? null : id; ctxTab = "agents"; renderAll(); };
     mem.appendChild(chip);
+  }
+  if (sumTokens > 0) {
+    const s = document.createElement("span");
+    s.className = "member";
+    s.style.cursor = "default";
+    s.innerHTML = `Σ ${sumTokens.toLocaleString()}tok / $${sumCost.toFixed(4)}`;
+    s.title = "このスレッドのメンバーの合計消費";
+    mem.appendChild(s);
   }
   const hint = $("composer-hint");
   hint.textContent = selectedThread === "__main__"
