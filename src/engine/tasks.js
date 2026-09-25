@@ -103,6 +103,27 @@ export class TaskBlackboard {
     }));
   }
 
+  // 担当者が消える終わり方(予算停止/エラー/継続不能)のとき、請求中をopenへ戻す。
+  // 戻さないとタスクが請求者ごと凍結され、誰にも再開されない(発見器も「未解決あり」と扱う)。
+  release(agentId, note = null) {
+    const files = readdirSync(this.claimed).filter((f) => f.startsWith(`${agentId}--`) && f.endsWith(".md"));
+    const released = [];
+    for (const f of files) {
+      const taskId = f.replace(/\.md$/, "").slice(agentId.length + 2);
+      const src = join(this.claimed, f);
+      const dst = join(this.open, `${taskId}.md`);
+      try {
+        if (note) appendNote(src, note);
+        renameSync(src, dst);
+        this.bus?.emit("task.released", { agent: agentId, taskId });
+        released.push(taskId);
+      } catch {
+        // 先に他者が動いた場合等。次のファイルへ。
+      }
+    }
+    return released;
+  }
+
   snapshot() {
     const list = (dir) => readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
     return { open: list(this.open), claimed: list(this.claimed), done: list(this.done) };

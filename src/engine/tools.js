@@ -37,13 +37,13 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "spawn_agent",
-      description: "作業用のサブエージェントを新規にスポーンする。briefに具体的な指示(何を/どこまで/どう確認するか)を書く。進捗はボードに流れるので、呼んだあとはボードを見ること。",
+      description: "作業用のサブエージェントを新規にスポーンする。briefに目標・完了条件・一意の指示を書く。ボード経過や完了タスクなどの共有素材は労働者側が gather_context で自分で読むので転写不要。スポーン後の追加指示はボード経由になる。",
       parameters: {
         type: "object",
         properties: {
           display_name: { type: "string", description: "短い表示名(例: pad実装係)" },
           role: { type: "string", description: "ロール(impl/review/lead等)" },
-          brief: { type: "string", description: "初期ブリーフ。スポーン後の追加指示はボード経由になるため、必要なことはすべてここに書く" },
+          brief: { type: "string", description: "初期ブリーフ。目標・完了条件・このタスク固有の指示のみ。共有素材は労働者が gather_context で読む" },
         },
         required: ["brief"],
         additionalProperties: false,
@@ -83,6 +83,19 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       name: "wait_for_board",
       description: "他エージェントのボード投稿を待つ(最大180秒)。完了報告待ち等に使う。タイムアウト時はその旨が返る。",
       parameters: { type: "object", properties: { timeout_sec: { type: "number", description: "省略時60秒、最大180秒" } }, additionalProperties: false },
+    },
+    {
+      name: "gather_context",
+      description: "作業に必要な生素材を読む: source=\"board\"=ボードの全経過、\"done\"=完了タスクの本文、\"open\"=未着手タスクの本文。今のタスクに必要な前提を自分で集めるときに使う(読み取り時キュレーション)。",
+      parameters: {
+        type: "object",
+        properties: {
+          source: { type: "string", enum: ["board", "done", "open"] },
+          limit: { type: "number", description: "最大件数(既定20)" },
+        },
+        required: ["source"],
+        additionalProperties: false,
+      },
     },
   ];
 
@@ -143,6 +156,36 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         });
         if (r.error) return { ok: false, text: `スポーンできません: ${r.error}` };
         return { ok: true, text: `サブエージェント ${r.id}(${r.displayName}) をスポーンしました。進捗はボードに流れます。` };
+      }
+      case "gather_context": {
+        const source = String(args.source ?? "board");
+        const limit = clamp(Number(args.limit ?? 20), 1, 100);
+        const GATHER_LIMIT = 12000;
+        if (source === "board") {
+          const posts = board.posts.slice(-limit);
+          if (!posts.length) return { ok: true, text: "ボードに投稿はまだありません。" };
+          const text = posts.map((p) => `[${p.from}] #${p.id}\n${p.text}`).join("\n---\n");
+          return { ok: true, text: `ボード経過(${posts.length}件・末尾ほど新しい):\n${text.slice(-GATHER_LIMIT)}` };
+        }
+        const dir = join(mainWorkspace ?? workspace, "tasks", source === "done" ? "done" : "open");
+        let files = [];
+        try {
+          files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+        } catch {
+          return { ok: true, text: "タスクボードは空です。" };
+        }
+        const picked = files.slice(-limit);
+        const bodies = picked.map((f) => {
+          let body = "";
+          try {
+            body = readFileSync(join(dir, f), "utf8").trim();
+          } catch {
+            // 読めないファイルは飛ばす
+          }
+          return `## ${f.replace(/\.md$/, "")}\n${body.slice(0, 2500)}`;
+        });
+        if (!picked.length) return { ok: true, text: `${source}タスクはありません。` };
+        return { ok: true, text: `${source === "done" ? "完了タスク" : "未着手タスク"}(${picked.length}/${files.length}件):\n\n${bodies.join("\n\n")}`.slice(0, GATHER_LIMIT + 500) };
       }
       case "list_files": {
         const files = listWorkspaceFiles(safePath(args.path ?? "."));

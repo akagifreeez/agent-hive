@@ -118,17 +118,25 @@ test("idle強制終了: claim失敗×3でendedBy=idle", async () => {
   cleanup(ws);
 });
 
-// 予算ブレーキ: ラン合計が上限超で即終了
-test("予算ブレーキ: maxTokensPerRun超過でendedBy=budget", async () => {
+// 予算ブレーキ: このラン(ループ実行)の消費が上限超で即終了。セッション累積には連動しない
+test("予算ブレーキ: このランの消費で判定し、他エージェントの累積は影響しない", async () => {
   const ws = mktmp();
   const { board, tasks, bus } = makeEnv(ws);
   const agent = { id: "alpha", displayName: "アルファ", role: "impl", personaPath: PERSONA };
   const tools = createTools({ agent, workspace: ws, board, tasks, bus });
   const ledger = new UsageLedger();
-  ledger.add("other", { promptTokens: 5000, completionTokens: 100 });
-  const model = scriptedModel([{ toolCalls: [{ name: "claim_next_task" }] }]);
-  const r = await runAgentLoop({ agent, model, tools, board, tasks, bus, ledger, budget: { maxTokensPerRun: 1000 }, maxTurns: 10 });
-  assert.equal(r.endedBy, "budget");
+  ledger.add("other", { promptTokens: 999999, completionTokens: 0 }); // セッション累積には乗っている
+
+  // 自分のランが軽ければ予算に達しない(常駐chatが使い切りでbrickしない仕組みの根拠)
+  const light = scriptedModel([{ text: "軽い応答", usage: { promptTokens: 100, completionTokens: 10 } }]);
+  const rA = await runAgentLoop({ agent, model: light, tools, board, tasks, bus, ledger, budget: { maxTokensPerRun: 1000 }, maxTurns: 3 });
+  assert.equal(rA.ok, true);
+  assert.notEqual(rA.endedBy, "budget");
+
+  // 自分のランが重ければ予算で停止
+  const heavy = scriptedModel([{ toolCalls: [{ name: "claim_next_task" }], usage: { promptTokens: 900, completionTokens: 200 } }]);
+  const rB = await runAgentLoop({ agent, model: heavy, tools, board, tasks, bus, ledger, budget: { maxTokensPerRun: 1000 }, maxTurns: 10 });
+  assert.equal(rB.endedBy, "budget");
   cleanup(ws);
 });
 

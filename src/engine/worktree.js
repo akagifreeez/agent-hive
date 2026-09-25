@@ -12,10 +12,21 @@ function queueMerge(fn) {
   return p;
 }
 
-// 毎ランfreshに張り直す(前回のブランチ残骸を掃除)
-export async function setupWorktrees({ mainWorkspace, worktreeRoot, agents, exec = runCommand }) {
+// 毎ランfreshに張り直す(前回のブランチ残骸を掃除)。ただしworktree内に未コミット変更が
+// ある場合は無音に壊さない——保持してonKeptで告知し、引き継ぎ判断を外に見せる。
+export async function setupWorktrees({ mainWorkspace, worktreeRoot, agents, exec = runCommand, onKept = null }) {
   const paths = {};
   for (const agent of agents) {
+    const path = resolve(join(worktreeRoot, agent.id));
+    if (existsSync(path)) {
+      const st = await exec({ command: "git status --porcelain", cwd: path, outputLimit: 2000 });
+      const dirty = st.ok && st.text.split("\n").slice(1).some((l) => l.trim());
+      if (dirty) {
+        paths[agent.id] = path;
+        onKept?.({ agentId: agent.id, path, detail: st.text.slice(0, 800) });
+        continue;
+      }
+    }
     paths[agent.id] = await createWorktree({ mainWorkspace, worktreeRoot, agentId: agent.id, exec });
   }
   return paths;

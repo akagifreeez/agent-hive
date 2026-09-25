@@ -14,7 +14,7 @@ function makeWorkspace() {
   return mkdtempSync(join(tmpdir(), "hive-wt-"));
 }
 
-test("setupWorktrees: エージェントごとのworktree+ブランチを作り、再実行でも新鮮に張り直す", async () => {
+test("setupWorktrees: クリーンならfreshに張り直し、未コミット変更は保持+onKept告知", async () => {
   const ws = makeWorkspace();
   const bus = new Bus();
   await ensureGitRepo(ws);
@@ -22,14 +22,20 @@ test("setupWorktrees: エージェントごとのworktree+ブランチを作り�
   const agents = [{ id: "alpha" }, { id: "beta" }];
   const p1 = await setupWorktrees({ mainWorkspace: ws, worktreeRoot: root, agents });
   assert.ok(existsSync(p1.alpha));
-  const br = await runCommand({ command: "git branch --list agent/alpha", cwd: ws, outputLimit: 500 });
-  assert.match(br.text, /agent\/alpha/);
-  // ベースラインの内容が入っている(シード相当)
   assert.ok(existsSync(join(p1.alpha, ".gitignore")));
-  // 再実行(毎ランfresh)
-  writeFileSync(join(p1.alpha, "stale.txt"), "前回ランの残骸");
-  const p2 = await setupWorktrees({ mainWorkspace: ws, worktreeRoot: root, agents });
-  assert.equal(existsSync(join(p2.alpha, "stale.txt")), false);
+  // alphaはクリーン(コミットだけ) → 再実行でブランチごとfreshになる
+  await runCommand({ command: "git -c user.name=t -c user.email=t@t commit -q --allow-empty -m old-work", cwd: p1.alpha, outputLimit: 500 });
+  // betaは未コミットの下書き → 無音に壊さず保持する
+  writeFileSync(join(p1.beta, "draft.md"), "未コミットの下書き");
+  const kept = [];
+  const p2 = await setupWorktrees({
+    mainWorkspace: ws, worktreeRoot: root, agents,
+    onKept: (k) => kept.push(k),
+  });
+  const log = await runCommand({ command: "git log --oneline agent/alpha", cwd: ws, outputLimit: 500 });
+  assert.doesNotMatch(log.text, /old-work/); // クリーンなブランチ残骸は掃除
+  assert.equal(existsSync(join(p2.beta, "draft.md")), true); // 未コミット変更は保持
+  assert.deepEqual(kept.map((k) => k.agentId), ["beta"]);
   rmSync(ws, { recursive: true, force: true });
   rmSync(root, { recursive: true, force: true });
 });
