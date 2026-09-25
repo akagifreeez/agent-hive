@@ -18,21 +18,22 @@ export class TaskBlackboard {
     for (const t of tasks ?? []) this.create(t);
   }
 
-  // 発見器などが直接タスクを投入する
-  create({ id, role, body }) {
+  // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ
+  create({ id, role, body, project = "" }) {
     const f = join(this.open, `${id}.md`);
     if (existsSync(f)) return false;
-    const roleLine = role ? `role: ${role}\n` : "";
-    writeFileSync(f, `${roleLine}\n${body ?? ""}\n`);
+    const meta = metaLines(project, role);
+    writeFileSync(f, `${meta}\n${body ?? ""}\n`);
     this.bus?.emit("task.created", { taskId: id });
     return true;
   }
 
   // スポーンなどで最初から請求済みとしてタスクを投入する(ブリーフ=そのエージェントの担当)
-  assign({ agentId, taskId, body }) {
+  assign({ agentId, taskId, body, project = "" }) {
     const f = join(this.claimed, `${agentId}--${taskId}.md`);
     if (existsSync(f)) return false;
-    writeFileSync(f, `${body ?? ""}\n`);
+    const meta = metaLines(project, null);
+    writeFileSync(f, `${meta}\n${body ?? ""}\n`);
     return true;
   }
 
@@ -62,12 +63,14 @@ export class TaskBlackboard {
     return false;
   }
 
-  // roleが一致するタスクを優先して請求。一致が無ければrole指定なしのタスク。どちらも無ければnull。
-  claim(agent) {
-    const files = readdirSync(this.open).filter((f) => f.endsWith(".md")).sort();
+  // role一致を優先して請求(無ければrole指定なし)。opts.projectで文脈(プロジェクト)を絞れる——
+  // 指定した文脈のタスクだけを請求対象にするので、別の取り組みのタスクと混ざらない。
+  claim(agent, opts = {}) {
+    const all = readdirSync(this.open).filter((f) => f.endsWith(".md")).sort();
+    const files = opts.project ? all.filter((f) => readMeta(join(this.open, f)).project === opts.project) : all;
     for (const pass of [(r) => r === agent.role, (r) => r === null]) {
       for (const f of files) {
-        if (!pass(readRole(join(this.open, f)))) continue;
+        if (!pass(readMeta(join(this.open, f)).role)) continue;
         const src = join(this.open, f);
         const dst = join(this.claimed, `${agent.id}--${f}`);
         try {
@@ -129,13 +132,15 @@ export class TaskBlackboard {
     return { open: list(this.open), claimed: list(this.claimed), done: list(this.done) };
   }
 
-  // UIのタスク管理パネル用。1件ごとに状態/担当/要約/ファイルパスを返す(本文は必要時のみ取得)
+  // UIのタスク管理パネル用。1件ごとに状態/担当/文脈/要約/ファイルパスを返す(本文は必要時のみ取得)
   list() {
-    const splitRole = (raw) => {
-      const nl = raw.indexOf("\n");
-      const head = nl === -1 ? raw : raw.slice(0, nl);
-      if (head.startsWith("role: ")) return { role: head.slice(6).trim() || null, body: raw.slice(nl + 1) };
-      return { role: null, body: raw };
+    // メタ行(role:/project:)と空行を除いた本文
+    const bodyOf = (raw) => {
+      const lines = raw.split("\n");
+      let i = 0;
+      while (i < lines.length && lines[i].trim()) i++;
+      if (i < lines.length) i++;
+      return lines.slice(i).join("\n");
     };
     // 要約は最初の実質行([解放]等のシステムノートは飛ばす)
     const summarize = (body) => {
@@ -143,22 +148,43 @@ export class TaskBlackboard {
       return line.trim().slice(0, 90);
     };
     const open = readdirSync(this.open).filter((f) => f.endsWith(".md")).sort().map((f) => {
-      const { role, body } = splitRole(readFileSync(join(this.open, f), "utf8"));
-      return { state: "open", id: f.replace(/\.md$/, ""), agent: null, role, summary: summarize(body), path: `tasks/open/${f}` };
+      const meta = readMeta(join(this.open, f));
+      return { state: "open", id: f.replace(/\.md$/, ""), agent: null, role: meta.role, project: meta.project, summary: summarize(bodyOf(readFileSync(join(this.open, f), "utf8"))), path: `tasks/open/${f}` };
     });
     const claimed = readdirSync(this.claimed).filter((f) => f.endsWith(".md")).sort().map((f) => {
-      const { role, body } = splitRole(readFileSync(join(this.claimed, f), "utf8"));
+      const meta = readMeta(join(this.claimed, f));
       const base = f.replace(/\.md$/, "");
       const idx = base.indexOf("--");
-      return { state: "claimed", id: base.slice(idx + 2), agent: base.slice(0, idx), role, summary: summarize(body), path: `tasks/claimed/${f}` };
+      return { state: "claimed", id: base.slice(idx + 2), agent: base.slice(0, idx), role: meta.role, project: meta.project, summary: summarize(bodyOf(readFileSync(join(this.claimed, f), "utf8"))), path: `tasks/claimed/${f}` };
     });
     const done = readdirSync(this.done).filter((f) => f.endsWith(".md")).sort().map((f) => {
-      const { body } = splitRole(readFileSync(join(this.done, f), "utf8"));
       const base = f.replace(/\.md$/, "");
       const idx = base.indexOf("--");
-      return { state: "done", id: base.slice(idx + 2), agent: base.slice(0, idx), role: null, summary: summarize(body), path: `tasks/done/${f}` };
+      return { state: "done", id: base.slice(idx + 2), agent: base.slice(0, idx), role: null, project: readMeta(join(this.done, f)).project, summary: summarize(bodyOf(readFileSync(join(this.done, f), "utf8"))), path: `tasks/done/${f}` };
     });
     return { open, claimed, done };
+  }
+
+  // 文脈(プロジェクト)の付け替え。既存タスクを後からグルーピングする(UIの[移動])。
+  // relPathはlist()が返す tasks/<state>/<file>.md 形式のみ許容(脱出防止)。
+  setProject(relPath, project) {
+    const m = String(relPath ?? "").match(/^tasks[\\/](open|claimed|done)[\\/]([A-Za-z0-9._-]+\.md)$/);
+    if (!m) return false;
+    const file = join(this.dir, m[1], m[2]);
+    const proj = String(project ?? "").trim().replace(/[\r\n]/g, "").slice(0, 60);
+    try {
+      const lines = readFileSync(file, "utf8").split("\n");
+      let i = 0;
+      const metaBlock = [];
+      while (i < lines.length && lines[i].trim()) metaBlock.push(lines[i++]);
+      if (i < lines.length) i++; // メタの後の空行を飛ばす
+      const kept = metaBlock.filter((l) => !l.startsWith("project: "));
+      const head = [...(proj ? [`project: ${proj}`] : []), ...kept];
+      writeFileSync(file, (head.length ? [...head, ""] : []).concat(lines.slice(i)).join("\n"));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // 1件だけ解放(claimed→open)。UIからの個別解放用(releaseは担当者の全件)
@@ -207,14 +233,30 @@ export class TaskBlackboard {
   }
 }
 
-function readRole(file) {
+// メタ行(role:/project:)は先頭の空行までに置く。旧形式(role行のみ)も読める。
+// tools.jsのgather_context絞込でも使うのでexportする。
+export function readMeta(file) {
   try {
-    const head = readFileSync(file, "utf8").split("\n", 1)[0];
-    const m = head.match(/^role:\s*(\S+)/);
-    return m ? m[1] : null;
+    const meta = { role: null, project: "" };
+    for (const l of readFileSync(file, "utf8").split("\n")) {
+      if (!l.trim()) break;
+      const r = l.match(/^role:\s*(.+)$/);
+      if (r) meta.role = r[1].trim() || null;
+      const p = l.match(/^project:\s*(.+)$/);
+      if (p) meta.project = p[1].trim();
+    }
+    return meta;
   } catch {
-    return null;
+    return { role: null, project: "" };
   }
+}
+
+function metaLines(project, role) {
+  const lines = [];
+  const proj = String(project ?? "").trim().replace(/[\r\n]/g, "");
+  if (proj) lines.push(`project: ${proj.slice(0, 60)}`);
+  if (role) lines.push(`role: ${role}`);
+  return lines.length ? lines.join("\n") + "\n" : "";
 }
 
 function appendNote(file, note) {

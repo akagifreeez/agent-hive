@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TaskBlackboard } from "../src/engine/tasks.js";
+import { TaskBlackboard, readMeta } from "../src/engine/tasks.js";
 import { Board, Bus } from "../src/engine/board.js";
 import { createTools } from "../src/engine/tools.js";
 
@@ -140,5 +140,75 @@ test("cancel/reopen: open→中止→done、再開でopenへ。二重再開は�
   assert.match(readFileSync(join(ws, "tasks/open/t1.md"), "utf8"), /再開/);
   // doneからは消えているので再openはもうできない(openに同名もあるし)
   assert.equal(tasks.reopen("t1"), false);
+  rmSync(ws, { recursive: true, force: true });
+});
+
+test("project: 作成時に文脈を付け、claimは文脈で絞れる(混ざらない)", () => {
+  const ws = mktmp();
+  const tasks = new TaskBlackboard(ws);
+  tasks.create({ id: "a-kernel", role: "impl", project: "cuda", body: "CUDAの仕事" });
+  tasks.create({ id: "web-ui", role: "impl", body: "別の取り組みの仕事" });
+
+  const got = tasks.claim({ id: "alpha", role: "impl" }, { project: "cuda" });
+  assert.equal(got.id, "a-kernel");
+  assert.equal(tasks.snapshot().open.includes("web-ui.md"), true); // 別文脈は残る
+  assert.equal(tasks.claim({ id: "beta", role: "impl" }, { project: "cuda" }), null); // cudaは空
+  const got2 = tasks.claim({ id: "beta", role: "impl" }); // 指定なしなら従来どおり何でも
+  assert.equal(got2.id, "web-ui");
+
+  const l = tasks.list();
+  assert.equal(l.claimed.find((t) => t.id === "a-kernel").project, "cuda");
+  assert.equal(l.done.find((t) => t.id === "web-ui")?.project ?? l.claimed.find((t) => t.id === "web-ui").project, "");
+  rmSync(ws, { recursive: true, force: true });
+});
+
+test("project: 旧形式ファイル(role行のみ)も読める", () => {
+  const ws = mktmp();
+  const tasks = new TaskBlackboard(ws);
+  tasks.seed([{ id: "t1", role: "review", body: "旧形式のタスク" }]);
+  assert.equal(readMeta(join(ws, "tasks/open/t1.md")).role, "review");
+  assert.equal(readMeta(join(ws, "tasks/open/t1.md")).project, "");
+  const got = tasks.claim({ id: "gamma", role: "review" }, { project: "" });
+  assert.equal(got.id, "t1");
+  rmSync(ws, { recursive: true, force: true });
+});
+
+test("setProject: 後から文脈を付け替え。role行は保持、不正パスは拒否", () => {
+  const ws = mktmp();
+  const tasks = new TaskBlackboard(ws);
+  tasks.seed([{ id: "t1", role: "impl", body: "本文はそのまま残る" }]);
+  const p = "tasks/open/t1.md";
+  assert.equal(tasks.setProject(p, "cuda"), true);
+  const l = tasks.list();
+  assert.equal(l.open[0].project, "cuda");
+  assert.equal(l.open[0].role, "impl");
+  assert.match(readFileSync(join(ws, "tasks/open/t1.md"), "utf8"), /本文はそのまま残る/);
+  // 再度付け替えると既存project行は置き換わる(重複しない)
+  assert.equal(tasks.setProject(p, "hive"), true);
+  const meta = readMeta(join(ws, "tasks/open/t1.md"));
+  assert.equal(meta.project, "hive");
+  assert.equal(meta.role, "impl");
+  // 未分類へ戻す(空文字)
+  assert.equal(tasks.setProject(p, ""), true);
+  assert.equal(readMeta(join(ws, "tasks/open/t1.md")).project, "");
+  // 脱出パスは拒否
+  assert.equal(tasks.setProject("tasks/../../evil.md", "x"), false);
+  assert.equal(tasks.setProject("tasks/open/sub/evil.md", "x"), false);
+  rmSync(ws, { recursive: true, force: true });
+});
+
+test("gather_context: projectで絞り込める", async () => {
+  const ws = mktmp();
+  const bus = new Bus();
+  const board = new Board(bus);
+  const tasks = new TaskBlackboard(ws, bus);
+  const tools = createTools({ agent: AGENT, workspace: ws, mainWorkspace: ws, board, tasks, bus });
+  tasks.create({ id: "cuda-t", project: "cuda", body: "CUDAタスクの本文" });
+  tasks.create({ id: "other-t", body: "よそ者の本文" });
+  const r = await tools.execute("gather_context", { source: "open", project: "cuda" });
+  assert.match(r.text, /CUDAタスクの本文/);
+  assert.doesNotMatch(r.text, /よそ者の本文/);
+  const r2 = await tools.execute("gather_context", { source: "open", project: "nosuch" });
+  assert.match(r2.text, /nosuch/);
   rmSync(ws, { recursive: true, force: true });
 });

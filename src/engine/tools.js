@@ -5,6 +5,7 @@ import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from "n
 import { resolve, join, dirname, sep } from "node:path";
 import { runCommand, detectShell } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
+import { readMeta } from "./tasks.js";
 
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
@@ -13,8 +14,14 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
   const specs = [
     {
       name: "claim_next_task",
-      description: "タスクボードから自分が担当できる次のタスクを1件請求(claim)する。成功でタスク本文、無ければ『請求できるタスクはありません』が返る。",
-      parameters: { type: "object", properties: {}, additionalProperties: false },
+      description: "タスクボードから自分が担当できる次のタスクを1件請求(claim)する。成功でタスク本文、無ければ『請求できるタスクはありません』が返る。projectを指定するとその文脈のタスクだけを対象にする(別の取り組みの仕事を混ぜない)。",
+      parameters: {
+        type: "object",
+        properties: {
+          project: { type: "string", description: "文脈(プロジェクト)名。自分の担当する取り組みのタスクに絞るときに指定" },
+        },
+        additionalProperties: false,
+      },
     },
     {
       name: "finish_task",
@@ -23,12 +30,13 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "create_task",
-      description: "新しい仕事をタスクボードへ投入する。レビュー指摘の修正など後続の仕事を生んだときに使う。task_idは英小文字数字とハイフン。",
+      description: "新しい仕事をタスクボードへ投入する。レビュー指摘の修正など後続の仕事を生んだときに使う。task_idは英小文字数字とハイフン。projectに文脈(取り組み名)を付けると、その取り組みのタスクとしてグルーピングされる。",
       parameters: {
         type: "object",
         properties: {
           task_id: { type: "string" },
           role: { type: "string", description: "担当ロール(impl/review/lead等)。省略で誰でも可" },
+          project: { type: "string", description: "文脈(プロジェクト)名。関連する取り組みに統一" },
           body: { type: "string", description: "具体的な指示(何を/どう確認するか/完了条件)" },
         },
         required: ["task_id", "body"],
@@ -37,12 +45,13 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "spawn_agent",
-      description: "作業用のサブエージェントを新規にスポーンする。briefに目標・完了条件・一意の指示を書く。ボード経過や完了タスクなどの共有素材は労働者側が gather_context で自分で読むので転写不要。スポーン後の追加指示はボード経由になる。",
+      description: "作業用のサブエージェントを新規にスポーンする。briefに目標と完了条件を書く。ボード経過や完了タスクなどの共有素材は労働者側が gather_context で自分で読むので転写不要。スポーン後の追加指示はボード経由になる。",
       parameters: {
         type: "object",
         properties: {
           display_name: { type: "string", description: "短い表示名(例: pad実装係)" },
           role: { type: "string", description: "ロール(impl/review/lead等)" },
+          project: { type: "string", description: "文脈(プロジェクト)名。労働者が追加のタスクを請求するときの絞込に使われる" },
           brief: { type: "string", description: "初期ブリーフ。目標・完了条件・このタスク固有の指示のみ。共有素材は労働者が gather_context で読む" },
         },
         required: ["brief"],
@@ -86,12 +95,13 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "gather_context",
-      description: "作業に必要な生素材を読む: source=\"board\"=ボードの全経過、\"done\"=完了タスクの本文、\"open\"=未着手タスクの本文。今のタスクに必要な前提を自分で集めるときに使う(読み取り時キュレーション)。",
+      description: "作業に必要な生素材を読む: source=\"board\"=ボードの全経過、\"done\"=完了タスクの本文、\"open\"=未着手タスクの本文。今のタスクに必要な前提を自分で集めるときに使う(読み取り時キュレーション)。projectで絞り込める。",
       parameters: {
         type: "object",
         properties: {
           source: { type: "string", enum: ["board", "done", "open"] },
           limit: { type: "number", description: "最大件数(既定20)" },
+          project: { type: "string", description: "文脈(プロジェクト)名で絞込(done/openのみ有効)" },
         },
         required: ["source"],
         additionalProperties: false,
@@ -110,8 +120,17 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
   async function dispatch(name, args) {
     switch (name) {
       case "claim_next_task": {
-        const t = tasks.claim(agent);
-        if (!t) return { ok: true, claimMiss: true, text: "請求できるタスクはありません。" };
+        const opts = args.project ? { project: String(args.project) } : {};
+        const t = tasks.claim(agent, opts);
+        if (!t) {
+          return {
+            ok: true,
+            claimMiss: true,
+            text: args.project
+              ? `請求できるタスクはありません(project: ${args.project} のタスクは無いか、全て完了済み)。`
+              : "請求できるタスクはありません。",
+          };
+        }
         return { ok: true, text: `タスク ${t.id} を請求しました。\n\n${t.body}` };
       }
       case "finish_task": {
@@ -142,9 +161,9 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
           return { ok: false, text: "task_idは英小文字数字とハイフンで付けてください。" };
         }
-        const created = tasks.create({ id, role: args.role ? String(args.role) : null, body: String(args.body ?? "") });
+        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? "") });
         if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
-        return { ok: true, text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"})。` };
+        return { ok: true, text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""})。` };
       }
       case "spawn_agent": {
         if (!spawner) return { ok: false, text: "このエージェントにはスポーン権限がありません。" };
@@ -152,6 +171,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           parent: agent,
           displayName: args.display_name ? String(args.display_name) : undefined,
           role: args.role ? String(args.role) : undefined,
+          project: args.project ? String(args.project) : "",
           brief: String(args.brief ?? ""),
         });
         if (r.error) return { ok: false, text: `スポーンできません: ${r.error}` };
@@ -160,6 +180,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       case "gather_context": {
         const source = String(args.source ?? "board");
         const limit = clamp(Number(args.limit ?? 20), 1, 100);
+        const project = args.project ? String(args.project) : null;
         const GATHER_LIMIT = 12000;
         if (source === "board") {
           const posts = board.posts.slice(-limit);
@@ -170,7 +191,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const dir = join(mainWorkspace ?? workspace, "tasks", source === "done" ? "done" : "open");
         let files = [];
         try {
-          files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+          files = readdirSync(dir).filter((f) => f.endsWith(".md")).filter((f) => !project || readMeta(join(dir, f)).project === project).sort();
         } catch {
           return { ok: true, text: "タスクボードは空です。" };
         }
@@ -184,8 +205,10 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           }
           return `## ${f.replace(/\.md$/, "")}\n${body.slice(0, 2500)}`;
         });
-        if (!picked.length) return { ok: true, text: `${source}タスクはありません。` };
-        return { ok: true, text: `${source === "done" ? "完了タスク" : "未着手タスク"}(${picked.length}/${files.length}件):\n\n${bodies.join("\n\n")}`.slice(0, GATHER_LIMIT + 500) };
+        if (!picked.length) {
+          return { ok: true, text: project ? `${source}タスクはありません(project: ${project})。` : `${source}タスクはありません。` };
+        }
+        return { ok: true, text: `${source === "done" ? "完了タスク" : "未着手タスク"}${project ? `(project: ${project})` : ""}(${picked.length}/${files.length}件):\n\n${bodies.join("\n\n")}`.slice(0, GATHER_LIMIT + 500) };
       }
       case "list_files": {
         const files = listWorkspaceFiles(safePath(args.path ?? "."));
