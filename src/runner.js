@@ -46,7 +46,15 @@ export async function runChat({ config, bus = new Bus() }) {
   const mains = config.agents
     .filter((a) => (config.chat?.mains ?? config.agents.map((x) => x.id)).includes(a.id))
     .map((a) => ({ ...a, depth: 0 }));
-  const worktreePaths = await setupWorktrees({ mainWorkspace: config.workspace, worktreeRoot, agents: mains });
+  const worktreePaths = await setupWorktrees({
+    mainWorkspace: config.workspace,
+    worktreeRoot,
+    agents: mains,
+    onKept: ({ agentId, path, detail }) => {
+      bus.emit("worktree.kept", { agent: agentId, path });
+      board.post("system", `[worktree保持] worktrees/${agentId} に前回実行の未コミット変更があるため初期化をスキップしました。引き継ぐ場合はそのまま作業するか、確定させてください。\n\n${detail}`);
+    },
+  });
 
   // 永続記憶(memory/)は毎回読み直す(distill-learningsの反映を次ラウンドから効かせる)
   const memoryFn = () => buildMemoryContext(config.workspace);
@@ -119,7 +127,15 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
 
   // v3: エージェント別worktree(作業の隔離)
   const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
-  const worktreePaths = await setupWorktrees({ mainWorkspace: config.workspace, worktreeRoot, agents: config.agents });
+  const worktreePaths = await setupWorktrees({
+    mainWorkspace: config.workspace,
+    worktreeRoot,
+    agents: config.agents,
+    onKept: ({ agentId, path, detail }) => {
+      bus.emit("worktree.kept", { agent: agentId, path });
+      board.post("system", `[worktree保持] worktrees/${agentId} に前回実行の未コミット変更があるため初期化をスキップしました。\n\n${detail}`);
+    },
+  });
   bus.emit("worktrees.ready", { paths: Object.values(worktreePaths) });
 
   const discovery = startDiscovery({

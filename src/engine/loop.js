@@ -25,6 +25,7 @@ const COMMON_RULES = `
 - 進行予告だけの投稿をしない(「作成します」等)。成果が出てから報告する。
 - 自分の担当タスクを完了したら finish_task を必ず呼ぶ。最後のテキスト出力は総括として短く。
 - 他エージェントの投稿([ボード新着])が届いたら、自分の仕事に関係するものは必ず踏まえる。
+- 自分より前の経過が必要なときは gather_context でボードの全経過・完了タスクを読める。セッションをまたいだ決め事はシステムプロンプトの永続記憶(memory/)にある。
 - wait_for_board で起床したら、期待する報告(完了報告など)が揃っているか確認し、揃うまで再度待ってよい。
 - bashで拒否されたコマンドは、理由を読んで安全な別手段に切り替えること(再試行しない)。
 `;
@@ -73,12 +74,23 @@ export async function runAgentLoop({
   let claimMisses = 0;
   let autocompactFailures = 0;
   let lastPromptTokens = 0;
+  let runTokens = 0; // このラン(ループ実行)自体の消費。予算判定はラン単位(セッション累積だと常駐chatが使い切りで brick する)
   bus.emit("agent.status", { agent: agent.id, status: "working" });
 
+  // 担当者不在になる終わり方のとき、請求中タスクをopenへ戻す(凍結防止)
+  function releaseClaims(reason) {
+    if (!tasks) return;
+    const released = tasks.release(agent.id, `[解放] 担当者(${agent.id})が「${reason}」で終了したため、未完了としてopenへ戻しました。`);
+    if (released.length) {
+      board.post("system", `[解放] ${agent.id} 終了により ${released.join(", ")} をopenへ戻しました。誰でも請求できます。`);
+    }
+  }
+
   for (let turn = 1; turn <= maxTurns; turn++) {
-    // 予算ブレーキ: ラン全体のトークンが上限を超えたら終了
-    if (ledger && budget?.maxTokensPerRun && ledger.totals().promptTokens + ledger.totals().completionTokens > budget.maxTokensPerRun) {
-      board.post(agent.id, `[予算停止] ラン全体のトークン予算(${budget.maxTokensPerRun})に達したため終了します。`);
+    // 予算ブレーキ: このランのトークンが上限を超えたら終了(ラン単位なので常駐chatは次ラウンドで復活する)
+    if (budget?.maxTokensPerRun && runTokens > budget.maxTokensPerRun) {
+      board.post(agent.id, `[予算停止] このランのトークン予算(${budget.maxTokensPerRun})に達したため終了します。`);
+      releaseClaims("予算停止");
       bus.emit("agent.status", { agent: agent.id, status: "budget-stop" });
       return { ok: false, endedBy: "budget", seenBoard: seen };
     }
@@ -99,6 +111,7 @@ export async function runAgentLoop({
     try {
       res = await model.chat({ messages, tools: tools.specs });
     } catch (err) {
+      releaseClaims("モデルエラー");
       bus.emit("agent.status", { agent: agent.id, status: "error" });
       bus.emit("agent.error", { agent: agent.id, turn, error: err.message });
       return { ok: false, error: err.message, seenBoard: seen };
@@ -107,6 +120,7 @@ export async function runAgentLoop({
       ledger.add(agent.id, res.usage);
       bus.emit("usage", { agent: agent.id, usage: res.usage });
     }
+    runTokens += (res.usage?.promptTokens ?? 0) + (res.usage?.completionTokens ?? 0);
     lastPromptTokens = res.usage?.promptTokens ?? 0;
     bus.emit("agent.turn", { agent: agent.id, turn, content: res.content ?? "" });
 
@@ -129,6 +143,7 @@ export async function runAgentLoop({
         }
       }
       if (claimMisses >= 3) {
+        releaseClaims("idle待機終了");
         board.post(agent.id, `[待機終了] 請求できるタスクが3回連続で無かったため終了します。`);
         bus.emit("agent.status", { agent: agent.id, status: "done" });
         return { ok: true, endedBy: "idle", seenBoard: seen };
@@ -148,6 +163,7 @@ export async function runAgentLoop({
       try {
         const summary = await model.chat({ messages: buildCompactRequest(messages, { taskContext: currentTaskContext(tasks, agent, messages), hasMemory: Boolean(memory) }) });
         if (ledger) ledger.add(agent.id, summary.usage);
+        runTokens += (summary.usage?.promptTokens ?? 0) + (summary.usage?.completionTokens ?? 0);
         const text = (summary.content ?? "").trim();
         if (!text) throw new Error("要約が空でした");
         const compacted = applyCompaction(messages, text);

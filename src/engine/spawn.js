@@ -12,6 +12,7 @@ const WORKER_PERSONA = (displayName, role) => `# ${displayName}(スポーンさ�
 あなたはハイブで働く作業エージェントです。親エージェントからのブリーフ(最初の指示)に従って作業します。
 
 ## 方針
+- ブリーフは要点(目標・完了条件)だけ書かれている。着手前に gather_context でボードの経過と、必要なら完了タスク(source: "done")も読み、**このタスクに必要な前提を自分で集めてから**作業計画を立てる(読み取り時キュレーション)。
 - ブリーフに書かれたことだけを確実にやる。範囲を広げすぎない。
 - 作ったら必ず自分で実行・確認し、結果をボードへ報告する。
 - 追加の仕事が必要になったら create_task で起票し、ボードでも告知する。
@@ -102,7 +103,7 @@ export class SpawnManager {
     const mem = this.memoryFn?.() ?? "";
     const messages = [
       { role: "system", content: mem ? `${buildSystemPrompt(agent, shellKind)}\n\n${mem}` : buildSystemPrompt(agent, shellKind) },
-      { role: "user", content: `親(${agent.parent})からのブリーフです。これに従って作業してください:\n\n${brief}` },
+      { role: "user", content: `親(${agent.parent})からのブリーフです。まず gather_context でボード経過と関連素材を読み、必要な前提を集めてから着手してください:\n\n${brief}` },
     ];
     const loopOpts = {
       agent, model, tools,
@@ -118,6 +119,16 @@ export class SpawnManager {
     if (r.endedBy === "turn-limit") {
       messages.push({ role: "user", content: "[システム] ターン上限で中断しました。請求中のタスクがあれば続きを完了し、finish_task まで進めてください。" });
       r = await runAgentLoop(loopOpts);
+    }
+    // 継続しても完了できなかった場合、担当者はもう戻ってこないので請求中を解放する
+    if (r.endedBy === "turn-limit" || r.endedBy === "budget" || r.endedBy === "error") {
+      const released = this.tasks.release(
+        agent.id,
+        `[解放] 担当者(${agent.id})が終了したためopenへ戻しました。前走者の未反映作業は worktrees/${agent.id} にある場合があります。`
+      );
+      if (released.length) {
+        this.board.post("system", `[解放] ${agent.id} 終了により ${released.join(", ")} をopenへ戻しました。誰でも請求できます。`);
+      }
     }
     const e = this.live.get(agent.id);
     if (e) e.status = r.ok ? "done" : `ended:${r.endedBy ?? "error"}`;
