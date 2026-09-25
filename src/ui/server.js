@@ -22,7 +22,9 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
 
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null }) {
   const live = {
-    agents: Object.fromEntries(config.agents.map((a) => [a.id, { status: "idle", turn: 0, lastTool: null }])),
+    // v6: エージェントは thread.opened/agent.spawned 登録時に出現する(事前登録しない。
+    // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
+    agents: {},
     board: [],
     requests: [],
     threads: [],
