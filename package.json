@@ -4,13 +4,19 @@
   "private": true,
   "type": "module",
   "description": "複数エージェントが同一ワークスペースで同時に作業し、共有ボードで横につながるハーネス(デスクトップソフトへの成長を前提)。Gitリポジトリ=blackboard、タスクファイルのclaimで仕事を自律発見。",
+  "main": "src/desktop/main.js",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "start": "node src/index.js --serve",
     "run": "node src/index.js --run",
+    "desktop": "electron .",
+    "desktop:smoke": "electron . --smoke",
     "test": "node --test \"test/*.test.js\"",
     "doctor": "node scripts/doctor.js"
+  },
+  "devDependencies": {
+    "electron": "^37.10.3"
   }
 }

@@ -10,7 +10,7 @@ import { listWorkspaceFiles } from "../engine/tools.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
 
-export async function startUi({ config, modelFactory, bus }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true }) {
   const live = {
     agents: Object.fromEntries(config.agents.map((a) => [a.id, { status: "idle", turn: 0, lastTool: null }])),
     board: [],
@@ -76,10 +76,20 @@ export async function startUi({ config, modelFactory, bus }) {
     }
   });
 
-  await new Promise((r) => server.listen(config.ui.port, "127.0.0.1", r));
-  console.log(`UI: http://localhost:${config.ui.port} (シナリオを自動開始します)`);
-  // 待ち受けを邪魔しない走行
-  runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(config.ui.port, "127.0.0.1", () => { server.off("error", reject); resolve(); });
+  }).catch((err) => {
+    if (err.code === "EADDRINUSE") {
+      throw new Error(`ポート${config.ui.port}は既に使用中です。別のagent-hive(または以前のプロセス残骸)が動いていませんか?`);
+    }
+    throw err;
+  });
+  console.log(`UI: http://localhost:${config.ui.port}${autoStart ? " (シナリオを自動開始します)" : ""}`);
+  if (autoStart) {
+    // 待ち受けを邪魔しない走行
+    runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
+  }
 }
 
 function json(res, obj, status = 200) {

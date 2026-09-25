@@ -3,3 +3,4 @@ workspace/
 worktrees/
 *.log
 .env
+smoke-result.txt
