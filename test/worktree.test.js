@@ -2,6 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+
+function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視 */ } }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Board, Bus } from "../src/engine/board.js";
@@ -36,8 +38,8 @@ test("setupWorktrees: クリーンならfreshに張り直し、未コミット�
   assert.doesNotMatch(log.text, /old-work/); // クリーンなブランチ残骸は掃除
   assert.equal(existsSync(join(p2.beta, "draft.md")), true); // 未コミット変更は保持
   assert.deepEqual(kept.map((k) => k.agentId), ["beta"]);
-  rmSync(ws, { recursive: true, force: true });
-  rmSync(root, { recursive: true, force: true });
+  rmTree(ws);
+  rmTree(root);
 });
 
 test("finish_taskの実体: worktreeの変更がmainへマージされる", async () => {
@@ -51,8 +53,8 @@ test("finish_taskの実体: worktreeの変更がmainへマージされる", asyn
   assert.equal(readFileSync(join(ws, "code.txt"), "utf8"), "v1 by alpha");
   const log = await runCommand({ command: "git log --oneline", cwd: ws, outputLimit: 2000 });
   assert.match(log.text, /merge: t1 by alpha/);
-  rmSync(ws, { recursive: true, force: true });
-  rmSync(root, { recursive: true, force: true });
+  rmTree(ws);
+  rmTree(root);
 });
 
 test("競合時はconflict返却でmainは無傷。解決して再finishすれば取り込まれる", async () => {
@@ -75,8 +77,8 @@ test("競合時はconflict返却でmainは無傷。解決して再finishすれ�
   const r2 = await mergeAgentWork({ mainWorkspace: ws, worktreePath: wt, agent: { id: "alpha" }, taskId: "t2" });
   assert.equal(r2.ok, true);
   assert.equal(readFileSync(join(ws, "code.txt"), "utf8"), "resolved by alpha");
-  rmSync(ws, { recursive: true, force: true });
-  rmSync(root, { recursive: true, force: true });
+  rmTree(ws);
+  rmTree(root);
 });
 
 test("finish_taskツール経由: マージ+ボード投稿+タスクdoneまで通る", async () => {
@@ -97,6 +99,6 @@ test("finish_taskツール経由: マージ+ボード投稿+タスクdoneまで�
   assert.equal(readFileSync(join(ws, "out.txt"), "utf8"), "成果");
   assert.ok(tasks.snapshot().done.some((f) => f.includes("build-thing")));
   assert.ok(board.posts.some((p) => p.from === "system" && /マージ/.test(p.text)));
-  rmSync(ws, { recursive: true, force: true });
-  rmSync(root, { recursive: true, force: true });
+  rmTree(ws);
+  rmTree(root);
 });

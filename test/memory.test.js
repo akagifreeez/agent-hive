@@ -2,6 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "node:fs";
+
+function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視 */ } }
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,7 +31,7 @@ test("buildMemoryContext: ファイル無しは空、あれば権威ブロック
   assert.match(ctx, /sm_89/);
   assert.doesNotMatch(ctx, /notes\.txt/);
   assert.deepEqual(listMemoryFiles(ws), ["decisions.md"]);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("buildCompactRequest: hasMemoryで権威分離指示が乗る", () => {
@@ -63,7 +65,7 @@ test("ループ統合: memoryを渡すとシステムプロンプトへ注入さ
   await runAgentLoop({ agent, model, tools, board, tasks, bus, maxTurns: 1, messages: null, memory: mem, shellKind: "bash" });
   assert.match(sysSeen, /persistent-memory/);
   assert.match(sysSeen, /テストを先に書く/);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 // 発見器: 完了タスクの未処理があればdistill-learningsを起票し、静かなら起票しない
@@ -89,7 +91,7 @@ test("発見器distill: 未処理のdoneがある+静か → 起票。通常タ�
   const opens = tasks.snapshot().open.filter((f) => f.startsWith(DISTILL_TASK_ID));
   assert.equal(opens.length, 1);
   d.stop();
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("発見器distill: finishでマーカーが進み、再起票されない。未処理ゼロの残置は自動解決", async () => {
@@ -117,5 +119,5 @@ test("発見器distill: finishでマーカーが進み、再起票されない�
   assert.equal(existsSync(join(ws, "tasks/open", `${DISTILL_TASK_ID}.md`)), false);
   assert.ok(tasks.snapshot().done.some((f) => f.includes(`auto--${DISTILL_TASK_ID}`)));
   d.stop();
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });

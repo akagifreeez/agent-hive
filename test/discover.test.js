@@ -2,6 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+
+function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視 */ } }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Board, Bus } from "../src/engine/board.js";
@@ -38,7 +40,7 @@ test("テスト失敗→fixタスク生成、テスト復旧→自動解決", as
   assert.equal(tasks.existsOpenOrClaimed("fix-test-failures"), false);
   assert.ok(tasks.snapshot().done.some((f) => f.includes("fix-test-failures")));
   d.stop();
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("既にfixタスクがある間は二重生成しない", async () => {
@@ -51,7 +53,7 @@ test("既にfixタスクがある間は二重生成しない", async () => {
   const open = tasks.snapshot().open.filter((f) => f === "fix-test-failures.md");
   assert.equal(open.length, 1);
   d.stop();
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("diff検出(reviewed..main)→reviewタスク生成、レビュー完了→タグ前進", async () => {
@@ -80,7 +82,7 @@ test("diff検出(reviewed..main)→reviewタスク生成、レビュー完了→
   const main = await runCommand({ command: "git rev-parse main", cwd: ws, outputLimit: 500 });
   assert.equal(tag.text.trim(), main.text.trim());
   d.stop();
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("impl等の通常タスクが残っている間はテスト失敗を仕事化しない", async () => {
@@ -93,7 +95,7 @@ test("impl等の通常タスクが残っている間はテスト失敗を仕事�
   assert.equal(tasks.existsOpenOrClaimed("fix-test-failures"), false);
   assert.equal(tasks.existsOpenOrClaimed("impl-something"), true);
   d.stop();
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });
 
 test("承認制ゲート: denyは即拒否、askは承認で通る、拒否/タイムアウトでは遮る", async () => {
@@ -128,5 +130,5 @@ test("bashツールはゲートを通り、拒否時はok:falseで理由を返�
   const out2 = await tools.execute("bash", { command: "git push origin main" });
   assert.equal(out2.ok, false);
   assert.match(out2.text, /拒否/);
-  rmSync(ws, { recursive: true, force: true });
+  rmTree(ws);
 });

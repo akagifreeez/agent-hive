@@ -3,6 +3,10 @@
 // messages配列として保持され、会話が続く限り積み上がる(v4.5のcompactが適用される)。
 // 横つながりのルール: ユーザー入力は全メインに見え、@表示名で特定の仲間を呼べる。
 // ラウンド中にスポーンされたサブの進捗もボードに流れ、次のラウンドで読まれる。
+// v6.1: 各メインのmessagesはラウンド終了ごとに workspace/state/ へ保存し、
+// 再起動時に復元する(チャットの記憶がプロセスをまたいで続く)。
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { runAgentLoop, buildSystemPrompt } from "./loop.js";
 import { createTools } from "./tools.js";
 import { mergeAgentWork } from "./worktree.js";
@@ -43,12 +47,43 @@ export class ChatHost {
 
   memory(main) {
     if (!this.memories.has(main.id)) {
-      this.memories.set(main.id, [
-        { role: "system", content: buildSystemPrompt(main, this.shellKind) },
-        { role: "user", content: "あなたはメインチャットに常駐するエージェントとして活動を始めます。ユーザーや同僚の入力を待って応答・行動してください。" },
-      ]);
+      const restored = this.loadMemories(main.id);
+      if (restored) {
+        this.memories.set(main.id, restored);
+      } else {
+        this.memories.set(main.id, [
+          { role: "system", content: buildSystemPrompt(main, this.shellKind) },
+          { role: "user", content: "あなたはメインチャットに常駐するエージェントとして活動を始めます。ユーザーや同僚の入力を待って応答・行動してください。" },
+        ]);
+      }
     }
     return this.memories.get(main.id);
+  }
+
+  // 会話メモリの保存/復元(workspace/state/mem-<id>.json)
+  memPath(id) {
+    return this.mainWorkspace ? join(this.mainWorkspace, "state", `mem-${id}.json`) : null;
+  }
+
+  loadMemories(id) {
+    const p = this.memPath(id);
+    if (!p) return null;
+    try {
+      const d = JSON.parse(readFileSync(p, "utf8"));
+      if (Array.isArray(d.messages) && d.messages.length > 1) return d.messages;
+    } catch {}
+    return null;
+  }
+
+  saveMemories(main) {
+    const p = this.memPath(main.id);
+    if (!p || !this.memories.has(main.id)) return;
+    try {
+      mkdirSync(join(this.mainWorkspace, "state"), { recursive: true });
+      writeFileSync(p, JSON.stringify({ messages: this.memories.get(main.id) }));
+    } catch {
+      // 保存失敗でラウンドを壊さない
+    }
   }
 
   // ユーザー入力: 全メインを時間差で起こす(同時だと議論にならないため)。
@@ -110,6 +145,8 @@ export class ChatHost {
         });
         // 既読位置をラウンド間で保持(同じ入力の二重配信を防ぐ)
         if (typeof r.seenBoard === "number") this.seen.set(main.id, r.seenBoard);
+        // 会話メモリを永続化(再起動後も続きから)
+        this.saveMemories(main);
         // メインが自ら直接作業した場合の受け皿: ラウンド終了時にmainへ自動マージ
         if (this.mainWorkspace) {
           const m = await mergeAgentWork({
