@@ -1,0 +1,16 @@
+{
+  "name": "agent-hive",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "複数エージェントが同一ワークスペースで同時に作業し、共有ボードで横につながるハーネス(デスクトップソフトへの成長を前提)。Gitリポジトリ=blackboard、タスクファイルのclaimで仕事を自律発見。",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js --serve",
+    "run": "node src/index.js --run",
+    "test": "node --test",
+    "doctor": "node scripts/doctor.js"
+  }
+}

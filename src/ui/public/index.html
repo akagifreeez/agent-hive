@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>agent-hive</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Meiryo", "Yu Gothic", sans-serif; background: #14171c; color: #d8dce2; display: flex; height: 100vh; }
+  #board { flex: 1.2; overflow-y: auto; padding: 16px; border-right: 1px solid #262b33; }
+  #side { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
+  h1 { font-size: 15px; margin: 0 0 4px; color: #9fb3c8; }
+  .post { background: #1b2028; border: 1px solid #2a313b; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; white-space: pre-wrap; word-break: break-word; }
+  .post .from { font-weight: bold; color: #7fb5ff; margin-bottom: 4px; }
+  .post.gamma .from { color: #ffd479; }
+  .post.beta .from { color: #8fd6a5; }
+  .card { background: #1b2028; border: 1px solid #2a313b; border-radius: 8px; padding: 10px 12px; margin: 8px 12px; }
+  .card .name { font-weight: bold; }
+  .card .st { float: right; font-size: 12px; color: #9aa4b1; }
+  .card.working .st { color: #ffd479; }
+  .card.done .st { color: #8fd6a5; }
+  .card.error .st { color: #ff7a7a; }
+  .sec { padding: 0 12px; font-size: 12px; color: #9aa4b1; }
+  pre { background: #10131a; border: 1px solid #2a313b; border-radius: 6px; padding: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
+  #fileview { flex: 1; overflow: auto; padding: 8px 12px; }
+  ul.files { list-style: none; padding: 0; margin: 4px 0; font-size: 12px; }
+  ul.files li { cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+  ul.files li:hover { background: #232a35; }
+  .phase { font-size: 12px; color: #9aa4b1; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+  <div id="board"><h1>共有ボード</h1><div class="phase" id="phase"></div><div id="posts"></div></div>
+  <div id="side">
+    <div id="agents"></div>
+    <div class="card"><div class="name">タスク</div><pre id="tasks"></pre></div>
+    <div class="card"><div class="name">ワークスペースのファイル(クリックで表示)</div><ul class="files" id="files"></ul></div>
+    <div id="fileview"></div>
+  </div>
+<script>
+const agentsEl = document.getElementById("agents");
+const postsEl = document.getElementById("posts");
+let agentOrder = [];
+
+function renderState(state) {
+  const names = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ" };
+  agentsEl.innerHTML = "";
+  for (const [id, a] of Object.entries(state.live.agents)) {
+    const div = document.createElement("div");
+    div.className = "card " + (a.status ?? "");
+    div.innerHTML = `<span class="name">${names[id] ?? id}</span><span class="st">${a.status ?? "idle"} / turn ${a.turn ?? 0} ${a.lastTool ? "/ " + a.lastTool : ""}</span>`;
+    agentsEl.appendChild(div);
+  }
+  document.getElementById("tasks").textContent =
+    `open:    ${state.tasks.open.join("\n        ") || "(なし)"}\nclaimed: ${state.tasks.claimed.join("\n         ") || "(なし)"}\ndone:    ${state.tasks.done.join("\n     ") || "(なし)"}`;
+  document.getElementById("phase").textContent = state.live.scenario ? `シナリオ: ${state.live.scenario.name} [${state.live.scenario.phase}]` : "";
+  renderFiles();
+}
+
+async function renderFiles() {
+  const state = await (await fetch("/api/state")).json();
+  const files = state.files ?? [];
+  const ul = document.getElementById("files");
+  ul.innerHTML = "";
+  for (const f of files) {
+    const li = document.createElement("li");
+    li.textContent = f;
+    li.onclick = async () => {
+      const r = await (await fetch("/api/file?path=" + encodeURIComponent(f))).json();
+      document.getElementById("fileview").innerHTML = `<pre>${escapeHtml(r.content ?? "")}</pre>`;
+    };
+    ul.appendChild(li);
+  }
+}
+
+function addPost(p) {
+  const div = document.createElement("div");
+  div.className = "post " + p.from;
+  div.innerHTML = `<div class="from">${p.from} #${p.id}</div>${escapeHtml(p.text)}`;
+  postsEl.appendChild(div);
+  document.getElementById("board").scrollTop = document.getElementById("board").scrollHeight;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+async function refresh() {
+  const state = await (await fetch("/api/state")).json();
+  postsEl.innerHTML = "";
+  for (const p of state.live.board) addPost(p);
+  renderState(state);
+}
+
+const es = new EventSource("/events");
+es.onmessage = (e) => {
+  const { type, payload } = JSON.parse(e.data);
+  if (type === "board") addPost(payload);
+  if (type === "scenario.started" || type === "scenario.finished") refresh();
+  if (type === "task.claimed" || type === "task.finished") refresh();
+};
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

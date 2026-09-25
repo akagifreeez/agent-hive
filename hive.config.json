@@ -1,0 +1,40 @@
+{
+  "model": {
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "apiKeyEnv": "OPENROUTER_API_KEY",
+    "apiKeyFile": "../../openrouter.key",
+    "model": "z-ai/glm-5.3-flash",
+    "temperature": 0.7,
+    "maxTokens": 4000,
+    "timeoutMs": 120000
+  },
+  "workspace": "workspace",
+  "agents": [
+    { "id": "alpha", "displayName": "アルファ", "role": "impl", "persona": "agents/alpha.md" },
+    { "id": "beta", "displayName": "ベータ", "role": "review", "persona": "agents/beta.md" },
+    { "id": "gamma", "displayName": "ガンマ", "role": "lead", "persona": "agents/gamma.md" }
+  ],
+  "loop": { "maxTurns": 40 },
+  "runner": { "timeoutSec": 480 },
+  "ui": { "port": 7789 },
+  "scenario": {
+    "name": "wordcount-cli",
+    "tasks": [
+      {
+        "id": "impl-wordcount",
+        "role": "impl",
+        "body": "このワークスペースにNode.js製CLIツール tools/wordcount.js を作成する。\n- 標準モジュールのみ使用。引数で渡されたテキストファイルの「行数・単語数・文字数」を1行ずつ表示する。\n- 動作確認用の sample.txt(数行の日本語+英語混在テキスト)も作り、`node tools/wordcount.js sample.txt` で実行して結果を確認する。\n- 実行結果をボードへ報告すること。\n- その後、レビュー担当からの指摘を wait_for_board で待ち、指摘があれば修正して修正完了を報告する。指摘がなければそのまま完了としてよい。\n- すべて終わってから finish_task すること。"
+      },
+      {
+        "id": "review-wordcount",
+        "role": "review",
+        "body": "実装担当の報告を wait_for_board で待つ。\n- 報告が届いたら tools/wordcount.js を読み、正確性・境界条件(空ファイル/連続空白/CRLF/日本語)・可読性の観点で査読する。\n- 実際に自分でも bash で動かして挙動を確認すること。\n- 指摘をボードへ投稿する(良い点も一言添える)。致命的な問題がなければ「問題なし」と明言する。\n- 投稿したら finish_task すること。"
+      },
+      {
+        "id": "summarize-wordcount",
+        "role": "lead",
+        "body": "レビュー担当の投稿を wait_for_board で待つ。\n- ワークスペースの成果物を自分でも確認し、全体のまとめ(何が作られたか/品質の評価/残課題)をボードへ投稿する。\n- 投稿したら finish_task すること。"
+      }
+    ]
+  }
+}
