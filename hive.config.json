@@ -6,7 +6,7 @@
     "model": "z-ai/glm-5.3-flash",
     "temperature": 0.7,
     "maxTokens": 4000,
-    "timeoutMs": 120000
+    "timeoutMs": 180000
   },
   "workspace": "workspace",
   "agents": [
@@ -16,24 +16,38 @@
   ],
   "loop": { "maxTurns": 40 },
   "runner": { "timeoutSec": 480 },
+  "discovery": {
+    "intervalSec": 30,
+    "testCommand": "node --test tests/*.test.mjs 2>&1"
+  },
+  "permissions": {
+    "askTimeoutSec": 120,
+    "deny": ["rm -rf /", "rm -rf ~", "mkfs", "shutdown", "format ", "del /", ":(){:|:&};:"],
+    "ask": ["rm -rf", "git reset --hard", "git clean", "git push", "npm publish"]
+  },
   "ui": { "port": 7789 },
   "scenario": {
-    "name": "wordcount-cli",
+    "name": "counter-cli",
+    "seedFiles": [
+      {
+        "path": "package.json",
+        "content": "{ \"name\": \"hive-workspace\", \"private\": true, \"type\": \"module\", \"scripts\": { \"test\": \"node --test tests/*.test.mjs\" } }\n"
+      },
+      {
+        "path": "tests/counter.test.mjs",
+        "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { createCounter } from \"../src/counter.js\";\n\ntest(\"初期値は0\", () => {\n  const c = createCounter();\n  assert.equal(c.getValue(), 0);\n});\n\ntest(\"incrementで1ずつ増える\", () => {\n  const c = createCounter();\n  c.increment();\n  c.increment();\n  assert.equal(c.getValue(), 2);\n});\n\ntest(\"decrementで減る(マイナスも可)\", () => {\n  const c = createCounter();\n  c.decrement();\n  assert.equal(c.getValue(), -1);\n});\n\ntest(\"resetで0に戻る\", () => {\n  const c = createCounter();\n  c.increment();\n  c.increment();\n  c.reset();\n  assert.equal(c.getValue(), 0);\n});\n\ntest(\"増減後もresetが効く\", () => {\n  const c = createCounter();\n  c.decrement();\n  c.increment();\n  c.increment();\n  c.reset();\n  c.increment();\n  assert.equal(c.getValue(), 1);\n});\n"
+      }
+    ],
     "tasks": [
       {
-        "id": "impl-wordcount",
+        "id": "impl-counter",
         "role": "impl",
-        "body": "このワークスペースにNode.js製CLIツール tools/wordcount.js を作成する。\n- 標準モジュールのみ使用。引数で渡されたテキストファイルの「行数・単語数・文字数」を1行ずつ表示する。\n- 動作確認用の sample.txt(数行の日本語+英語混在テキスト)も作り、`node tools/wordcount.js sample.txt` で実行して結果を確認する。\n- 実行結果をボードへ報告すること。\n- その後、レビュー担当からの指摘を wait_for_board で待ち、指摘があれば修正して修正完了を報告する。指摘がなければそのまま完了としてよい。\n- すべて終わってから finish_task すること。"
+        "body": "src/counter.js を実装する。\n- ESM。createCounter() が { increment, decrement, reset, getValue } を返す。仕様は tests/counter.test.mjs を読んで決める(テストが仕様書である)。\n- `node --test tests/` を実行して全件通ることを確認し、実行結果をボードへ報告する。\n- 完了したら finish_task。その後、発見器が生成する review-changes タスクの指摘がボードに届いたら、修正すべきものは対応して報告する。"
       },
       {
-        "id": "review-wordcount",
-        "role": "review",
-        "body": "実装担当の報告を wait_for_board で待つ。\n- 報告が届いたら tools/wordcount.js を読み、正確性・境界条件(空ファイル/連続空白/CRLF/日本語)・可読性の観点で査読する。\n- 実際に自分でも bash で動かして挙動を確認すること。\n- 指摘をボードへ投稿する(良い点も一言添える)。致命的な問題がなければ「問題なし」と明言する。\n- 投稿したら finish_task すること。"
-      },
-      {
-        "id": "summarize-wordcount",
+        "id": "summarize-counter",
         "role": "lead",
-        "body": "レビュー担当の投稿を wait_for_board で待つ。\n- ワークスペースの成果物を自分でも確認し、全体のまとめ(何が作られたか/品質の評価/残課題)をボードへ投稿する。\n- 投稿したら finish_task すること。"
+        "body": "レビュー投稿とテストの状態を wait_for_board で待つ。\n- 自分でも `node --test tests/` を実行して通ることを確認する。\n- 全体のまとめ(何が作られたか/テスト・レビューの結果/残課題)をボードへ投稿し、finish_task。"
       }
     ]
   }

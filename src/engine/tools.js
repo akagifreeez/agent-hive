@@ -1,13 +1,14 @@
 // エージェントに渡すツール一式。ファイル系はワークスペース配下に閉じ込める
-// (パス検証で workspace 外への脱出を拒否)。bashは cwd=ワークスペースで実行。
-import { spawn } from "node:child_process";
+// (パス検証で workspace 外への脱出を拒否)。bashは cwd=ワークスペースで実行し、
+// 承認制ゲート(gate)を通す。
 import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, join, dirname, sep } from "node:path";
+import { runCommand, detectShell } from "./exec.js";
 
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
-export function createTools({ agent, workspace, board, tasks, bus, maxBashMs = 30000 }) {
+export function createTools({ agent, workspace, board, tasks, bus, gate = null, maxBashMs = 30000 }) {
   const specs = [
     {
       name: "claim_next_task",
@@ -69,13 +70,11 @@ export function createTools({ agent, workspace, board, tasks, bus, maxBashMs = 3
       case "claim_next_task": {
         const t = tasks.claim(agent);
         if (!t) return { ok: true, text: "請求できるタスクはありません。" };
-        bus.emit("task.claimed", { agent: agent.id, taskId: t.id });
         return { ok: true, text: `タスク ${t.id} を請求しました。\n\n${t.body}` };
       }
       case "finish_task": {
         const done = tasks.finish(agent, String(args.task_id ?? ""));
         if (!done) return { ok: false, text: "そのタスクは請求していません(task_idを確認)。" };
-        bus.emit("task.finished", { agent: agent.id, taskId: String(args.task_id) });
         return { ok: true, text: `タスク ${args.task_id} を完了にしました。` };
       }
       case "list_files": {
@@ -107,7 +106,7 @@ export function createTools({ agent, workspace, board, tasks, bus, maxBashMs = 3
         return { ok: true, text: `${args.path} を編集しました。` };
       }
       case "bash":
-        return await bash(String(args.command ?? ""), clamp(Number(args.timeout_ms) || maxBashMs, 1000, 120000));
+        return await gatedBash(String(args.command ?? ""), clamp(Number(args.timeout_ms) || maxBashMs, 1000, 120000));
       case "post_to_board": {
         const post = board.post(agent.id, String(args.text ?? ""));
         return { ok: true, text: `ボード#${post.id}へ投稿しました。` };
@@ -133,47 +132,16 @@ export function createTools({ agent, workspace, board, tasks, bus, maxBashMs = 3
     return full;
   }
 
-  // Windowsでもモデルは自然にPOSIXコマンドを書くので、bashがあればそれを使う
-  let shellKind = null;
-  async function detectShell() {
-    if (shellKind) return shellKind;
-    if (process.platform !== "win32") return (shellKind = "bash");
-    shellKind = await new Promise((res) => {
-      const p = spawn("bash", ["-c", "echo __hive_ok__"], { windowsHide: true });
-      let out = "";
-      p.stdout.on("data", (d) => (out += d.toString()));
-      p.on("error", () => res("cmd"));
-      p.on("close", (code) => res(code === 0 && out.includes("__hive_ok__") ? "bash" : "cmd"));
-    });
-    return shellKind;
-  }
-
-  async function bash(command, timeoutMs) {
-    const kind = await detectShell();
-    const child =
-      kind === "bash"
-        ? spawn("bash", ["-c", command], { cwd: workspace, windowsHide: true })
-        : spawn(command, { shell: true, cwd: workspace, windowsHide: true });
-    let out = "";
-    const append = (d) => {
-      if (out.length < BASH_OUTPUT_LIMIT) out += d.toString();
-    };
-    child.stdout.on("data", append);
-    child.stderr.on("data", append);
-    return await new Promise((res) => {
-      const timer = setTimeout(() => {
-        child.kill();
-        res({ ok: false, text: `タイムアウト(${timeoutMs}ms)で中断:\n${out.slice(0, BASH_OUTPUT_LIMIT)}` });
-      }, timeoutMs);
-      child.on("error", (err) => {
-        clearTimeout(timer);
-        res({ ok: false, text: `起動エラー: ${err.message}` });
-      });
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        res({ ok: code === 0, text: `exit=${code}\n${out.slice(0, BASH_OUTPUT_LIMIT)}` });
-      });
-    });
+  // 承認制ゲート: 禁止パターンは即拒否、要承認パターンはUI承認を待つ
+  async function gatedBash(command, timeoutMs) {
+    if (gate) {
+      const verdict = await gate.check(command);
+      if (!verdict.allowed) {
+        bus.emit("permission.denied", { agent: agent.id, command });
+        return { ok: false, text: `このコマンドは拒否されました(${verdict.reason})。別の安全な方法で作業を続けてください。` };
+      }
+    }
+    return await runCommand({ command, cwd: workspace, timeoutMs, outputLimit: BASH_OUTPUT_LIMIT });
   }
 
   return { specs, execute, detectShell };

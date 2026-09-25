@@ -15,7 +15,12 @@ export function loadConfig(configPath) {
     loop: { maxTurns: 30, ...(raw.loop ?? {}) },
     runner: { timeoutSec: 480, ...(raw.runner ?? {}) },
     ui: { port: 7789, ...(raw.ui ?? {}) },
-    scenario: raw.scenario ?? { name: "default", tasks: [] },
+    discovery: { intervalSec: 30, testCommand: null, ...(raw.discovery ?? {}) },
+    permissions: {
+      askTimeoutSec: 120,
+      ...(raw.permissions ?? {}),
+    },
+    scenario: { seedFiles: [], ...raw.scenario },
   };
   cfg.model.apiKey = resolveApiKey(cfg.model);
   return cfg;

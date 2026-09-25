@@ -14,9 +14,10 @@ export async function startUi({ config, modelFactory, bus }) {
   const live = {
     agents: Object.fromEntries(config.agents.map((a) => [a.id, { status: "idle", turn: 0, lastTool: null }])),
     board: [],
+    requests: [],
     scenario: null,
   };
-  const tasks = new TaskBlackboard(config.workspace);
+  const tasks = new TaskBlackboard(config.workspace, bus);
   const clients = new Set();
 
   const record = {
@@ -24,6 +25,11 @@ export async function startUi({ config, modelFactory, bus }) {
     "agent.turn": (p) => { live.agents[p.agent] = { ...live.agents[p.agent], turn: p.turn }; },
     "tool.call": (p) => { live.agents[p.agent] = { ...live.agents[p.agent], lastTool: `${p.tool}` }; },
     "board": (p) => { live.board.push(p); },
+    "permission.request": (p) => { live.requests.push({ ...p, state: "pending" }); },
+    "permission.resolved": (p) => {
+      const r = live.requests.find((x) => x.id === p.id);
+      if (r) r.state = p.verdict === "approve" ? "approved" : "denied";
+    },
     "scenario.started": (p) => { live.scenario = { name: p.name, phase: "running" }; },
     "scenario.finished": () => { if (live.scenario) live.scenario.phase = "done"; },
   };
@@ -44,6 +50,21 @@ export async function startUi({ config, modelFactory, bus }) {
         return;
       }
       if (url.pathname === "/api/state") return json(res, { live, tasks: tasks.snapshot(), files: listWorkspaceFiles(config.workspace) });
+      if (url.pathname === "/api/permission" && req.method === "POST") {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const { id, approve } = JSON.parse(body);
+            bus.emit("permission.resolved", { id, verdict: approve ? "approve" : "deny" });
+            bus.emit("permission.verdict", { id: Number(id), approve: Boolean(approve) });
+            json(res, { ok: true });
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
       if (url.pathname === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });

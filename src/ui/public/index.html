@@ -30,7 +30,7 @@
 </style>
 </head>
 <body>
-  <div id="board"><h1>共有ボード</h1><div class="phase" id="phase"></div><div id="posts"></div></div>
+  <div id="board"><h1>共有ボード</h1><div class="phase" id="phase"></div><div id="permreq"></div><div id="posts"></div></div>
   <div id="side">
     <div id="agents"></div>
     <div class="card"><div class="name">タスク</div><pre id="tasks"></pre></div>
@@ -85,10 +85,37 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
+function renderRequests(requests) {
+  const el = document.getElementById("permreq");
+  el.innerHTML = "";
+  for (const r of requests.filter((x) => x.state === "pending")) {
+    const div = document.createElement("div");
+    div.className = "post";
+    div.innerHTML = `<div class="from" style="color:#ff9a9a">承認要求 #${r.id}</div><pre>${escapeHtml(r.command)}</pre>`;
+    const row = document.createElement("div");
+    const yes = document.createElement("button");
+    yes.textContent = "承認";
+    yes.onclick = () => decide(r.id, true);
+    const no = document.createElement("button");
+    no.textContent = "拒否";
+    no.onclick = () => decide(r.id, false);
+    row.append(yes, no);
+    div.appendChild(row);
+    el.appendChild(div);
+  }
+  if (el.childElementCount) document.getElementById("board").scrollTop = 0;
+}
+
+async function decide(id, approve) {
+  await fetch("/api/permission", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, approve }) });
+  refresh();
+}
+
 async function refresh() {
   const state = await (await fetch("/api/state")).json();
   postsEl.innerHTML = "";
   for (const p of state.live.board) addPost(p);
+  renderRequests(state.live.requests ?? []);
   renderState(state);
 }
 

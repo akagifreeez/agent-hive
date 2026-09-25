@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/index.js --serve",
     "run": "node src/index.js --run",
-    "test": "node --test",
+    "test": "node --test \"test/*.test.js\"",
     "doctor": "node scripts/doctor.js"
   }
 }
