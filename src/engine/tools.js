@@ -10,7 +10,7 @@ import { readMeta } from "./tasks.js";
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null }) {
   const specs = [
     {
       name: "claim_next_task",
@@ -88,8 +88,18 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "edit_file",
-      description: "既存ファイルの一部を置換する。old_textは一意に一致すること(複数箇所や不一致はエラー)。",
-      parameters: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"], additionalProperties: false },
+      description: "既存ファイルの一部を置換する。old_textは一意に一致すること(複数箇所や不一致はエラー)。replace_all: true で全一致を一括置換。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          old_text: { type: "string" },
+          new_text: { type: "string" },
+          replace_all: { type: "boolean", description: "全ての一致を一括置換するか" },
+        },
+        required: ["path", "old_text", "new_text"],
+        additionalProperties: false,
+      },
     },
     {
       name: "bash",
@@ -108,15 +118,38 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "gather_context",
-      description: "作業に必要な生素材を読む: source=\"board\"=ボードの全経過、\"done\"=完了タスクの本文、\"open\"=未着手タスクの本文。今のタスクに必要な前提を自分で集めるときに使う(読み取り時キュレーション)。projectで絞り込める。",
+      description: "作業に必要な生素材を読む: source=\"board\"=ボードの全経過、\"done\"=完了タスクの本文、\"open\"=未着手タスクの本文、\"threads\"=全スレッドの進捗サマリ。今のタスクに必要な前提を自分で集めるときに使う(読み取り時キュレーション)。projectで絞り込める。",
       parameters: {
         type: "object",
         properties: {
-          source: { type: "string", enum: ["board", "done", "open"] },
+          source: { type: "string", enum: ["board", "done", "open", "threads"] },
           limit: { type: "number", description: "最大件数(既定20)" },
           project: { type: "string", description: "文脈(プロジェクト)名で絞込(done/openのみ有効)" },
         },
         required: ["source"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "web_fetch",
+      description: "指定URLの内容を取得する(http/https、GETのみ、テキスト)。調査の参照先やドキュメントを読むときに使う。",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "取得するURL" },
+          max_chars: { type: "number", description: "本文の最大文字数(既定8000)" },
+        },
+        required: ["url"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "close_thread",
+      description: "サブスレッドを閉じる(リーダー専用)。スレッド一覧から外れ、ワーカーは新規の起床を止める。成果物・タスク履歴・会話ログは消えない。",
+      parameters: {
+        type: "object",
+        properties: { project: { type: "string", description: "閉じるスレッド名" } },
+        required: ["project"],
         additionalProperties: false,
       },
     },
@@ -212,6 +245,39 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           const text = posts.map((p) => `[${p.from}] #${p.id}\n${p.text}`).join("\n---\n");
           return { ok: true, text: `ボード経過(${posts.length}件・末尾ほど新しい):\n${text.slice(-GATHER_LIMIT)}` };
         }
+        if (source === "threads") {
+          // 全スレッドの進捗サマリ(リーダーが進捗を確認する用)。ログはstate/の永続ファイルから読む
+          const dir = join(mainWorkspace ?? workspace, "state");
+          let registry = [];
+          try {
+            registry = JSON.parse(readFileSync(join(dir, "threads.json"), "utf8"));
+          } catch {}
+          const names = registry.filter((t) => t.name !== "__main__").map((t) => t.name);
+          if (!names.length) return { ok: true, text: "開いているスレッドはありません。" };
+          const l = tasks.list();
+          const lines = names.map((name) => {
+            const th = registry.find((t) => t.name === name);
+            const openN = l.open.filter((t) => (t.project || "") === name).length;
+            const claimedN = l.claimed.filter((t) => (t.project || "") === name).length;
+            const doneN = l.done.filter((t) => (t.project || "") === name).length;
+            let tail = ["(投稿なし)"];
+            try {
+              tail = readFileSync(join(dir, `board-${name}.jsonl`), "utf8").trim().split("\n").filter(Boolean).slice(-3)
+                .map((line) => {
+                  try {
+                    const p = JSON.parse(line);
+                    return `[${p.from}] ${String(p.text).replace(/\s+/g, " ").slice(0, 140)}`;
+                  } catch {
+                    return "";
+                  }
+                })
+                .filter(Boolean);
+              if (!tail.length) tail = ["(投稿なし)"];
+            } catch {}
+            return `## スレッド ${name}\n目標: ${th?.goal ?? "(未記録)"}\nタスク: 未着手${openN} / 作業中${claimedN} / 完了${doneN}\n最近の投稿:\n${tail.map((s) => "- " + s).join("\n")}`;
+          });
+          return { ok: true, text: `スレッド進捗サマリ:\n\n${lines.join("\n\n")}`.slice(0, GATHER_LIMIT) };
+        }
         const dir = join(mainWorkspace ?? workspace, "tasks", source === "done" ? "done" : "open");
         let files = [];
         try {
@@ -233,6 +299,27 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           return { ok: true, text: project ? `${source}タスクはありません(project: ${project})。` : `${source}タスクはありません。` };
         }
         return { ok: true, text: `${source === "done" ? "完了タスク" : "未着手タスク"}${project ? `(project: ${project})` : ""}(${picked.length}/${files.length}件):\n\n${bodies.join("\n\n")}`.slice(0, GATHER_LIMIT + 500) };
+      }
+      case "close_thread": {
+        if (!threadCloser) return { ok: false, text: "close_threadはリーダー専用です。" };
+        const projectName = String(args.project ?? "").trim();
+        const r = await threadCloser({ project: projectName });
+        if (r.error) return { ok: false, text: `スレッドを閉じられません: ${r.error}` };
+        return { ok: true, text: `スレッド ${projectName} を閉じました。成果物とログは保持されています。` };
+      }
+      case "web_fetch": {
+        const url = String(args.url ?? "").trim();
+        if (!/^https?:\/\//i.test(url)) return { ok: false, text: "urlはhttp(s)で始めてください。" };
+        const maxChars = clamp(Number(args.max_chars ?? 8000), 200, 50000);
+        try {
+          const res = await fetch(url, { signal: AbortSignal.timeout(20000), headers: { "user-agent": "agent-hive/1.0" }, redirect: "follow" });
+          const ct = res.headers?.get?.("content-type") ?? "(不明)";
+          const text = await res.text();
+          if (!res.ok) return { ok: false, text: `HTTP ${res.status}: ${text.slice(0, 300)}` };
+          return { ok: true, text: `[${res.status}] ${url}\ncontent-type: ${ct}\n\n${text.slice(0, maxChars)}` };
+        } catch (err) {
+          return { ok: false, text: `取得エラー: ${err.message}` };
+        }
       }
       case "list_files": {
         const files = listWorkspaceFiles(safePath(args.path ?? "."));
@@ -258,7 +345,11 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const oldText = String(args.old_text ?? "");
         const count = src.split(oldText).length - 1;
         if (count === 0) return { ok: false, text: "old_textが見つかりません。" };
-        if (count > 1) return { ok: false, text: `old_textが${count}箇所に一致します。一意になるよう範囲を広げてください。` };
+        if (args.replace_all) {
+          writeFileSync(p, src.split(oldText).join(String(args.new_text ?? "")));
+          return { ok: true, text: `${args.path} の${count}箇所を一括置換しました。` };
+        }
+        if (count > 1) return { ok: false, text: `old_textが${count}箇所に一致します。一意になるよう範囲を広げるか replace_all を使ってください。` };
         writeFileSync(p, src.replace(oldText, String(args.new_text ?? "")));
         return { ok: true, text: `${args.path} を編集しました。` };
       }
