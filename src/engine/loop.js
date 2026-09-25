@@ -122,7 +122,7 @@ export async function runAgentLoop({
     }
     runTokens += (res.usage?.promptTokens ?? 0) + (res.usage?.completionTokens ?? 0);
     lastPromptTokens = res.usage?.promptTokens ?? 0;
-    bus.emit("agent.turn", { agent: agent.id, turn, content: res.content ?? "" });
+    bus.emit("agent.turn", { agent: agent.id, turn, content: res.content ?? "", reasoning: res.reasoning ?? "" });
 
     if (res.toolCalls.length > 0) {
       // GLM/OpenRouterはcontent:nullのassistantメッセージを拒むため文字列に正規化

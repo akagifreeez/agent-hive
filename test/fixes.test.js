@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { TaskBlackboard, readMeta } from "../src/engine/tasks.js";
 import { Board, Bus } from "../src/engine/board.js";
 import { createTools } from "../src/engine/tools.js";
+import { pushAgentLog, AGENT_LOG_LIMIT } from "../src/ui/server.js";
+import { OpenAIModel } from "../src/model/openai.js";
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-fix-"));
@@ -211,4 +213,37 @@ test("gather_context: projectで絞り込める", async () => {
   const r2 = await tools.execute("gather_context", { source: "open", project: "nosuch" });
   assert.match(r2.text, /nosuch/);
   rmSync(ws, { recursive: true, force: true });
+});
+
+test("pushAgentLog: ログは上限件数で切り詰め、長文は圧縮", () => {
+  const a = {};
+  for (let i = 0; i < AGENT_LOG_LIMIT + 30; i++) pushAgentLog(a, "tool", `cmd-${i}`);
+  assert.equal(a.log.length, AGENT_LOG_LIMIT);
+  assert.equal(a.log[0].text, `cmd-${AGENT_LOG_LIMIT + 30 - AGENT_LOG_LIMIT}`); // 古い分から落ちる
+  assert.equal(a.log.at(-1).text, `cmd-${AGENT_LOG_LIMIT + 29}`);
+  const big = {};
+  pushAgentLog(big, "think", "あ".repeat(5000));
+  assert.equal(big.log[0].text.length, 2000);
+  assert.equal(big.log[0].kind, "think");
+  pushAgentLog(null, "tool", "無害(エージェント不明でも落ちない)");
+});
+
+test("OpenAIModel: reasoning(思考テキスト)を応答に含める", async () => {
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      choices: [{ message: { content: "答え", reasoning: "まずXを確認しよう" } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, completion_tokens_details: { reasoning_tokens: 3 }, cost: 0.001 },
+    }),
+  });
+  try {
+    const m = new OpenAIModel({ baseUrl: "http://x/api/v1", apiKey: "k", model: "m" });
+    const r = await m.chat({ messages: [{ role: "user", content: "hi" }] });
+    assert.equal(r.reasoning, "まずXを確認しよう");
+    assert.equal(r.content, "答え");
+    assert.equal(r.usage.reasoningTokens, 3);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
 });

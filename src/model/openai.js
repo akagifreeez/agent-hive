@@ -50,6 +50,7 @@ export class OpenAIModel {
     if (!msg) throw new Error(`応答の形式が不正です: ${JSON.stringify(data).slice(0, 300)}`);
     return {
       content: msg.content ?? null,
+      reasoning: msg.reasoning ?? null, // 思考テキスト(OpenRouterのreasoningモデル。UIの活動ログ用)
       toolCalls: (msg.tool_calls ?? []).map((tc) => ({
         id: tc.id,
         name: tc.function.name,
