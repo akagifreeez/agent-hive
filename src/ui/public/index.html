@@ -69,9 +69,14 @@
   <div id="side">
     <div id="agents"></div>
     <div class="card"><div class="name">タスク(UIから直接操作・チャット不要)</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:#9aa4b1;">
+        <span>文脈:</span>
+        <select id="projfilter" style="background:#10131a;border:1px solid #2a313b;color:#d8dce2;border-radius:4px;padding:2px 6px;font-size:12px;"></select>
+      </div>
       <div id="tasks"></div>
       <div id="newtask">
         <input id="nt-id" placeholder="task_id(空欄で自動採番)">
+        <input id="nt-project" placeholder="文脈(project)(任意、例: cuda-compress)">
         <input id="nt-role" placeholder="role(impl/review等、空欄で誰でも)">
         <textarea id="nt-body" placeholder="何を / どう確認するか / 完了条件"></textarea>
         <button id="nt-add">タスク投入(ボードへ直接)</button>
@@ -102,39 +107,81 @@ function renderState(state) {
   renderFiles();
 }
 
-// タスクパネル: 状態ごとの一覧+UI直操作(クリックで本文、ボタンで解放/中止/再開)
+// タスクパネル: 文脈(project)ごとにグループ化して表示+絞込+UI直操作。
+// 「すべて」は文脈の混ざりを見る用、絞り込めばその取り組みだけが見える。
+let projectFilter = "";
 function renderTasks(list) {
   const el = document.getElementById("tasks");
+  const all = [...(list.open ?? []), ...(list.claimed ?? []), ...(list.done ?? [])];
+  // 文脈一覧(未分類は最後に)
+  const projects = [...new Set(all.map((t) => t.project || "").filter((p) => p !== ""))].sort();
+  const sel = document.getElementById("projfilter");
+  const opts = ["", ...projects, "__none__"];
+  if (sel.dataset.sig !== opts.join("|")) {
+    sel.dataset.sig = opts.join("|");
+    sel.innerHTML = "";
+    for (const p of opts) {
+      const o = document.createElement("option");
+      o.value = p;
+      o.textContent = p === "" ? "すべて" : p === "__none__" ? "(未分類)" : p;
+      sel.appendChild(o);
+    }
+    sel.value = projectFilter;
+    if (!opts.includes(projectFilter)) { projectFilter = ""; sel.value = ""; }
+  }
   el.innerHTML = "";
   const secs = [
-    ["open", "未着手", (t) => ({ label: "中止", action: "cancel" })],
-    ["claimed", "作業中", (t) => ({ label: "解放", action: "release" })],
-    ["done", "完了", (t) => ({ label: "再開", action: "reopen" })],
+    ["open", "未着手", () => ({ label: "中止", action: "cancel" })],
+    ["claimed", "作業中", () => ({ label: "解放", action: "release" })],
+    ["done", "完了", () => ({ label: "再開", action: "reopen" })],
   ];
-  for (const [state, label, btn] of secs) {
-    const rows = list[state] ?? [];
+  // 表示順: 「すべて」はprojectごとにグループ化(未分類は最後)、絞込中はその文脈だけ
+  const groups = projectFilter === ""
+    ? [...projects.map((p) => [p, p]), ["", "(未分類)"]]
+    : [[projectFilter === "__none__" ? "" : projectFilter, projectFilter === "__none__" ? "(未分類)" : projectFilter]];
+  for (const [proj, label] of groups) {
+    const inProj = all.filter((t) => (t.project || "") === proj);
+    if (!inProj.length) continue;
     const head = document.createElement("div");
     head.className = "tsec";
-    head.textContent = `${label}(${rows.length})`;
+    head.style.color = proj ? "#7fb5ff" : "#9aa4b1";
+    head.textContent = `◆ ${label}`;
     el.appendChild(head);
-    for (const t of rows) {
-      const row = document.createElement("div");
-      row.className = "taskrow";
-      const id = document.createElement("span");
-      id.className = "tid";
-      id.textContent = t.id + (t.agent && t.agent !== "auto" && t.agent !== "you" ? ` @${t.agent}` : "");
-      id.title = t.summary;
-      id.onclick = () => showTaskBody(t);
-      const sum = document.createElement("span");
-      sum.className = "tsum";
-      sum.textContent = t.summary;
-      sum.onclick = () => showTaskBody(t);
-      const b = document.createElement("button");
-      const spec = btn(t);
-      b.textContent = spec.label;
-      b.onclick = (e) => { e.stopPropagation(); taskAction({ action: spec.action, id: t.id, agent: t.agent }); };
-      row.append(id, sum, b);
-      el.appendChild(row);
+    for (const [state, stateLabel, btn] of secs) {
+      const rows = inProj.filter((t) => t.state === state);
+      if (!rows.length) continue;
+      const sh = document.createElement("div");
+      sh.className = "tsec";
+      sh.textContent = `${stateLabel}(${rows.length})`;
+      el.appendChild(sh);
+      for (const t of rows) {
+        const row = document.createElement("div");
+        row.className = "taskrow";
+        const id = document.createElement("span");
+        id.className = "tid";
+        id.textContent = t.id + (t.agent && t.agent !== "auto" && t.agent !== "you" ? ` @${t.agent}` : "");
+        id.title = t.summary;
+        id.onclick = () => showTaskBody(t);
+        const sum = document.createElement("span");
+        sum.className = "tsum";
+        sum.textContent = t.summary;
+        sum.onclick = () => showTaskBody(t);
+        const mv = document.createElement("button");
+        mv.textContent = "移動";
+        mv.title = "文脈(project)を付け替える";
+        mv.onclick = async (e) => {
+          e.stopPropagation();
+          const p = prompt(`文脈(project)を入力(空欄で未分類):`, t.project || "");
+          if (p === null) return;
+          await taskAction({ action: "reproject", path: t.path, project: p });
+        };
+        const b = document.createElement("button");
+        const spec = btn(t);
+        b.textContent = spec.label;
+        b.onclick = (e) => { e.stopPropagation(); taskAction({ action: spec.action, id: t.id, agent: t.agent }); };
+        row.append(id, sum, mv, b);
+        el.appendChild(row);
+      }
     }
   }
 }
@@ -154,12 +201,14 @@ async function taskAction(payload) {
 
 async function createTask() {
   const id = document.getElementById("nt-id").value.trim();
+  const project = document.getElementById("nt-project").value.trim();
   const role = document.getElementById("nt-role").value.trim();
   const body = document.getElementById("nt-body").value.trim();
   if (!body) { alert("本文(何を/完了条件)を書いてください"); return; }
-  const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, role, body }) })).json();
+  const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, project, role, body }) })).json();
   if (r.error) { alert(r.error); return; }
   document.getElementById("nt-id").value = "";
+  document.getElementById("nt-project").value = "";
   document.getElementById("nt-role").value = "";
   document.getElementById("nt-body").value = "";
   refresh();
@@ -237,6 +286,7 @@ es.onmessage = (e) => {
   if (type === "task.claimed" || type === "task.finished" || type === "task.created" || type === "task.released" || type === "task.cancelled" || type === "task.autoResolved") refresh();
 };
 document.getElementById("nt-add").onclick = createTask;
+document.getElementById("projfilter").onchange = (e) => { projectFilter = e.target.value; refresh(); };
 document.getElementById("saybtn").onclick = sendSay;
 document.getElementById("saytext").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) sendSay();

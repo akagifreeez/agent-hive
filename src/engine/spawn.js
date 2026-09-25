@@ -45,7 +45,7 @@ export class SpawnManager {
   }
 
   // ツールから呼ばれる。呼び出し元は待たせないので、ループは非同期で走らせる。
-  async spawn({ parent, displayName, role, brief }) {
+  async spawn({ parent, displayName, role, brief, project = "" }) {
     const depth = (parent.depth ?? 0) + 1;
     if (depth > this.hierarchy.maxDepth) {
       return { error: `深さの上限(${this.hierarchy.maxDepth})に達しています。あなたの配下には作れません。` };
@@ -78,7 +78,8 @@ export class SpawnManager {
     };
     this.live.set(id, { displayName: dn, depth, parent: parent.id, status: "working" });
     // ブリーフ=このエージェントの請求済みタスク。finish_taskで完了→main自動マージまで繋がる
-    this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, body: `スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
+    const projNote = project ? `文脈(project): ${project} — 追加のタスクを請求するときは project: ${project} で絞ること。\n\n` : "";
+    this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, project, body: `${projNote}スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
     this.bus.emit("agent.spawned", { agent: { id, displayName: dn, depth, parent: parent.id, role: agent.role } });
     this.board.post("system", `[スポーン] ${parent.displayName} が作業エージェント ${dn}(${id}) を作成しました。`);
 
