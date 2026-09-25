@@ -128,6 +128,83 @@ export class TaskBlackboard {
     const list = (dir) => readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
     return { open: list(this.open), claimed: list(this.claimed), done: list(this.done) };
   }
+
+  // UIのタスク管理パネル用。1件ごとに状態/担当/要約/ファイルパスを返す(本文は必要時のみ取得)
+  list() {
+    const splitRole = (raw) => {
+      const nl = raw.indexOf("\n");
+      const head = nl === -1 ? raw : raw.slice(0, nl);
+      if (head.startsWith("role: ")) return { role: head.slice(6).trim() || null, body: raw.slice(nl + 1) };
+      return { role: null, body: raw };
+    };
+    // 要約は最初の実質行([解放]等のシステムノートは飛ばす)
+    const summarize = (body) => {
+      const line = body.trim().split("\n").find((l) => l.trim() && !l.trim().startsWith("[")) ?? "(本文なし)";
+      return line.trim().slice(0, 90);
+    };
+    const open = readdirSync(this.open).filter((f) => f.endsWith(".md")).sort().map((f) => {
+      const { role, body } = splitRole(readFileSync(join(this.open, f), "utf8"));
+      return { state: "open", id: f.replace(/\.md$/, ""), agent: null, role, summary: summarize(body), path: `tasks/open/${f}` };
+    });
+    const claimed = readdirSync(this.claimed).filter((f) => f.endsWith(".md")).sort().map((f) => {
+      const { role, body } = splitRole(readFileSync(join(this.claimed, f), "utf8"));
+      const base = f.replace(/\.md$/, "");
+      const idx = base.indexOf("--");
+      return { state: "claimed", id: base.slice(idx + 2), agent: base.slice(0, idx), role, summary: summarize(body), path: `tasks/claimed/${f}` };
+    });
+    const done = readdirSync(this.done).filter((f) => f.endsWith(".md")).sort().map((f) => {
+      const { body } = splitRole(readFileSync(join(this.done, f), "utf8"));
+      const base = f.replace(/\.md$/, "");
+      const idx = base.indexOf("--");
+      return { state: "done", id: base.slice(idx + 2), agent: base.slice(0, idx), role: null, summary: summarize(body), path: `tasks/done/${f}` };
+    });
+    return { open, claimed, done };
+  }
+
+  // 1件だけ解放(claimed→open)。UIからの個別解放用(releaseは担当者の全件)
+  releaseOne(agentId, taskId, note = null) {
+    const src = join(this.claimed, `${agentId}--${taskId}.md`);
+    const dst = join(this.open, `${taskId}.md`);
+    try {
+      if (note) appendNote(src, note);
+      if (existsSync(dst)) return false; // 同idのopenが既にある(手動投入等)場合は壊さない
+      renameSync(src, dst);
+      this.bus?.emit("task.released", { agent: agentId, taskId });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // 未着手タスクを中止としてdoneへ(open→done)。削除せず履歴に残す
+  cancel(taskId, note = "[中止] ユーザーがUIから中止") {
+    const src = join(this.open, `${taskId}.md`);
+    try {
+      appendNote(src, note);
+      renameSync(src, join(this.done, `you--${taskId}.md`));
+      this.bus?.emit("task.cancelled", { taskId });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // 完了タスクを再度openへ(done→open)。UIからの再開用
+  reopen(taskId, note = "[再開] ユーザーがUIから再open") {
+    const file = readdirSync(this.done).filter((f) => f.endsWith(`--${taskId}.md`)).sort().pop();
+    if (!file) return false;
+    const src = join(this.done, file);
+    const dst = join(this.open, `${taskId}.md`);
+    try {
+      if (existsSync(dst)) return false;
+      appendNote(src, note);
+      renameSync(src, dst);
+      this.bus?.emit("task.created", { taskId });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 function readRole(file) {

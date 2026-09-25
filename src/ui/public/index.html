@@ -48,6 +48,18 @@
   ul.files li { cursor: pointer; padding: 2px 6px; border-radius: 4px; }
   ul.files li:hover { background: #232a35; }
   .phase { font-size: 12px; color: #9aa4b1; margin-bottom: 10px; }
+  .taskrow { display: flex; align-items: baseline; gap: 6px; padding: 3px 4px; border-radius: 4px; font-size: 12px; }
+  .taskrow:hover { background: #232a35; }
+  .taskrow .tid { color: #7fb5ff; cursor: pointer; white-space: nowrap; }
+  .taskrow .tsum { flex: 1; color: #aab4c0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .taskrow .tag { font-size: 10px; color: #9aa4b1; white-space: nowrap; }
+  .taskrow button { background: #2a313b; border: 1px solid #3a4453; color: #d8dce2; border-radius: 4px; font-size: 11px; padding: 1px 7px; cursor: pointer; }
+  .taskrow button:hover { background: #3a4453; }
+  .tsec { margin: 8px 0 2px; font-size: 11px; color: #9aa4b1; }
+  #newtask { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+  #newtask input, #newtask textarea { background: #10131a; border: 1px solid #2a313b; color: #d8dce2; border-radius: 4px; padding: 4px 6px; font-size: 12px; }
+  #newtask textarea { min-height: 44px; resize: vertical; }
+  #newtask button { align-self: flex-end; background: #2b6cb0; border: none; color: #fff; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -56,7 +68,15 @@
   </div>
   <div id="side">
     <div id="agents"></div>
-    <div class="card"><div class="name">タスク</div><pre id="tasks"></pre></div>
+    <div class="card"><div class="name">タスク(UIから直接操作・チャット不要)</div>
+      <div id="tasks"></div>
+      <div id="newtask">
+        <input id="nt-id" placeholder="task_id(空欄で自動採番)">
+        <input id="nt-role" placeholder="role(impl/review等、空欄で誰でも)">
+        <textarea id="nt-body" placeholder="何を / どう確認するか / 完了条件"></textarea>
+        <button id="nt-add">タスク投入(ボードへ直接)</button>
+      </div>
+    </div>
     <div class="card"><div class="name">ワークスペースのファイル(クリックで表示)</div><ul class="files" id="files"></ul></div>
     <div id="fileview"></div>
   </div>
@@ -77,10 +97,72 @@ function renderState(state) {
       `<div class="meta">${hier}${a.tokens ? ` / tokens ${a.tokens.toLocaleString()} / $${(a.costUsd ?? 0).toFixed(4)}` : ""}</div>`;
     agentsEl.appendChild(div);
   }
-  document.getElementById("tasks").textContent =
-    `open:    ${state.tasks.open.join("\n        ") || "(なし)"}\nclaimed: ${state.tasks.claimed.join("\n         ") || "(なし)"}\ndone:    ${state.tasks.done.join("\n     ") || "(なし)"}`;
+  renderTasks(state.taskList);
   document.getElementById("phase").textContent = state.live.scenario ? `シナリオ: ${state.live.scenario.name} [${state.live.scenario.phase}]` : "";
   renderFiles();
+}
+
+// タスクパネル: 状態ごとの一覧+UI直操作(クリックで本文、ボタンで解放/中止/再開)
+function renderTasks(list) {
+  const el = document.getElementById("tasks");
+  el.innerHTML = "";
+  const secs = [
+    ["open", "未着手", (t) => ({ label: "中止", action: "cancel" })],
+    ["claimed", "作業中", (t) => ({ label: "解放", action: "release" })],
+    ["done", "完了", (t) => ({ label: "再開", action: "reopen" })],
+  ];
+  for (const [state, label, btn] of secs) {
+    const rows = list[state] ?? [];
+    const head = document.createElement("div");
+    head.className = "tsec";
+    head.textContent = `${label}(${rows.length})`;
+    el.appendChild(head);
+    for (const t of rows) {
+      const row = document.createElement("div");
+      row.className = "taskrow";
+      const id = document.createElement("span");
+      id.className = "tid";
+      id.textContent = t.id + (t.agent && t.agent !== "auto" && t.agent !== "you" ? ` @${t.agent}` : "");
+      id.title = t.summary;
+      id.onclick = () => showTaskBody(t);
+      const sum = document.createElement("span");
+      sum.className = "tsum";
+      sum.textContent = t.summary;
+      sum.onclick = () => showTaskBody(t);
+      const b = document.createElement("button");
+      const spec = btn(t);
+      b.textContent = spec.label;
+      b.onclick = (e) => { e.stopPropagation(); taskAction({ action: spec.action, id: t.id, agent: t.agent }); };
+      row.append(id, sum, b);
+      el.appendChild(row);
+    }
+  }
+}
+
+async function showTaskBody(t) {
+  const r = await (await fetch("/api/file?path=" + encodeURIComponent(t.path))).json();
+  document.getElementById("fileview").innerHTML =
+    `<div class="tsec">${escapeHtml(t.id)} の本文(<code>${escapeHtml(t.path)}</code>)</div>` +
+    `<div class="post">${renderMarkdown(r.content ?? "")}</div>`;
+}
+
+async function taskAction(payload) {
+  const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })).json();
+  if (r.error) alert(r.error);
+  refresh();
+}
+
+async function createTask() {
+  const id = document.getElementById("nt-id").value.trim();
+  const role = document.getElementById("nt-role").value.trim();
+  const body = document.getElementById("nt-body").value.trim();
+  if (!body) { alert("本文(何を/完了条件)を書いてください"); return; }
+  const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, role, body }) })).json();
+  if (r.error) { alert(r.error); return; }
+  document.getElementById("nt-id").value = "";
+  document.getElementById("nt-role").value = "";
+  document.getElementById("nt-body").value = "";
+  refresh();
 }
 
 async function renderFiles() {
@@ -152,8 +234,9 @@ es.onmessage = (e) => {
   if (type === "board") addPost(payload);
   if (type === "agent.spawned") refresh();
   if (type === "scenario.started" || type === "scenario.finished") refresh();
-  if (type === "task.claimed" || type === "task.finished" || type === "task.created") refresh();
+  if (type === "task.claimed" || type === "task.finished" || type === "task.created" || type === "task.released" || type === "task.cancelled" || type === "task.autoResolved") refresh();
 };
+document.getElementById("nt-add").onclick = createTask;
 document.getElementById("saybtn").onclick = sendSay;
 document.getElementById("saytext").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) sendSay();

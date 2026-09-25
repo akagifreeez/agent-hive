@@ -81,3 +81,64 @@ test("gather_context: limitで取得件数を絞れる(新しい方を優先)", 
   assert.match(r.text, /新しい投稿3/);
   rmSync(ws, { recursive: true, force: true });
 });
+
+// UI直操作(チャット不要のタスク管理)の土台
+test("list: 状態ごとにid/担当/要約/パス付きで一覧を返す", () => {
+  const ws = mktmp();
+  const tasks = new TaskBlackboard(ws);
+  tasks.seed([{ id: "t1", role: "impl", body: "role行の次がサマリーになる\n詳細は2行目" }, { id: "t2", role: null, body: "roleなしの仕事" }]);
+  tasks.claim({ id: "alpha", role: "impl" });
+  const l = tasks.list();
+  assert.equal(l.open.length, 1);
+  assert.equal(l.open[0].id, "t2");
+  assert.equal(l.open[0].state, "open");
+  assert.match(l.open[0].summary, /roleなしの仕事/);
+  assert.match(l.open[0].path, /^tasks\/open\/t2\.md$/);
+  assert.equal(l.claimed.length, 1);
+  assert.equal(l.claimed[0].id, "t1");
+  assert.equal(l.claimed[0].agent, "alpha");
+  assert.equal(l.claimed[0].role, "impl");
+  assert.match(l.claimed[0].summary, /サマリーになる/);
+  tasks.finish({ id: "alpha" }, "t1");
+  const l2 = tasks.list();
+  assert.equal(l2.done[0].id, "t1");
+  assert.equal(l2.done[0].agent, "alpha");
+  rmSync(ws, { recursive: true, force: true });
+});
+
+test("releaseOne: 指定1件だけopenへ戻す。openに同名があれば壊さない", () => {
+  const ws = mktmp();
+  const tasks = new TaskBlackboard(ws);
+  tasks.seed([{ id: "t1", role: null, body: "仕事1" }, { id: "t2", role: null, body: "仕事2" }]);
+  tasks.claim({ id: "alpha", role: "x" });
+  tasks.claim({ id: "alpha", role: "x" });
+  assert.equal(tasks.releaseOne("alpha", "t1", "UIから解放"), true);
+  assert.equal(existsSync(join(ws, "tasks/open/t1.md")), true);
+  assert.match(readFileSync(join(ws, "tasks/open/t1.md"), "utf8"), /UIから解放/);
+  assert.equal(tasks.snapshot().claimed.length, 1); // t2はstill claimed
+  // openに同名が既にある場合は失敗(上書きしない)
+  tasks.create({ id: "t2", body: "手動で投入済み" });
+  assert.equal(tasks.releaseOne("alpha", "t2", "note"), false);
+  assert.equal(readFileSync(join(ws, "tasks/open/t2.md"), "utf8").includes("手動で投入済み"), true);
+  rmSync(ws, { recursive: true, force: true });
+});
+
+test("cancel/reopen: open→中止→done、再開でopenへ。二重再開は拒否", () => {
+  const ws = mktmp();
+  const bus = new Bus();
+  const events = [];
+  bus.on("task.cancelled", (p) => events.push(p));
+  const tasks = new TaskBlackboard(ws, bus);
+  tasks.seed([{ id: "t1", role: null, body: "やめる仕事" }]);
+  assert.equal(tasks.cancel("t1"), true);
+  assert.equal(existsSync(join(ws, "tasks/open/t1.md")), false);
+  assert.match(readFileSync(join(ws, "tasks/done/you--t1.md"), "utf8"), /中止/);
+  assert.deepEqual(events, [{ taskId: "t1" }]);
+
+  assert.equal(tasks.reopen("t1"), true);
+  assert.equal(existsSync(join(ws, "tasks/open/t1.md")), true);
+  assert.match(readFileSync(join(ws, "tasks/open/t1.md"), "utf8"), /再開/);
+  // doneからは消えているので再openはもうできない(openに同名もあるし)
+  assert.equal(tasks.reopen("t1"), false);
+  rmSync(ws, { recursive: true, force: true });
+});

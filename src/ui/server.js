@@ -49,6 +49,32 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   };
   for (const [type, fn] of Object.entries(record)) bus.on(type, fn);
 
+  // タスクの直接操作(チャットを介さずblackboardのファイルを触る。トークン消費ゼロ)
+  function handleTaskAction({ action, id, agent, role, body }) {
+    if (action === "create") {
+      const taskBody = String(body ?? "").trim();
+      if (!taskBody) return { ok: false, error: "bodyが空です" };
+      let taskId = String(id ?? "").trim();
+      if (!taskId) taskId = `task-${Date.now().toString(36)}`;
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(taskId)) return { ok: false, error: "task_idは英小文字数字とハイフン" };
+      if (!tasks.create({ id: taskId, role: role ? String(role) : null, body: taskBody })) return { ok: false, error: `task_id ${taskId} は既に存在します` };
+      return { ok: true, id: taskId };
+    }
+    if (action === "release") {
+      if (!tasks.releaseOne(String(agent ?? ""), String(id ?? ""), "[解放] ユーザーがUIから解放")) return { ok: false, error: "解放できません(指定を確認)" };
+      return { ok: true };
+    }
+    if (action === "cancel") {
+      if (!tasks.cancel(String(id ?? ""))) return { ok: false, error: "中止できません(openのタスクを指定)" };
+      return { ok: true };
+    }
+    if (action === "reopen") {
+      if (!tasks.reopen(String(id ?? ""))) return { ok: false, error: "再開できません(doneに同名タスクがあるか、openに既に存在)" };
+      return { ok: true };
+    }
+    return { ok: false, error: `不明なaction: ${action}` };
+  }
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     try {
@@ -63,7 +89,21 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
-      if (url.pathname === "/api/state") return json(res, { live, tasks: tasks.snapshot(), files: listWorkspaceFiles(config.workspace) });
+      if (url.pathname === "/api/state") return json(res, { live, tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace) });
+      if (url.pathname === "/api/tasks" && req.method === "POST") {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const r = handleTaskAction(JSON.parse(body));
+            if (!r.ok) throw new Error(r.error);
+            json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/say" && req.method === "POST" && onSay) {
         let body = "";
         req.on("data", (d) => (body += d));
