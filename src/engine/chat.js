@@ -60,9 +60,11 @@ export class ChatHost {
     });
   }
 
-  // ボード上の@表示名で特定のメインを起こす
+  // ボード上の@表示名で特定のメインを起こす。ただし自分のスレッドの投稿だけ
+  // (他スレッドのボードで同名が呼ばれても起こされない)
   handleBoardPost(post) {
     if (post.from === "you") return; // ユーザー入力はsay()経由で処理済み
+    if (post.thread !== this.board.name) return;
     for (const m of this.mains) {
       if (post.from === m.id) continue;
       if (post.text.includes(`@${m.displayName}`)) {

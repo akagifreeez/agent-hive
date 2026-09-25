@@ -15,7 +15,7 @@
   "workspace": "workspace",
   "worktrees": { "dir": "worktrees" },
   "hierarchy": { "maxDepth": 2, "maxConcurrent": 6 },
-  "chat": { "mains": ["alpha", "beta", "gamma"], "maxTurnsPerRound": 12 },
+  "chat": { "lead": "lead", "workers": ["alpha", "beta", "gamma"], "mains": ["alpha", "beta", "gamma"], "maxTurnsPerRound": 12 },
   "agents": [
     { "id": "alpha", "displayName": "アルファ", "role": "impl", "persona": "agents/alpha.md" },
     { "id": "delta", "displayName": "デルタ", "role": "impl", "persona": "agents/delta.md" },

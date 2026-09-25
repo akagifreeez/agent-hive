@@ -10,7 +10,7 @@ import { readMeta } from "./tasks.js";
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000 }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null }) {
   const specs = [
     {
       name: "claim_next_task",
@@ -55,6 +55,19 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           brief: { type: "string", description: "初期ブリーフ。目標・完了条件・このタスク固有の指示のみ。共有素材は労働者が gather_context で読む" },
         },
         required: ["brief"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "open_thread",
+      description: "計画に基づきサブスレッドを開く(リーダー専用)。3エージェント(設計・実装/検証・レビュー/進行・調整)がそのスレッドで並行作業を始める。事前に create_task で project=<スレッド名> のタスクを起票しておくこと。",
+      parameters: {
+        type: "object",
+        properties: {
+          project: { type: "string", description: "スレッド名(=プロジェクト名)。英小文字数字とハイフン" },
+          goal: { type: "string", description: "スレッドの目標と受け入れ条件(1〜3文)" },
+        },
+        required: ["project", "goal"],
         additionalProperties: false,
       },
     },
@@ -169,6 +182,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!spawner) return { ok: false, text: "このエージェントにはスポーン権限がありません。" };
         const r = await spawner.spawn({
           parent: agent,
+          board, // 自分のスレッドのボードへスポーン関係の投稿を流す
           displayName: args.display_name ? String(args.display_name) : undefined,
           role: args.role ? String(args.role) : undefined,
           project: args.project ? String(args.project) : "",
@@ -176,6 +190,16 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         });
         if (r.error) return { ok: false, text: `スポーンできません: ${r.error}` };
         return { ok: true, text: `サブエージェント ${r.id}(${r.displayName}) をスポーンしました。進捗はボードに流れます。` };
+      }
+      case "open_thread": {
+        if (!threadOpener) return { ok: false, text: "open_threadはリーダー専用です。" };
+        const project = String(args.project ?? "").trim();
+        if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(project)) return { ok: false, text: "project(スレッド名)は英小文字数字とハイフンで40字以内にしてください。" };
+        const goal = String(args.goal ?? "").trim();
+        if (!goal) return { ok: false, text: "goalが空です。" };
+        const tr = await threadOpener({ project, goal });
+        if (tr.error) return { ok: false, text: `スレッドを開けません: ${tr.error}` };
+        return { ok: true, text: `サブスレッド ${tr.id} を開きました。3エージェントが並行作業を始めました。` };
       }
       case "gather_context": {
         const source = String(args.source ?? "board");

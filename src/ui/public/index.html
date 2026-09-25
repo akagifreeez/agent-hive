@@ -48,6 +48,10 @@
   ul.files li { cursor: pointer; padding: 2px 6px; border-radius: 4px; }
   ul.files li:hover { background: #232a35; }
   .phase { font-size: 12px; color: #9aa4b1; margin-bottom: 10px; }
+  #tabs { margin: 4px 0 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .tab { padding: 4px 12px; border-radius: 14px; cursor: pointer; font-size: 12px; background: #1b2028; border: 1px solid #2a313b; color: #aab4c0; }
+  .tab:hover { border-color: #3a4453; }
+  .tab.active { background: #2b6cb0; border-color: #2b6cb0; color: #fff; }
   .taskrow { display: flex; align-items: baseline; gap: 6px; padding: 3px 4px; border-radius: 4px; font-size: 12px; }
   .taskrow:hover { background: #232a35; }
   .taskrow .tid { color: #7fb5ff; cursor: pointer; white-space: nowrap; }
@@ -76,8 +80,8 @@
 </style>
 </head>
 <body>
-  <div id="board"><h1>共有ボード</h1><div class="phase" id="phase"></div><div id="permreq"></div><div id="posts"></div>
-    <div id="saybar"><input id="saytext" placeholder="メインチャットへ指示(全メインに届く。@アルファ で個別呼び出し)"><button id="saybtn">送信</button></div>
+  <div id="board"><h1>agent-hive</h1><div id="tabs"></div><div class="phase" id="phase"></div><div id="permreq"></div><div id="posts"></div>
+    <div id="saybar"><input id="saytext" placeholder="表示中のスレッドへ指示(メイン=リーダーと壁打ち。スレッド=3ワーカー全員に届く)"><button id="saybtn">送信</button></div>
   </div>
   <div id="side">
     <div id="agents"></div>
@@ -103,11 +107,35 @@ const agentsEl = document.getElementById("agents");
 const postsEl = document.getElementById("posts");
 let agentOrder = [];
 let expandedAgent = null;
+let selectedThread = "__main__";
+
+// スレッドタブ: メイン(リーダーと1:1)と各サブスレッド(3ワーカー)を切り替える
+function renderTabs(threads) {
+  const el = document.getElementById("tabs");
+  el.innerHTML = "";
+  const tabs = [
+    { id: "__main__", label: "🤝 メイン(壁打ち)" },
+    ...(threads ?? []).filter((t) => t.name !== "__main__").map((t) => ({ id: t.name, label: "🧵 " + t.name, title: t.goal })),
+  ];
+  for (const t of tabs) {
+    const b = document.createElement("span");
+    b.className = "tab" + (selectedThread === t.id ? " active" : "");
+    b.textContent = t.label;
+    if (t.title) b.title = t.goal ?? t.title;
+    b.onclick = () => {
+      selectedThread = t.id;
+      if (t.id !== "__main__") projectFilter = t.id; // タスク絞込もスレッドに追従
+      refresh();
+    };
+    el.appendChild(b);
+  }
+}
 
 function renderState(state) {
-  const names = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ", delta: "デルタ", system: "システム" };
+  renderTabs(state.live.threads);
+  const names = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ", delta: "デルタ", system: "システム", lead: "リーダー" };
   agentsEl.innerHTML = "";
-  for (const [id, a] of Object.entries(state.live.agents)) {
+  for (const [id, a] of Object.entries(state.live.agents).filter(([id, a]) => (a.thread ?? "__main__") === selectedThread)) {
     const div = document.createElement("div");
     const isOpen = expandedAgent === id;
     div.className = "card clickable " + (a.status ?? "") + (isOpen ? " open-agent" : "");
@@ -316,7 +344,10 @@ async function decide(id, approve) {
 async function refresh() {
   const state = await (await fetch("/api/state")).json();
   postsEl.innerHTML = "";
-  for (const p of state.live.board) addPost(p);
+  for (const p of state.live.board) {
+    if ((p.thread ?? "__main__") !== selectedThread) continue;
+    addPost(p);
+  }
   renderRequests(state.live.requests ?? []);
   renderState(state);
 }
@@ -331,7 +362,9 @@ function refreshSoon() {
 }
 es.onmessage = (e) => {
   const { type, payload } = JSON.parse(e.data);
-  if (type === "board") addPost(payload);
+  if (type === "board") {
+    if ((payload.thread ?? "__main__") === selectedThread) addPost(payload);
+  }
   if (type === "agent.spawned") refresh();
   if (type === "scenario.started" || type === "scenario.finished") refresh();
   if (type === "task.claimed" || type === "task.finished" || type === "task.created" || type === "task.released" || type === "task.cancelled" || type === "task.autoResolved") refresh();
@@ -348,7 +381,7 @@ async function sendSay() {
   const text = el.value.trim();
   if (!text) return;
   el.value = "";
-  await fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+  await fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, thread: selectedThread === "__main__" ? null : selectedThread }) });
 }
 refresh();
 setInterval(refresh, 5000);

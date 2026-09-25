@@ -1,15 +1,17 @@
 // 共有ボード(blackboardのメッセージ面)。全エージェントの投稿が流れ、
 // 他エージェントのループに「ボード新着」として注入される。
+// v6: Boardごとにスレッド名を持ち、投稿にthreadタグを付ける(メインチャット="__main__")。
 export class Board {
-  constructor(bus = null) {
+  constructor(bus = null, name = "__main__") {
     this.posts = [];
     this.seq = 0;
     this.bus = bus;
+    this.name = String(name);
     this.waiters = []; // {from, resolve, timer}
   }
 
   post(from, text) {
-    const post = { id: ++this.seq, from, text: String(text), at: Date.now() };
+    const post = { id: ++this.seq, from, text: String(text), at: Date.now(), thread: this.name };
     this.posts.push(post);
     this.bus?.emit("board", post);
     for (const w of this.waiters.splice(0)) {

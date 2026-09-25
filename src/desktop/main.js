@@ -41,7 +41,7 @@ async function bootstrap() {
   // smokeモード: chat配線とサーバーの立ち上がりだけ確認し、窓も出さず終了する
   if (SMOKE) {
     const controller = await runChat({ config, bus });
-    await startUi({ config, bus, autoStart: false, onSay: (text) => controller.say(text) });
+    await startUi({ config, bus, autoStart: false, onSay: (text, thread) => controller.say(text, thread) });
     const resultFile = process.env.HIVE_SMOKE_FILE ?? "smoke-result.txt";
     try {
       const res = await fetch(`http://localhost:${config.ui.port}/api/state`);
@@ -63,9 +63,9 @@ async function bootstrap() {
   if (SCENARIO) {
     await startUi({ config, modelFactory: () => new OpenAIModel(config.model), bus, autoStart: true });
   } else {
-    // 既定: メインチャット常駐モード
+    // 既定: メインチャット常駐モード(v6: リーダー+サブスレッド)
     const controller = await runChat({ config, bus });
-    await startUi({ config, bus, autoStart: false, onSay: (text) => controller.say(text) });
+    await startUi({ config, bus, autoStart: false, onSay: (text, thread) => controller.say(text, thread) });
   }
 
   win = new BrowserWindow({
