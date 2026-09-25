@@ -38,6 +38,19 @@ export function buildKickoff(agent, scenarioName) {
   return `シナリオ「${scenarioName}」を開始します。あなた(=${agent.displayName}/ロール:${agent.role})の仕事を claim_next_task で確認し、着手してください。`;
 }
 
+// autocompactの条件にする「いま遂行中の仕事」。請求中タスクがあればその本文、
+// 無ければ(chat統括など)直近の genuine なユーザー指示([で始まる注入メッセージは除外)。
+// どちらも無ければnullとなり、要約は従来どおり汎用になる。
+function currentTaskContext(tasks, agent, messages) {
+  const claimed = tasks ? tasks.claimedBy(agent.id) : [];
+  if (claimed.length) {
+    const text = claimed.map((t) => `タスク ${t.id}: ${t.body.trim()}`).join("\n");
+    return text.slice(0, 1500);
+  }
+  const user = [...messages].reverse().find((m) => m.role === "user" && !m.content.startsWith("["));
+  return user ? user.content.slice(0, 1500) : null;
+}
+
 export async function runAgentLoop({
   agent, model, tools, board, tasks, bus,
   ledger = null, budget = null,
@@ -131,7 +144,7 @@ export async function runAgentLoop({
     });
     if (ac.should && autocompactFailures < AUTOCOMPACT_FAILURE_LIMIT) {
       try {
-        const summary = await model.chat({ messages: buildCompactRequest(messages) });
+        const summary = await model.chat({ messages: buildCompactRequest(messages, { taskContext: currentTaskContext(tasks, agent, messages) }) });
         if (ledger) ledger.add(agent.id, summary.usage);
         const text = (summary.content ?? "").trim();
         if (!text) throw new Error("要約が空でした");

@@ -7,6 +7,8 @@ import {
   microcompact,
   shouldAutocompact,
   applyCompaction,
+  buildCompactRequest,
+  COMPACT_SYSTEM_PROMPT,
   MICROCOMPACT_PLACEHOLDER,
 } from "../src/engine/compact.js";
 import { UsageLedger } from "../src/engine/usage.js";
@@ -77,6 +79,15 @@ test("applyCompaction: system+要約+直近4件を残す", () => {
   assert.equal(out[out.length - 1].content, "u3");
 });
 
+test("buildCompactRequest: タスク文脈があれば読み取り時キュレーションを足し、無ければ汎用のまま", () => {
+  const msgs = [{ role: "user", content: "hi" }];
+  const withCtx = buildCompactRequest(msgs, { taskContext: "タスク t1: 素数判定の実装" });
+  assert.match(withCtx[0].content, /読み取り時キュレーション/);
+  assert.match(withCtx[0].content, /素数判定/);
+  const without = buildCompactRequest(msgs);
+  assert.equal(without[0].content, COMPACT_SYSTEM_PROMPT);
+});
+
 test("UsageLedger: エージェント別と合計を集計", () => {
   const l = new UsageLedger();
   l.add("alpha", { promptTokens: 100, completionTokens: 50, reasoningTokens: 20, costUsd: 0.01 });
@@ -118,6 +129,69 @@ test("予算ブレーキ: maxTokensPerRun超過でendedBy=budget", async () => {
   const model = scriptedModel([{ toolCalls: [{ name: "claim_next_task" }] }]);
   const r = await runAgentLoop({ agent, model, tools, board, tasks, bus, ledger, budget: { maxTokensPerRun: 1000 }, maxTurns: 10 });
   assert.equal(r.endedBy, "budget");
+  cleanup(ws);
+});
+
+// autocompact: 要約請求に請求中タスクの本文が乗る(読み取り時キュレーション)
+test("autocompact: 請求中タスクを条件に要約する", async () => {
+  const ws = mktmp();
+  const { board, tasks, bus } = makeEnv(ws);
+  const agent = { id: "alpha", displayName: "アルファ", role: "impl", personaPath: PERSONA };
+  const tools = createTools({ agent, workspace: ws, board, tasks, bus });
+  tasks.seed([{ id: "bigwork", role: "impl", body: "文字列ユーティリティ(upper/pad)の実装" }]);
+  tasks.claim({ id: "alpha", role: "impl" });
+
+  const compactPrompts = [];
+  let calls = 0;
+  const model = {
+    maxTokens: 4000,
+    async chat({ messages }) {
+      if (String(messages[0]?.content).includes("要約器")) {
+        compactPrompts.push(messages[0].content);
+        return { content: "要約した", toolCalls: [], raw: { content: "要約した" }, usage: { promptTokens: 10, completionTokens: 1 } };
+      }
+      calls++;
+      return { content: `応答${calls}`, toolCalls: [], raw: { content: `応答${calls}` }, usage: { promptTokens: calls === 1 ? 500000 : 10, completionTokens: 1 } };
+    },
+  };
+  await runAgentLoop({ agent, model, tools, board, tasks, bus, maxTurns: 4, contextWindow: 200000 });
+  assert.equal(compactPrompts.length, 1);
+  assert.match(compactPrompts[0], /読み取り時キュレーション/);
+  assert.match(compactPrompts[0], /bigwork/);
+  assert.match(compactPrompts[0], /upper\/pad/);
+  cleanup(ws);
+});
+
+// autocompact: 請求タスクが無い場合、直近のgenuineユーザー指示を文脈にする(注入メッセージは使わない)
+test("autocompact: タスク請求が無ければ直近のユーザー指示を文脈にする", async () => {
+  const ws = mktmp();
+  const { board, tasks, bus } = makeEnv(ws);
+  const agent = { id: "alpha", displayName: "アルファ", role: "impl", personaPath: PERSONA };
+  const tools = createTools({ agent, workspace: ws, board, tasks, bus });
+
+  const compactPrompts = [];
+  let calls = 0;
+  const model = {
+    maxTokens: 4000,
+    async chat({ messages }) {
+      if (String(messages[0]?.content).includes("要約器")) {
+        compactPrompts.push(messages[0].content);
+        return { content: "要約した", toolCalls: [], raw: { content: "要約した" }, usage: { promptTokens: 10, completionTokens: 1 } };
+      }
+      calls++;
+      return { content: `応答${calls}`, toolCalls: [], raw: { content: `応答${calls}` }, usage: { promptTokens: calls === 1 ? 500000 : 10, completionTokens: 1 } };
+    },
+  };
+  const memory = [
+    { role: "user", content: "家計簿アプリの足し算を実装して" },
+    { role: "assistant", content: "了解しました" },
+    { role: "user", content: "[ボード新着]\nbeta: こちらは進行中です" },
+  ];
+  await runAgentLoop({ agent, model, tools, board, tasks, bus, maxTurns: 4, contextWindow: 200000, messages: memory });
+  assert.equal(compactPrompts.length, 1);
+  assert.match(compactPrompts[0], /読み取り時キュレーション/);
+  assert.match(compactPrompts[0], /家計簿アプリ/);
+  assert.doesNotMatch(compactPrompts[0], /ボード新着/);
   cleanup(ws);
 });
 
