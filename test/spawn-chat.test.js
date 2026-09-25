@@ -190,7 +190,7 @@ test("継続ラウンド: ターン上限で中断しても1回だけ自動継�
   const secondCallContents = received[1]?.map((m) => m.content) ?? [];
   assert.ok(secondCallContents.some((c) => String(c).includes("ターン上限で中断")));
   // 未コミットの作業があるためworktreeは保持される
-  assert.ok(board.posts.some((p) => p.text.includes("[保持]")));
+  assert.ok(await waitUntil(() => board.posts.some((p) => p.text.includes("[保持]"))));
   rmTree(ws, { recursive: true, force: true });
   rmTree(root, { recursive: true, force: true });
 });
@@ -213,7 +213,7 @@ test("継続もターン上限なら諦めモード: worktree保持+[保持]告�
   assert.equal(manager.snapshot()[r.id].status, "ended:turn-limit");
   const wt = join(root, r.id);
   assert.ok(existsSync(wt)); // 保持される
-  assert.ok(board.posts.some((p) => p.text.includes("[保持]") && p.text.includes(r.id)));
+  assert.ok(await waitUntil(() => board.posts.some((p) => p.text.includes("[保持]") && p.text.includes(r.id))));
   rmTree(ws, { recursive: true, force: true });
   rmTree(root, { recursive: true, force: true });
 });

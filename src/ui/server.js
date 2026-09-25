@@ -95,6 +95,10 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
+      if (url.pathname === "/markdown.js") {
+        res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+        return res.end(readFileSync(join(PUBLIC, "markdown.js")));
+      }
       if (url.pathname === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         return res.end(readFileSync(join(PUBLIC, "index.html")));
