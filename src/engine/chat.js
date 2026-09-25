@@ -32,7 +32,9 @@ export class ChatHost {
     this.staggerMs = staggerMs;
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
     this.memories = new Map(); // id => messages配列(ラウンド間で保持)
+    this.seen = new Map(); // id => ボード既読位置(ラウンド間で保持。配信はボード注入の1経路のみ)
     this.roundState = new Map(); // id => {running, pending[]}
+    for (const m of mains) this.seen.set(m.id, board.lastId());
     // ボード上の@表示名でメインを起こす(横つながりの入口)
     bus.on("board", (p) => this.handleBoardPost(p));
   }
@@ -47,11 +49,12 @@ export class ChatHost {
     return this.memories.get(main.id);
   }
 
-  // ユーザー入力: 全メインを時間差で起こす(同時だと議論にならないため)
+  // ユーザー入力: 全メインを時間差で起こす(同時だと議論にならないため)。
+  // 本文はボード経由で1回だけ届く(seen管理)。キックオフは中身を持たない汎用文。
   say(text) {
     this.board.post("you", text);
     this.mains.forEach((m, i) => {
-      this.wake(m, `[チャット] ユーザーからの入力:\n${text}`, i * this.staggerMs);
+      this.wake(m, "[チャット] ユーザーからの新着入力があります。直前のボード新着を確認して応答してください。", i * this.staggerMs);
     });
   }
 
@@ -61,7 +64,7 @@ export class ChatHost {
     for (const m of this.mains) {
       if (post.from === m.id) continue;
       if (post.text.includes(`@${m.displayName}`)) {
-        this.wake(m, `[ボード] ${post.from} があなたを呼びました:\n${post.text.slice(0, 4000)}`, 800);
+        this.wake(m, "[ボード] あなたが呼ばれました。直前のボード新着を確認して応答してください。", 800);
       }
     }
   }
@@ -79,7 +82,7 @@ export class ChatHost {
       const messages = this.memory(main);
       messages.push({ role: "user", content: kickoffText });
       try {
-        await runAgentLoop({
+        const r = await runAgentLoop({
           agent: main,
           model: this.modelFactory(main),
           tools: this.toolsFactory(main),
@@ -93,7 +96,10 @@ export class ChatHost {
           contextWindow: this.contextWindow,
           thresholdPercent: this.thresholdPercent,
           messages,
+          seenBoard: this.seen.get(main.id) ?? null,
         });
+        // 既読位置をラウンド間で保持(同じ入力の二重配信を防ぐ)
+        if (typeof r.seenBoard === "number") this.seen.set(main.id, r.seenBoard);
         // メインが自ら直接作業した場合の受け皿: ラウンド終了時にmainへ自動マージ
         if (this.mainWorkspace) {
           const m = await mergeAgentWork({

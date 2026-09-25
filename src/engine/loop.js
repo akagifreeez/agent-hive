@@ -44,6 +44,7 @@ export async function runAgentLoop({
   maxTurns = 30, shellKind = "bash",
   contextWindow = 200000, thresholdPercent,
   messages = null, // 常駐エージェント(chat)は外部で保持した記憶を渡す
+  seenBoard = null, // 前回までの既読位置(chat常駐時はホストが保持。nullならラウンド開始時点まで既読)
 }) {
   if (!messages) {
     messages = [
@@ -51,7 +52,7 @@ export async function runAgentLoop({
       { role: "user", content: buildKickoff(agent, agent.scenarioName ?? "default") },
     ];
   }
-  let seenBoard = board.lastId();
+  let seen = seenBoard ?? board.lastId();
   let nudged = false;
   let emptyStreak = 0;
   let claimMisses = 0;
@@ -64,13 +65,13 @@ export async function runAgentLoop({
     if (ledger && budget?.maxTokensPerRun && ledger.totals().promptTokens + ledger.totals().completionTokens > budget.maxTokensPerRun) {
       board.post(agent.id, `[予算停止] ラン全体のトークン予算(${budget.maxTokensPerRun})に達したため終了します。`);
       bus.emit("agent.status", { agent: agent.id, status: "budget-stop" });
-      return { ok: false, endedBy: "budget" };
+      return { ok: false, endedBy: "budget", seenBoard: seen };
     }
 
-    // ボード新着の注入
-    const fresh = board.since(seenBoard).filter((p) => p.from !== agent.id);
+    // ボード新着の注入(既読位置以降だけ。seenはホストが保持して二重配信を防ぐ)
+    const fresh = board.since(seen).filter((p) => p.from !== agent.id);
     if (fresh.length) {
-      seenBoard = fresh[fresh.length - 1].id;
+      seen = fresh[fresh.length - 1].id;
       const text = fresh.map((p) => `${p.from}: ${p.text}`).join("\n---\n");
       messages.push({ role: "user", content: `[ボード新着]\n${text.slice(0, 6000)}` });
     }
@@ -85,7 +86,7 @@ export async function runAgentLoop({
     } catch (err) {
       bus.emit("agent.status", { agent: agent.id, status: "error" });
       bus.emit("agent.error", { agent: agent.id, turn, error: err.message });
-      return { ok: false, error: err.message };
+      return { ok: false, error: err.message, seenBoard: seen };
     }
     if (ledger) {
       ledger.add(agent.id, res.usage);
@@ -115,7 +116,7 @@ export async function runAgentLoop({
       if (claimMisses >= 3) {
         board.post(agent.id, `[待機終了] 請求できるタスクが3回連続で無かったため終了します。`);
         bus.emit("agent.status", { agent: agent.id, status: "done" });
-        return { ok: true, endedBy: "idle" };
+        return { ok: true, endedBy: "idle", seenBoard: seen };
       }
       continue;
     }
@@ -152,7 +153,7 @@ export async function runAgentLoop({
       emptyStreak += 1;
       if (emptyStreak > 3) {
         bus.emit("agent.status", { agent: agent.id, status: "empty-loop" });
-        return { ok: false, error: "空応答が連続しました" };
+        return { ok: false, error: "空応答が連続しました", seenBoard: seen };
       }
       messages.push({ role: "user", content: "[システム] 応答が空でした。次に行うべき行動をツール呼び出しで実行してください。" });
       continue;
@@ -166,9 +167,9 @@ export async function runAgentLoop({
     }
     board.post(agent.id, finalText);
     bus.emit("agent.status", { agent: agent.id, status: "done" });
-    return { ok: true, finalText };
+    return { ok: true, finalText, seenBoard: seen };
   }
 
   bus.emit("agent.status", { agent: agent.id, status: "turn-limit" });
-  return { ok: false, endedBy: "turn-limit", error: `ターン上限(${maxTurns})に達しました` };
+  return { ok: false, endedBy: "turn-limit", error: `ターン上限(${maxTurns})に達しました`, seenBoard: seen };
 }

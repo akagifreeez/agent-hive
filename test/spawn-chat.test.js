@@ -239,3 +239,41 @@ test("クリーン終了(マージ済み)ならworktreeとブランチを掃除�
   rmTree(ws, { recursive: true, force: true });
   rmTree(root, { recursive: true, force: true });
 });
+
+// 連続送信の二重配信バグの回帰テスト: 各入力は正確に1回だけ届く
+test("連続送信: 2通目が注入とkickoffで二重に届かない", async () => {
+  const ws = mkdtempSync(join(tmpdir(), "hive-dup-"));
+  const bus = new Bus();
+  const board = new Board(bus);
+  const tasks = new TaskBlackboard(ws, bus);
+  const received = [];
+  let calls = 0;
+  let release;
+  const blocked = new Promise((r) => { release = r; });
+  const main = { id: "alpha", displayName: "アルファ", role: "lead", depth: 0, personaPath: PERSONA };
+  const host = new ChatHost({
+    mains: [main],
+    modelFactory: () => ({
+      maxTokens: 4000,
+      async chat({ messages }) {
+        calls += 1;
+        received.push(messages.map((m) => String(m.content)));
+        if (calls === 1) await blocked; // 1通目の応答中に2通目を送る状況を再現
+        return { content: `応答${calls}`, toolCalls: [], raw: { role: "assistant", content: `応答${calls}` }, usage: {} };
+      },
+    }),
+    toolsFactory: () => ({ specs: [], detectShell: async () => "bash", execute: async () => ({ ok: true, text: "" }) }),
+    board, tasks, bus,
+    maxTurnsPerRound: 5, staggerMs: 0,
+  });
+  host.say("1つ目の指示");
+  await new Promise((r) => setTimeout(r, 300)); // ラウンド1が注入を終えてモデル呼び出し中になるまで待つ
+  host.say("2つ目の指示"); // ラウンド1進行中 → ボードには流れるが起床はpendingへ
+  await new Promise((r) => setTimeout(r, 200));
+  release();
+  await new Promise((r) => setTimeout(r, 800));
+  const occurrences = received.flat().filter((c) => c.includes("2つ目の指示")).length;
+  assert.equal(occurrences, 1, `2つ目の指示が${occurrences}回届いた(1回であるべき)`);
+  assert.equal(calls, 2, "pendingのラウンドは1回だけ走る");
+  rmTree(ws);
+});
