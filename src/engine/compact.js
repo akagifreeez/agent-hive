@@ -67,9 +67,20 @@ export const COMPACT_SYSTEM_PROMPT = `あなたは会話の要約器です。ツ
 
 出力は上記の箇条書き形式のみ。前置き・感想は不要。`;
 
-export function buildCompactRequest(messages) {
+// タスク文脈を渡すと読み取り時キュレーション(JIT memory, arXiv:2609.27334)に切り替える:
+// 圧縮の瞬間には遂行中タスクが判明しているので、「何を残すか」を汎用に決めず
+// 現在タスクを条件に取捨選択する。文脈が無い(=タスク外の会話)場合は従来どおり汎用要約。
+export function buildCompactRequest(messages, { taskContext = null } = {}) {
+  const system = taskContext
+    ? `${COMPACT_SYSTEM_PROMPT}
+読み取り時キュレーション: この要約は、下記の遂行中タスクが判明した状態で読まれます。
+--- 遂行中のタスク ---
+${taskContext}
+--- ここまで ---
+上記の遂行に不要な細部(無関係な探索・失敗した試行の詳細)は短くしてよい。逆に遂行に必要な要素(対象ファイル・制約・決定事項・現在の進捗)は必ず残すこと。`
+    : COMPACT_SYSTEM_PROMPT;
   return [
-    { role: "system", content: COMPACT_SYSTEM_PROMPT },
+    { role: "system", content: system },
     { role: "user", content: "以下の会話履歴を要約してください:\n\n" + messages.map((m) => `${m.role}: ${typeof m.content === "string" ? m.content.slice(0, 4000) : ""}`).join("\n---\n") },
   ];
 }
