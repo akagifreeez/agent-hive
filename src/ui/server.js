@@ -25,6 +25,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     agents: Object.fromEntries(config.agents.map((a) => [a.id, { status: "idle", turn: 0, lastTool: null }])),
     board: [],
     requests: [],
+    threads: [],
     scenario: null,
   };
   const tasks = new TaskBlackboard(config.workspace, bus);
@@ -51,7 +52,13 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     "compact.micro": (p) => pushAgentLog(live.agents[p.agent], "compact", `microcompact(-${p.savingsTokens}tok)`),
     "compact.failed": (p) => pushAgentLog(live.agents[p.agent], "compact", `圧縮失敗(${p.failures}回目): ${p.error}`),
     "agent.spawned": (p) => {
-      live.agents[p.agent.id] = { status: "working", turn: 0, displayName: p.agent.displayName, depth: p.agent.depth, parent: p.agent.parent };
+      live.agents[p.agent.id] = { status: "working", turn: 0, displayName: p.agent.displayName, depth: p.agent.depth, parent: p.agent.parent, thread: live.agents[p.agent.parent]?.thread ?? "__main__" };
+    },
+    "thread.opened": (p) => {
+      live.threads.push({ name: p.name, goal: p.goal });
+      for (const a of p.agents) {
+        live.agents[a.id] = { status: "idle", turn: 0, displayName: a.displayName, thread: p.name };
+      }
     },
     "agent.exited": (p) => {
       if (live.agents[p.agent]) live.agents[p.agent] = { ...live.agents[p.agent], status: p.ok ? "done" : "error" };
@@ -139,9 +146,9 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         req.on("data", (d) => (body += d));
         req.on("end", () => {
           try {
-            const { text } = JSON.parse(body);
+            const { text, thread } = JSON.parse(body);
             if (!text || !String(text).trim()) throw new Error("空の入力です");
-            onSay(String(text).trim());
+            onSay(String(text).trim(), thread ? String(thread) : null);
             json(res, { ok: true });
           } catch (err) {
             json(res, { error: err.message }, 400);

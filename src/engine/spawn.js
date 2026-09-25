@@ -45,7 +45,8 @@ export class SpawnManager {
   }
 
   // ツールから呼ばれる。呼び出し元は待たせないので、ループは非同期で走らせる。
-  async spawn({ parent, displayName, role, brief, project = "" }) {
+  // boardは呼び出し元のスレッドのボード(v6。省略時は構築時のboard=メイン)。
+  async spawn({ parent, board = null, displayName, role, brief, project = "" }) {
     const depth = (parent.depth ?? 0) + 1;
     if (depth > this.hierarchy.maxDepth) {
       return { error: `深さの上限(${this.hierarchy.maxDepth})に達しています。あなたの配下には作れません。` };
@@ -59,6 +60,7 @@ export class SpawnManager {
     const n = ++this.counter;
     const id = `${role ?? "worker"}-${n}`;
     const dn = displayName?.trim() || `${role ?? "worker"}-${n}`;
+    const b = board ?? this.board; // 呼び出し元のスレッドのボード
     let worktreePath;
     try {
       worktreePath = await createWorktree({
@@ -81,20 +83,21 @@ export class SpawnManager {
     const projNote = project ? `文脈(project): ${project} — 追加のタスクを請求するときは project: ${project} で絞ること。\n\n` : "";
     this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, project, body: `${projNote}スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
     this.bus.emit("agent.spawned", { agent: { id, displayName: dn, depth, parent: parent.id, role: agent.role } });
-    this.board.post("system", `[スポーン] ${parent.displayName} が作業エージェント ${dn}(${id}) を作成しました。`);
+    b.post("system", `[スポーン] ${parent.displayName} が作業エージェント ${dn}(${id}) を作成しました。`);
 
     // 呼び出し元をブロックしない(縦の待ちを作らない)
-    void this.runAgent(agent, worktreePath, brief.trim());
+    void this.runAgent(agent, worktreePath, brief.trim(), b);
     return { id, displayName: dn };
   }
 
-  async runAgent(agent, worktreePath, brief) {
+  async runAgent(agent, worktreePath, brief, board = null) {
+    const b = board ?? this.board;
     const model = this.modelFactory(agent);
     const tools = createTools({
       agent,
       workspace: worktreePath,
       mainWorkspace: this.mainWorkspace,
-      board: this.board,
+      board: b,
       tasks: this.tasks,
       bus: this.bus,
       gate: this.gate,
@@ -128,24 +131,24 @@ export class SpawnManager {
         `[解放] 担当者(${agent.id})が終了したためopenへ戻しました。前走者の未反映作業は worktrees/${agent.id} にある場合があります。`
       );
       if (released.length) {
-        this.board.post("system", `[解放] ${agent.id} 終了により ${released.join(", ")} をopenへ戻しました。誰でも請求できます。`);
+        b.post("system", `[解放] ${agent.id} 終了により ${released.join(", ")} をopenへ戻しました。誰でも請求できます。`);
       }
     }
     const e = this.live.get(agent.id);
     if (e) e.status = r.ok ? "done" : `ended:${r.endedBy ?? "error"}`;
     this.bus.emit("agent.exited", { agent: agent.id, ok: r.ok, endedBy: r.endedBy ?? r.error });
-    await this.cleanupOrKeep(agent, worktreePath, r);
+    await this.cleanupOrKeep(b, agent, worktreePath, r);
   }
 
   // 終了後のworktree後始末: 未コミット/未マージがゼロなら掃除、あるなら保持してボードに告知
-  async cleanupOrKeep(agent, worktreePath, r) {
+  async cleanupOrKeep(board, agent, worktreePath, r) {
     try {
       const status = await runCommand({ command: "git status --porcelain", cwd: worktreePath, outputLimit: 2000 });
       const unmerged = await runCommand({ command: `git log main..agent/${agent.id} --oneline`, cwd: this.mainWorkspace, outputLimit: 2000 });
       const dirty = status.text.split("\n").slice(1).some((l) => l.trim());
       const hasCommits = unmerged.text.split("\n").slice(1).some((l) => l.trim());
       if (dirty || hasCommits) {
-        this.board.post("system", `[保持] ${agent.displayName}(${agent.id}) のworktreeに未反映の作業があります(worktrees/${agent.id})。引き継ぐ場合はそちらから。`);
+        board.post("system", `[保持] ${agent.displayName}(${agent.id}) のworktreeに未反映の作業があります(worktrees/${agent.id})。引き継ぐ場合はそちらから。`);
         return;
       }
       await runCommand({ command: `git worktree remove --force '${worktreePath}'`, cwd: this.mainWorkspace, outputLimit: 1000 });

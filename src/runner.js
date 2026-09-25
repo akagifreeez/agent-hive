@@ -26,11 +26,12 @@ export function createModelFactory(config) {
     });
 }
 
-// メインチャット常駐モード(v5): メイン3体+スポーンされるサブ/作業員。
-// コントローラ { say, manager } を返す(UIの入力欄からsayが呼ばれる)。
-export async function runChat({ config, bus = new Bus() }) {
+// メインチャット常駐モード(v6): リーダー1体がメインチャットで壁打ちと計画を担い、
+// open_threadで開かれたサブスレッド(project)ごとに3ワーカーが並行作業する。
+// コントローラ { say(text, thread?), openThread, listThreads, manager } を返す。
+export async function runChat({ config, bus = new Bus(), modelFactory = null }) {
   mkdirSync(config.workspace, { recursive: true });
-  const board = new Board(bus);
+  const mainBoard = new Board(bus, "__main__");
   const tasks = new TaskBlackboard(config.workspace, bus);
   const gate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   const ledger = new UsageLedger();
@@ -43,19 +44,6 @@ export async function runChat({ config, bus = new Bus() }) {
   await ensureGitRepo(config.workspace);
 
   const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
-  const mains = config.agents
-    .filter((a) => (config.chat?.mains ?? config.agents.map((x) => x.id)).includes(a.id))
-    .map((a) => ({ ...a, depth: 0 }));
-  const worktreePaths = await setupWorktrees({
-    mainWorkspace: config.workspace,
-    worktreeRoot,
-    agents: mains,
-    onKept: ({ agentId, path, detail }) => {
-      bus.emit("worktree.kept", { agent: agentId, path });
-      board.post("system", `[worktree保持] worktrees/${agentId} に前回実行の未コミット変更があるため初期化をスキップしました。引き継ぐ場合はそのまま作業するか、確定させてください。\n\n${detail}`);
-    },
-  });
-
   // 永続記憶(memory/)は毎回読み直す(distill-learningsの反映を次ラウンドから効かせる)
   const memoryFn = () => buildMemoryContext(config.workspace);
 
@@ -66,44 +54,124 @@ export async function runChat({ config, bus = new Bus() }) {
   });
   bus.on("merge.completed", () => void discovery.tick());
 
+  const modelFor = modelFactory ?? createModelFactory(config);
+  const keptNotice = (board) => ({ agentId, path, detail }) => {
+    bus.emit("worktree.kept", { agent: agentId, path });
+    board.post("system", `[worktree保持] worktrees/${agentId} に前回実行の未コミット変更があるため初期化をスキップしました。引き継ぐ場合はそのまま作業するか、確定させてください。\n\n${detail}`);
+  };
+
   const manager = new SpawnManager({
     mainWorkspace: config.workspace,
     worktreeRoot,
-    board, tasks, bus, gate, ledger,
+    board: mainBoard, tasks, bus, gate, ledger,
     budget: config.budget,
     hierarchy: config.hierarchy,
-    modelFactory: createModelFactory(config),
+    modelFactory: modelFor,
     maxTurns: config.loop.maxTurns,
     contextWindow: config.model.contextWindow ?? 200000,
     thresholdPercent: config.compact?.thresholdPercent,
     memoryFn,
   });
-  const toolsFactory = (main) =>
-    createTools({
-      agent: main,
-      workspace: worktreePaths[main.id],
-      mainWorkspace: config.workspace,
-      board, tasks, bus, gate,
-      spawner: manager,
-    });
 
-  const host = new ChatHost({
-    mains,
+  // サブスレッド: project名=スレッド名。3ワーカー( personas: workers )が専用ボードで並行作業
+  const threads = new Map();
+  const openThread = async ({ project, goal }) => {
+    const name = String(project).trim();
+    if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) return { error: "project(スレッド名)は英小文字数字とハイフンで40字以内" };
+    if (threads.has(name)) return { error: `スレッド ${name} は既に開いています` };
+    const workerIds = config.chat?.workers ?? config.chat?.mains ?? ["alpha", "beta", "gamma"];
+    const members = workerIds.map((w) => {
+      const base = config.agents.find((a) => a.id === w) ?? { id: w, displayName: w, role: "impl" };
+      return {
+        id: `${name}-${w}`,
+        displayName: base.displayName ?? w,
+        role: base.role ?? "impl",
+        depth: 1,
+        personaPath: resolve(ROOT, base.persona ?? `agents/${w}.md`),
+        scenarioName: "chat",
+      };
+    });
+    const wtPaths = await setupWorktrees({
+      mainWorkspace: config.workspace,
+      worktreeRoot,
+      agents: members,
+      onKept: keptNotice(mainBoard),
+    });
+    const threadBoard = new Board(bus, name);
+    const host = new ChatHost({
+      mains: members,
+      mainWorkspace: config.workspace,
+      modelFactory: modelFor,
+      toolsFactory: (agent) => createTools({
+        agent,
+        workspace: wtPaths[agent.id],
+        mainWorkspace: config.workspace,
+        board: threadBoard, tasks, bus, gate,
+        spawner: manager,
+      }),
+      board: threadBoard, tasks, bus, ledger,
+      budget: config.budget,
+      maxTurnsPerRound: config.chat?.maxTurnsPerRound ?? 12,
+      contextWindow: config.model.contextWindow ?? 200000,
+      thresholdPercent: config.compact?.thresholdPercent,
+      memoryFn,
+      staggerMs: config.chat?.staggerMs ?? 3000,
+    });
+    host.worktreePaths = wtPaths;
+    threads.set(name, { name, goal, host });
+    bus.emit("thread.opened", { name, goal, agents: members.map((m) => ({ id: m.id, displayName: m.displayName })) });
+    host.say(`[スレッド開始] project: ${name}\n目標: ${goal}\n\nタスクは claim_next_task で project: ${name} を指定して請求してください。`);
+    return { ok: true, id: name };
+  };
+
+  // リーダー(メインチャットに1体)。壁打ち→計画→open_thread
+  const leadDef = config.agents.find((a) => a.id === (config.chat?.lead ?? "lead")) ?? {};
+  const lead = {
+    id: leadDef.id ?? config.chat?.lead ?? "lead",
+    displayName: leadDef.displayName ?? "リーダー",
+    role: "lead",
+    depth: 0,
+    personaPath: resolve(ROOT, leadDef.persona ?? `agents/${leadDef.id ?? "lead"}.md`),
+    scenarioName: "chat",
+  };
+  const leadWt = await setupWorktrees({
     mainWorkspace: config.workspace,
-    modelFactory: createModelFactory(config),
-    toolsFactory,
-    board, tasks, bus, ledger,
+    worktreeRoot,
+    agents: [lead],
+    onKept: keptNotice(mainBoard),
+  });
+  const leadHost = new ChatHost({
+    mains: [lead],
+    mainWorkspace: config.workspace,
+    modelFactory: modelFor,
+    toolsFactory: (agent) => createTools({
+      agent,
+      workspace: leadWt[lead.id],
+      mainWorkspace: config.workspace,
+      board: mainBoard, tasks, bus, gate,
+      spawner: manager,
+      threadOpener: openThread,
+    }),
+    board: mainBoard, tasks, bus, ledger,
     budget: config.budget,
     maxTurnsPerRound: config.chat?.maxTurnsPerRound ?? 12,
     contextWindow: config.model.contextWindow ?? 200000,
     thresholdPercent: config.compact?.thresholdPercent,
     memoryFn,
+    staggerMs: config.chat?.staggerMs ?? 3000,
   });
-  host.worktreePaths = worktreePaths;
+  leadHost.worktreePaths = leadWt;
+  bus.emit("thread.opened", { name: "__main__", goal: "メインチャット(壁打ちと計画)", agents: [{ id: lead.id, displayName: lead.displayName }] });
 
   bus.emit("scenario.started", { name: `chat:${config.scenario.name}`, tasks: [] });
   return {
-    say: (text) => host.say(text),
+    say: (text, thread = null) => {
+      const t = thread ? threads.get(thread) : null;
+      if (t) return t.host.say(text);
+      return leadHost.say(text);
+    },
+    openThread,
+    listThreads: () => [...threads.keys()],
     manager,
     bus,
   };
