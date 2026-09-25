@@ -14,6 +14,7 @@ import { UsageLedger } from "./engine/usage.js";
 import { OpenAIModel } from "./model/openai.js";
 import { SpawnManager } from "./engine/spawn.js";
 import { ChatHost } from "./engine/chat.js";
+import { buildMemoryContext } from "./engine/memory.js";
 import { ROOT } from "./config.js";
 
 export function createModelFactory(config) {
@@ -47,6 +48,9 @@ export async function runChat({ config, bus = new Bus() }) {
     .map((a) => ({ ...a, depth: 0 }));
   const worktreePaths = await setupWorktrees({ mainWorkspace: config.workspace, worktreeRoot, agents: mains });
 
+  // 永続記憶(memory/)は毎回読み直す(distill-learningsの反映を次ラウンドから効かせる)
+  const memoryFn = () => buildMemoryContext(config.workspace);
+
   const discovery = startDiscovery({
     workspace: config.workspace, tasks, bus,
     intervalSec: config.discovery?.intervalSec ?? 30,
@@ -64,6 +68,7 @@ export async function runChat({ config, bus = new Bus() }) {
     maxTurns: config.loop.maxTurns,
     contextWindow: config.model.contextWindow ?? 200000,
     thresholdPercent: config.compact?.thresholdPercent,
+    memoryFn,
   });
   const toolsFactory = (main) =>
     createTools({
@@ -84,6 +89,7 @@ export async function runChat({ config, bus = new Bus() }) {
     maxTurnsPerRound: config.chat?.maxTurnsPerRound ?? 12,
     contextWindow: config.model.contextWindow ?? 200000,
     thresholdPercent: config.compact?.thresholdPercent,
+    memoryFn,
   });
   host.worktreePaths = worktreePaths;
 
@@ -154,6 +160,7 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       maxTurns: config.loop.maxTurns, shellKind,
       contextWindow: config.model.contextWindow ?? 200000,
       thresholdPercent: config.compact?.thresholdPercent,
+      memory: buildMemoryContext(config.workspace) || null,
     });
   })());
 
