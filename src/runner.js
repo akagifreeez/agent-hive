@@ -204,6 +204,18 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     return { ok: true };
   };
 
+  // スレッドのフォルダ(ナビ表示用分類)を付け替え。openThreadと同じ正規化を適用
+  const setThreadFolder = ({ project, folder }) => {
+    const name = String(project).trim();
+    const t = threads.get(name);
+    if (!t) return { error: `スレッド ${name} は開いていません` };
+    const folderName = folder ? String(folder).trim().slice(0, 30) || null : null;
+    t.folder = folderName;
+    writeRegistry();
+    bus.emit("thread.folder", { name, folder: folderName });
+    return { ok: true, name, folder: folderName };
+  };
+
   // リーダー(メインチャットに1体)。壁打ち→計画→open_thread
   const leadDef = config.agents.find((a) => a.id === (config.chat?.lead ?? "lead")) ?? {};
   const lead = {
@@ -319,6 +331,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     },
     openThread,
     closeThread,
+    setThreadFolder,
     listThreads: () => [...threads.keys()],
     manager,
     mcpHosts,
