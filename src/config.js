@@ -8,9 +8,16 @@ export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export function loadConfig(configPath) {
   const p = configPath ? resolve(ROOT, configPath) : resolve(ROOT, "hive.config.json");
   const raw = JSON.parse(readFileSync(p, "utf8"));
+  // ローカル上書き(hive.local.json: フォルダ選択で生成)。無ければ何もしない
+  let local = {};
+  const localPath = resolve(ROOT, "hive.local.json");
+  if (existsSync(localPath)) {
+    try { local = JSON.parse(readFileSync(localPath, "utf8")); } catch {}
+  }
   const cfg = {
     model: { temperature: 0.7, maxTokens: 2000, timeoutMs: 120000, contextWindow: 200000, reasoningEffort: null, ...(raw.model ?? {}) },
-    workspace: resolve(ROOT, raw.workspace ?? "workspace"),
+    workspace: resolve(ROOT, local.workspace ?? raw.workspace ?? "workspace"),
+    worktrees: { dir: resolve(ROOT, local.worktreesDir ?? raw.worktrees?.dir ?? "worktrees") },
     agents: (raw.agents ?? []).map((a) => ({ ...a, personaPath: resolve(ROOT, a.persona ?? `agents/${a.id}.md`) })),
     loop: { maxTurns: 30, ...(raw.loop ?? {}) },
     runner: { timeoutSec: 480, ...(raw.runner ?? {}) },
@@ -26,6 +33,7 @@ export function loadConfig(configPath) {
     chat: { mains: ["alpha", "beta", "gamma"], maxTurnsPerRound: 12, ...(raw.chat ?? {}) },
     mcp: raw.mcp ?? { servers: {} },
     hooks: raw.hooks ?? {},
+    commands: raw.commands ?? {},
     scenario: { seedFiles: [], ...raw.scenario },
   };
   cfg.model.apiKey = resolveApiKey(cfg.model);

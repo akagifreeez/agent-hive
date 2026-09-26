@@ -101,7 +101,13 @@
   .msg.mine .who { color: var(--accent); text-align: right; }
   .sysline { align-self: center; font-size: 12px; color: var(--label-tertiary); padding: 2px 10px; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  #composer { border-top: 1px solid var(--separator); padding: 10px 18px 14px; background: var(--bg-elevated); }
+  #composer { border-top: 1px solid var(--separator); padding: 10px 18px 14px; background: var(--bg-elevated); position: relative; }
+  #suggest { position: absolute; bottom: 100%; left: 18px; right: 18px; background: var(--bg-elevated); border: 1px solid var(--separator); border-radius: 8px; box-shadow: var(--shadow-overlay); max-height: 240px; overflow-y: auto; z-index: 5; }
+  #suggest .sug { padding: 5px 12px; cursor: pointer; font-size: 12px; color: var(--label); }
+  #suggest .sug .d { color: var(--sub); margin-left: 8px; font-size: 11px; }
+  #suggest .sug:hover { background: var(--accent-fill); }
+  .msg img.md-img { min-height: 48px; max-width: 100%; border-radius: 6px; display: block; margin: 4px 0; background: var(--bg); }
+  .room .prog { display: block; font-size: 11px; color: var(--ok); margin-top: 1px; }
   #composer .row { display: flex; gap: 8px; }
   #saytext { flex: 1; background: var(--bg); border: 1px solid var(--separator); color: var(--label); border-radius: var(--radius-control); padding: 8px 12px; font-size: 13px; }
   #saytext:focus { outline: none; border-color: var(--accent); }
@@ -174,6 +180,7 @@
     <div id="permzone"></div>
     <div id="stream"></div>
     <div id="composer">
+      <div id="suggest" style="display:none"></div>
       <div class="row">
         <input id="saytext" placeholder="メッセージ">
         <button id="attachbtn" title="画像を添付">📎</button>
@@ -189,6 +196,7 @@
       <div class="ct active" data-tab="tasks">タスク</div>
       <div class="ct" data-tab="agents">エージェント</div>
       <div class="ct" data-tab="files">ファイル</div>
+      <div class="ct" data-tab="term">ターミナル</div>
     </div>
     <div id="ctx-body"></div>
   </aside>
@@ -208,6 +216,7 @@ const COMMANDS = {
   close: "スレッドを閉じる(/close <名前>)",
 };
 let customCommands = {};
+let uiEffort = null;
 let selectedAgent = null;
 let ctxTab = "tasks";
 let projectFilter = "";
@@ -232,7 +241,17 @@ function renderNav(threads) {
   for (const t of rooms) {
     const d = document.createElement("div");
     d.className = "room" + (selectedThread === t.id ? " active" : "");
-    d.innerHTML = `${escapeHtml(t.label)}<span class="sub">${escapeHtml(t.sub ?? "")}</span>`;
+    // 進捗(タスクの完了率)をサブに足す
+    let prog = "";
+    if (t.id !== "__main__") {
+      const all = (lastState?.taskList ?? { open: [], claimed: [], done: [] });
+      const inP = [...all.open, ...all.claimed, ...all.done].filter((x) => (x.project || "") === t.id);
+      if (inP.length) {
+        const doneN = inP.filter((x) => x.state === "done").length;
+        prog = `${doneN}/${inP.length} 完了`;
+      }
+    }
+    d.innerHTML = `${escapeHtml(t.label)}<span class="sub">${escapeHtml((t.sub ?? "") + (prog ? ` (${prog})` : ""))}</span>`;
     if (unread[t.id]) {
       const b = document.createElement("span");
       b.className = "badge";
@@ -318,6 +337,18 @@ function renderStream(state) {
     d.append(who, body);
     stream.appendChild(d);
   }
+  // スラッシュコマンドの応答(ローカル)。board再描画の最後に足す
+  for (const e of ephemeral) {
+    const d = document.createElement("div");
+    d.className = "msg mine";
+    const who = document.createElement("div");
+    who.className = "who";
+    who.textContent = "⌘";
+    const body = document.createElement("div");
+    body.textContent = e.text;
+    d.append(who, body);
+    stream.appendChild(d);
+  }
   if (nearBottom) stream.scrollTop = stream.scrollHeight;
 }
 
@@ -350,6 +381,7 @@ function renderCtx(state) {
   if (ctxTab === "tasks") renderTasksTab(body, state);
   if (ctxTab === "agents") renderAgentsTab(body, state);
   if (ctxTab === "files") renderFilesTab(body);
+  if (ctxTab === "term") renderTerminalTab();
 }
 
 function renderTasksTab(body, state) {
@@ -595,18 +627,18 @@ async function sendSay() {
 }
 
 // スラッシュコマンド: 入力欄からローカル操作(エージェントを起こさない)
+// スラッシュコマンドの応答(ローカル表示)。5秒ごとの再描画で消えないよう保持する
+const ephemeral = [];
+function pushEphemeral(text) {
+  ephemeral.push({ at: Date.now(), text });
+  if (ephemeral.length > 30) ephemeral.shift();
+}
+
 async function handleCommand(text) {
   const [cmd] = text.slice(1).split(/\s+/);
   const post = (t) => {
-    const d = document.createElement("div");
-    d.className = "msg";
-    d.style.maxWidth = "100%";
-    d.innerHTML = `<div class="who">⌘ コマンド</div>`;
-    const body = document.createElement("div");
-    body.textContent = t;
-    d.appendChild(body);
-    $("stream").appendChild(d);
-    $("stream").scrollTop = $("stream").scrollHeight;
+    pushEphemeral(t);
+    renderStream(lastState ?? { live: { board: [] } });
   };
   if (cmd === "help") {
     const rows = Object.entries(COMMANDS).map(([c, d]) => `/${c} — ${d}`);
@@ -655,7 +687,28 @@ async function handleCommand(text) {
     post(r.error ? `エラー: ${r.error}` : `スレッド ${name} を閉じました`);
   } else if (cmd === "model") {
     const m = lastState?.model;
-    post(m ? `モデル: ${m.name}${m.fallbacks?.length ? `(フォールバック: ${m.fallbacks.join(" → ")})` : ""}` : "モデル情報なし");
+    if (!args[0]) {
+      const e = lastState?.live.modelEffort;
+      post(`モデル: ${m?.name ?? "(不明)"}\n思考レベル: ${e ?? lastState?.live.modelEffort ?? "config値"}\nフォールバック: ${m?.fallbacks?.join(" → ") || "なし"}\n\n変更: /model <名前> / /effort <low|medium|high>`);
+    } else {
+      const r = await (await fetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: args[0] }) })).json();
+      if (!r.error) uiEffort = null;
+      post(r.error ? `エラー: ${r.error}` : `モデルを ${r.model} に変更しました(次のラウンドから)`);
+    }
+  } else if (cmd === "effort") {
+    const lv = (args[0] ?? "").toLowerCase();
+    if (!["low", "medium", "high"].includes(lv)) { post("low / medium / high のいずれかを指定してください"); return; }
+    const r = await (await fetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ effort: lv }) })).json();
+    if (!r.error) uiEffort = r.effort;
+    post(r.error ? `エラー: ${r.error}` : `思考レベルを ${r.effort} に変更しました(次のラウンドから)`);
+  } else if (cmd === "perm") {
+    const mode = (args[0] ?? "").toLowerCase();
+    if (!["normal", "auto"].includes(mode)) { post("normal または auto を指定してください"); return; }
+    const r = await (await fetch("/api/perm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode }) })).json();
+    post(r.error ? `エラー: ${r.error}` : `権限モードを ${r.mode} に変更しました(${mode === "auto" ? "承認要求を自動許可" : "承認要求は都度確認"})`);
+  } else if (cmd === "git") {
+    const r = await (await fetch("/api/git")).json();
+    post(`[GIT状況]\n${r.text ?? r.error}`);
   } else if (customCommands[cmd]) {
     // configで定義したカスタムプロンプトコマンド → リーダーへ送信
     sendSayText(customCommands[cmd].replace(/\$ARGS/g, text.slice(cmd.length + 2).trim()));
@@ -708,7 +761,61 @@ es.onmessage = (e) => {
     refreshSoon();
   }
 };
-$("saybtn").onclick = sendSay;
+const ALL_COMMANDS = () => ({
+    ...COMMANDS,
+    ...Object.fromEntries(Object.entries(customCommands ?? {}).map(([c, d]) => [c, d + "(カスタム)"])),
+  });
+  function renderSuggestions(input) {
+    const box = document.getElementById("suggest");
+    if (!input.startsWith("/")) { box.style.display = "none"; return; }
+    const word = input.slice(1).split(/s/)[0].toLowerCase();
+    const matches = Object.entries(ALL_COMMANDS()).filter(([c]) => c.toLowerCase().startsWith(word) && word !== "");
+    if (!matches.length) { box.style.display = "none"; return; }
+    box.style.display = "block";
+    box.innerHTML = "";
+    for (const [c, d] of matches) {
+      const div = document.createElement("div");
+      div.className = "sug";
+      div.innerHTML = "<b>/" + c + "</b><span class='d'>" + d + "</span>";
+      div.onclick = () => {
+        const needsArgs = ["session", "thread", "close"].includes(c) || customCommands[c];
+        document.getElementById("saytext").value = "/" + c + (needsArgs ? " " : "");
+        box.style.display = "none";
+        document.getElementById("saytext").focus();
+      };
+      box.appendChild(div);
+    }
+  }
+  $("saytext").addEventListener("input", () => renderSuggestions($("saytext").value));
+  function renderTerminalTab() {
+    const body = document.getElementById("ctx-body");
+    body.innerHTML = "";
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = "ワークスペース直下でコマンドを実行(120秒タイムアウト)";
+    body.appendChild(hint);
+    const out = document.createElement("pre");
+    out.className = "fileview";
+    out.style.minHeight = "200px";
+    out.textContent = window.__termOut ?? "";
+    const input = document.createElement("input");
+    input.className = "filter";
+    input.placeholder = "コマンドを入力してEnter";
+    input.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter" || !input.value.trim()) return;
+      const cmd = input.value.trim();
+      input.value = "";
+      window.__termOut = (window.__termOut ?? "") + "$ " + cmd + "\n";
+      out.textContent = window.__termOut + "実行中...";
+      const r = await (await fetch("/api/exec", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ command: cmd }) })).json();
+      window.__termOut += (r.text ?? "") + "\n";
+      out.textContent = window.__termOut;
+      out.scrollTop = out.scrollHeight;
+    });
+    body.appendChild(input);
+    body.appendChild(out);
+  }
+  $("saybtn").onclick = sendSay;
 $("saytext").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) sendSay(); });
 // 画像添付: 📎ボタン or 入力欄へのペースト。dataURL化してからサーバーへ保存させる
 let pendingImage = null;

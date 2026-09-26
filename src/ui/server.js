@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { runScenario } from "../runner.js";
 import { TaskBlackboard } from "../engine/tasks.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
+import { runCommand } from "../engine/exec.js";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -21,7 +22,7 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
-export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onModel = null, onPermMode = null }) {
   const live = {
     // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
     // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
@@ -31,6 +32,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     requests: [],
     threads: [],
     scenario: null,
+    permMode: "normal",
   };
   const tasks = new TaskBlackboard(config.workspace, bus);
   const clients = new Set();
@@ -72,6 +74,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         if (id.startsWith(p.name + "-") || id === p.name) delete live.agents[id];
       }
     },
+    "perm.mode": (p) => { live.permMode = p.mode; },
     "thread.opened": (p) => {
       live.threads.push({ name: p.name, goal: p.goal });
       for (const a of p.agents) {
@@ -262,6 +265,54 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           res.writeHead(404).end();
           return;
         }
+      }
+      if (url.pathname === "/api/git") {
+        const r = await runCommand({ command: "git branch --show-current; echo ---; git status --porcelain; echo ---; git log --oneline -5", cwd: config.workspace, timeoutMs: 15000, outputLimit: 4000 });
+        return json(res, r);
+      }
+      if (url.pathname === "/api/exec" && req.method === "POST") {
+        const chunks = [];
+        req.on("data", (d) => chunks.push(d));
+        req.on("end", async () => {
+          try {
+            const { command } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            if (!command || typeof command !== "string") throw new Error("commandが空です");
+            const r = await runCommand({ command, cwd: config.workspace, timeoutMs: 120000, outputLimit: 16 * 1024 });
+            json(res, r);
+          } catch (err) {
+            json(res, { ok: false, text: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/model" && req.method === "POST" && onModel) {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const r = onModel(JSON.parse(body));
+            if (!r.ok) throw new Error(r.error ?? "失敗しました");
+            json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/perm" && req.method === "POST" && onPermMode) {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const { mode } = JSON.parse(body);
+            const r = onPermMode(String(mode ?? ""));
+            if (!r.ok) throw new Error(r.error ?? "失敗しました");
+            json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
       }
       if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
       if (url.pathname === "/api/session" && req.method === "POST") {

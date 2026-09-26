@@ -67,7 +67,16 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   });
   bus.on("merge.completed", () => void discovery.tick());
 
-  const modelFor = modelFactory ?? createModelFactory(config);
+  // 実行時のモデル/思考レベル切替(/model・/effortコマンドやUIから)。nullならconfigどおり
+  const runtime = { model: null, effort: null };
+  const modelFor = (agent) => {
+    if (modelFactory) return modelFactory({ ...agent, model: runtime.model ?? agent.model, reasoningEffort: runtime.effort ?? agent.reasoningEffort });
+    return createModelFactory(config)({
+      ...agent,
+      model: runtime.model ?? agent.model,
+      reasoningEffort: runtime.effort ?? agent.reasoningEffort ?? config.model.reasoningEffort,
+    });
+  };
   const keptNotice = (board) => ({ agentId, path, detail }) => {
     bus.emit("worktree.kept", { agent: agentId, path });
     board.post("system", `[worktree保持] worktrees/${agentId} に前回実行の未コミット変更があるため初期化をスキップしました。引き継ぐ場合はそのまま作業するか、確定させてください。\n\n${detail}`);
@@ -253,6 +262,16 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       const host = t ? t.host : leadHost;
       host.attachImage(note, dataUrl, path);
       return { ok: true };
+    },
+    setModel: (patch) => {
+      if (patch.model !== undefined) runtime.model = String(patch.model).trim() || null;
+      if (patch.effort !== undefined) runtime.effort = ["low", "medium", "high"].includes(patch.effort) ? patch.effort : null;
+      bus.emit("model.changed", { model: runtime.model, effort: runtime.effort });
+      return { ok: true, model: runtime.model, effort: runtime.effort };
+    },
+    setPermMode: (mode) => {
+      gate.setMode(mode);
+      return { ok: true, mode: gate.mode };
     },
     openThread,
     closeThread,

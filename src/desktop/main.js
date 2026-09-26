@@ -3,6 +3,7 @@
 // デスクトップアプリとしての窓・トレイ常駐・ネイティブ通知だけを足す。
 import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, dialog } from "electron";
 import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadConfig } from "../config.js";
 import { OpenAIModel } from "../model/openai.js";
 import { startUi } from "../ui/server.js";
@@ -74,6 +75,10 @@ async function bootstrap() {
       onAttach: (path, dataUrl, note, thread) => controller?.attachImage(note, dataUrl, thread, path),
       onThread: (req) => controller?.openThread(req),
       onCloseThread: (req) => controller?.closeThread(req),
+      onModel: (patch) => controller?.setModel(patch),
+      onPermMode: (mode) => controller?.setPermMode(mode),
+      onModel: (patch) => controller?.setModel(patch),
+      onPermMode: (mode) => controller?.setPermMode(mode),
     });
     controller = await runChat({ config, bus });
   }
@@ -100,6 +105,13 @@ async function bootstrap() {
   tray.setToolTip("agent-hive — 常駐エージェントハーネス");
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "ボードを表示", click: () => { win.show(); win.focus(); } },
+    { label: "ワークスペースを変更...", click: async () => {
+      const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"], title: "ワークスペースを選択" });
+      if (r.canceled || !r.filePaths[0]) return;
+      writeFileSync(join(process.cwd(), "hive.local.json"), JSON.stringify({ workspace: r.filePaths[0], worktrees: { dir: join(r.filePaths[0], "wt") } }, null, 1));
+      app.relaunch();
+      app.quit();
+    } },
     { type: "separator" },
     { label: "終了", click: () => { quitting = true; app.quit(); } },
   ]));
