@@ -102,7 +102,7 @@ test("v6統合: リーダーがopen_threadすると3ワーカーがprojectタス
     if (agent.id === "lead") {
       return scriptedModel([
         { toolCalls: [{ name: "create_task", args: { task_id: "t1", project: "demo", body: "demoの仕事" } }] },
-        { toolCalls: [{ name: "open_thread", args: { project: "demo", goal: "demoを完成させる" } }] },
+        { toolCalls: [{ name: "open_thread", args: { project: "demo", goal: "demoを完成させる", folder: "AI開発" } }] },
         { text: "スレッドを開きました" },
       ]);
     }
@@ -117,6 +117,7 @@ test("v6統合: リーダーがopen_threadすると3ワーカーがprojectタス
   assert.ok(demo, "demoスレッドが開かれている");
   assert.equal(demo.agents.length, 3);
   assert.deepEqual(demo.agents.map((a) => a.id).sort(), ["demo-alpha", "demo-beta", "demo-gamma"]);
+  assert.equal(demo.folder, "AI開発"); // folderはスレッド登録とイベントに載る
   assert.ok(ctl.listThreads().includes("demo"));
 
   // ワーカーがproject絞込でdemoのタスクを請求する(モックは高速なのでイベントで判定)

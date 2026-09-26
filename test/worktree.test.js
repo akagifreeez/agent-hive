@@ -51,6 +51,10 @@ test("finish_taskの実体: worktreeの変更がmainへマージされる", asyn
   const r = await mergeAgentWork({ mainWorkspace: ws, worktreePath: wt, agent: { id: "alpha" }, taskId: "t1" });
   assert.equal(r.ok, true);
   assert.equal(readFileSync(join(ws, "code.txt"), "utf8"), "v1 by alpha");
+  // マージ差分: 要約・stat・patchが取れる(②diff表示の源)
+  assert.match(r.summary ?? "", /1ファイル/);
+  assert.match(r.stat ?? "", /code\.txt/);
+  assert.match(r.patch ?? "", /\+v1 by alpha/);
   const log = await runCommand({ command: "git log --oneline", cwd: ws, outputLimit: 2000 });
   assert.match(log.text, /merge: t1 by alpha/);
   rmTree(ws);

@@ -31,6 +31,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     board: loadPersistedBoardPosts(config.workspace),
     requests: [],
     threads: [],
+    // マージの差分(新着順・最大20件)。UIのマージ行クリックでdiffを見せる
+    merges: [],
     scenario: null,
     permMode: "normal",
   };
@@ -76,10 +78,14 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     },
     "perm.mode": (p) => { live.permMode = p.mode; },
     "thread.opened": (p) => {
-      live.threads.push({ name: p.name, goal: p.goal });
+      live.threads.push({ name: p.name, goal: p.goal, folder: p.folder ?? null });
       for (const a of p.agents) {
         live.agents[a.id] = { status: "idle", turn: 0, displayName: a.displayName, thread: p.name };
       }
+    },
+    "merge.completed": (p) => {
+      live.merges.unshift({ taskId: p.taskId, agent: p.agent, stat: p.stat ?? "", patch: p.patch ?? "", summary: p.summary ?? "", at: Date.now() });
+      if (live.merges.length > 20) live.merges.pop();
     },
     "agent.exited": (p) => {
       if (live.agents[p.agent]) live.agents[p.agent] = { ...live.agents[p.agent], status: p.ok ? "done" : "error" };
@@ -170,8 +176,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         req.on("data", (d) => (body += d));
         req.on("end", () => {
           try {
-            const { project, goal } = JSON.parse(body);
-            const r = onThread({ project: String(project ?? ""), goal: String(goal ?? "") });
+            const { project, goal, folder } = JSON.parse(body);
+            const r = onThread({ project: String(project ?? ""), goal: String(goal ?? ""), folder: folder ? String(folder) : null });
             if (r.error) throw new Error(r.error);
             json(res, { ok: true, id: r.id });
           } catch (err) {
