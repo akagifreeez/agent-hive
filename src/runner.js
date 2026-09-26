@@ -186,16 +186,19 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   // 請求ミス1回で早期退場させる(expendable)。並行度が仕事量に追従する。
   const aliveWorkers = new Map(); // thread => Set(agentId)
   const threadOfAgent = new Map();
+  const agentStatus = new Map(); // agentId => 最新の状態
   bus.on("thread.opened", (p) => {
     const set = aliveWorkers.get(p.name) ?? new Set();
-    for (const m of p.agents) { threadOfAgent.set(m.id, p.name); set.add(m.id); }
+    for (const m of p.agents) { threadOfAgent.set(m.id, p.name); set.add(m.id); agentStatus.set(m.id, "idle"); }
     aliveWorkers.set(p.name, set);
   });
   bus.on("agent.spawned", (p) => {
+    agentStatus.set(p.agent.id, "working");
     const th = threadOfAgent.get(p.agent.parent);
     if (th) { threadOfAgent.set(p.agent.id, th); aliveWorkers.get(th)?.add(p.agent.id); }
   });
   bus.on("agent.status", (ev) => {
+    agentStatus.set(ev.agent, ev.status);
     const th = threadOfAgent.get(ev.agent);
     if (th && ["done", "error", "budget-stop"].includes(ev.status)) aliveWorkers.get(th)?.delete(ev.agent);
   });
@@ -207,7 +210,15 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     const base = (config.chat?.workers ?? config.chat?.mains ?? ["alpha", "beta", "gamma"]).length;
     const max = config.chat?.maxWorkersPerThread ?? 4;
     const globalCap = config.hierarchy?.maxConcurrent ?? 6;
-    const open = tasks.list().open;
+    const list = tasks.list();
+    // 再起動などで担当者が停止したままの請求を解放(作業が凍結するのを防ぐ)
+    for (const t of list.claimed) {
+      if (!t.agent) continue;
+      if (agentStatus.get(t.agent) !== "working") {
+        tasks.releaseOne(t.agent, t.id, "[自動解放] 担当者が稼働していないため再請求可能にしました。");
+      }
+    }
+    const open = list.open;
     for (const [name, alive] of aliveWorkers) {
       const th = threads.get(name);
       if (!th) continue;
