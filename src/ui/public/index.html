@@ -158,6 +158,15 @@
 
   /* ============ 右: 状況パネル ============ */
   #ctx { background: var(--bg-elevated); border-left: 1px solid var(--separator); display: flex; flex-direction: column; min-height: 0; }
+  table.usage-tbl { width: 100%; border-collapse: collapse; font-size: 11.5px; font-family: var(--font-mono); margin-bottom: 4px; }
+  table.usage-tbl th { text-align: left; color: var(--label-tertiary); font-weight: 600; padding: 2px 6px; border-bottom: 1px solid var(--separator); }
+  table.usage-tbl td { padding: 2px 6px; border-bottom: 1px solid var(--separator); }
+  table.usage-tbl tr.total td { color: var(--label); border-top: 1px solid var(--line-strong); font-weight: 600; }
+  .session-row { display: flex; gap: 6px; margin-bottom: 6px; }
+  .session-row input { flex: 1; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 4px 8px; font-size: 12px; box-shadow: var(--inset-field); }
+  .session-row input:focus { outline: none; border-color: var(--accent); }
+  .session-item { display: flex; justify-content: space-between; align-items: center; padding: 3px 6px; font-size: 12px; border-bottom: 1px solid var(--separator); }
+  .session-item:hover { background: var(--fill); }
   #ctx-tabs { display: flex; border-bottom: 1px solid var(--separator); }
   #ctx-tabs .ct { flex: 1; text-align: center; padding: 8px 0; font-size: 12px; color: var(--label-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: color var(--duration) var(--ease); }
   #ctx-tabs .ct:hover { color: var(--label); }
@@ -267,6 +276,7 @@
       <div class="ct active" data-tab="tasks">タスク</div>
       <div class="ct" data-tab="agents">エージェント</div>
       <div class="ct" data-tab="files">ファイル</div>
+      <div class="ct" data-tab="status">状況</div>
       <div class="ct" data-tab="term">ターミナル</div>
     </div>
     <div id="ctx-body"></div>
@@ -571,6 +581,7 @@ function renderCtx(state) {
   if (ctxTab === "tasks") renderTasksTab(body, state);
   if (ctxTab === "agents") renderAgentsTab(body, state);
   if (ctxTab === "files") renderFilesTab(body);
+  if (ctxTab === "status") renderStatusTab(body);
   if (ctxTab === "term") renderTerminalTab();
 }
 
@@ -724,6 +735,102 @@ function renderAgentLog(a) {
   }
   requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
   return wrap;
+}
+
+function renderStatusTab(body) {
+  // usage(エージェント別消費)
+  const h1 = document.createElement("div");
+  h1.className = "sec";
+  h1.textContent = "消費(usage)";
+  body.appendChild(h1);
+  const agents = Object.entries(lastState?.live.agents ?? {});
+  if (!agents.length) {
+    const h = document.createElement("div");
+    h.className = "hint";
+    h.textContent = "usageはまだありません。";
+    body.appendChild(h);
+  } else {
+    const tbl = document.createElement("table");
+    tbl.className = "usage-tbl";
+    tbl.innerHTML = "<thead><tr><th>エージェント</th><th>状態</th><th>turn</th><th>tokens</th><th>cost</th></tr></thead>";
+    const tb = document.createElement("tbody");
+    let totTok = 0, totUsd = 0;
+    for (const [id, a] of agents) {
+      totTok += a.tokens ?? 0;
+      totUsd += a.costUsd ?? 0;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${escapeHtml(a.displayName ?? NAMES[id] ?? id)}</td>` +
+        `<td class="st ${(a.status ?? "idle").replace(/\s/g, "")}">${escapeHtml(statusJa(a.status))}</td>` +
+        `<td>${a.turn ?? 0}</td><td>${(a.tokens ?? 0).toLocaleString()}</td><td>$${(a.costUsd ?? 0).toFixed(4)}</td>`;
+      tb.appendChild(tr);
+    }
+    const tr = document.createElement("tr");
+    tr.className = "total";
+    tr.innerHTML = `<td>合計</td><td></td><td></td><td>${totTok.toLocaleString()}</td><td>$${totUsd.toFixed(4)}</td>`;
+    tb.appendChild(tr);
+    tbl.appendChild(tb);
+    body.appendChild(tbl);
+  }
+  // セッション保存/読込
+  const h2 = document.createElement("div");
+  h2.className = "sec";
+  h2.textContent = "セッション";
+  body.appendChild(h2);
+  const row = document.createElement("div");
+  row.className = "session-row";
+  const inp = document.createElement("input");
+  inp.id = "session-name";
+  inp.placeholder = "セッション名";
+  const saveB = document.createElement("button");
+  saveB.className = "btn";
+  saveB.textContent = "保存";
+  const listB = document.createElement("button");
+  listB.className = "btn";
+  listB.textContent = "一覧";
+  row.append(inp, saveB, listB);
+  body.appendChild(row);
+  const listBox = document.createElement("div");
+  listBox.id = "session-list";
+  body.appendChild(listBox);
+  const renderList = async () => {
+    const r = await (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "list" }) })).json();
+    listBox.innerHTML = "";
+    const list = r.list ?? [];
+    if (!list.length) {
+      const h = document.createElement("div");
+      h.className = "hint";
+      h.textContent = "保存済みセッションはありません。";
+      listBox.appendChild(h);
+      return;
+    }
+    for (const name of list) {
+      const lr = document.createElement("div");
+      lr.className = "session-item";
+      const nm = document.createElement("span");
+      nm.textContent = name;
+      const ld = document.createElement("button");
+      ld.className = "btn";
+      ld.textContent = "復元";
+      ld.onclick = async () => {
+        const rr = await (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "load", name }) })).json();
+        toast(rr.error ? `エラー: ${rr.error}` : `セッション ${name} を復元しました(反映には再起動)`, rr.error ? "err" : "ok");
+      };
+      lr.append(nm, ld);
+      listBox.appendChild(lr);
+    }
+  };
+  saveB.onclick = async () => {
+    const name = inp.value.trim();
+    if (!name) { toast("セッション名を入力してください"); return; }
+    const r = await (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "save", name }) })).json();
+    if (r.error) { toast(`エラー: ${r.error}`); return; }
+    inp.value = "";
+    toast(`セッション ${name} を保存しました`, "ok");
+    renderList();
+  };
+  inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); saveB.click(); } };
+  listB.onclick = renderList;
+  if (ctxTab === "status") renderList();
 }
 
 async function renderFilesTab(body) {
