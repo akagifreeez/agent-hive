@@ -353,7 +353,7 @@ function renderNav(threads) {
         if (v === null) return;
         const r = await (await fetch("/api/folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: t.id, folder: v }) })).json();
         if (r.error) toast(r.error);
-        else refreshState();
+        else refresh();
       };
       d.appendChild(fb);
     }
