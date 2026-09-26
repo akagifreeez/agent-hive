@@ -70,7 +70,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     "compact.micro": (p) => pushAgentLog(live.agents[p.agent], "compact", `microcompact(-${p.savingsTokens}tok)`),
     "compact.failed": (p) => pushAgentLog(live.agents[p.agent], "compact", `圧縮失敗(${p.failures}回目): ${p.error}`),
     "agent.spawned": (p) => {
-      live.agents[p.agent.id] = { status: "working", turn: 0, displayName: p.agent.displayName, depth: p.agent.depth, parent: p.agent.parent, thread: live.agents[p.agent.parent]?.thread ?? "__main__" };
+      live.agents[p.agent.id] = { status: "working", turn: 0, displayName: p.agent.displayName, depth: p.agent.depth, parent: p.agent.parent, thread: p.agent.thread ?? live.agents[p.agent.parent]?.thread ?? "__main__" };
     },
     "thread.closed": (p) => {
       live.threads = live.threads.filter((t) => t.name !== p.name);

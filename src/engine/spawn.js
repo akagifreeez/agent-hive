@@ -89,7 +89,7 @@ export class SpawnManager {
     // ブリーフ=このエージェントの請求済みタスク。finish_taskで完了→main自動マージまで繋がる
     const projNote = project ? `文脈(project): ${project} — 追加のタスクを請求するときは project: ${project} で絞ること。\n\n` : "";
     this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, project, body: `${projNote}スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
-    this.bus.emit("agent.spawned", { agent: { id, displayName: dn, depth, parent: parent.id, role: agent.role } });
+    this.bus.emit("agent.spawned", { agent: { id, displayName: dn, depth, parent: parent.id, role: agent.role, thread: project || null } });
     b.post("system", `[スポーン] ${parent.displayName} が作業エージェント ${dn}(${id}) を作成しました。`);
 
     // 呼び出し元をブロックしない(縦の待ちを作らない)
