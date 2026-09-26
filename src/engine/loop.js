@@ -77,6 +77,7 @@ export async function runAgentLoop({
   messages = null, // 常駐エージェント(chat)は外部で保持した記憶を渡す
   seenBoard = null, // 前回までの既読位置(chat常駐時はホストが保持。nullならラウンド開始時点まで既読)
   memory = null, // 永続記憶(memory/の権威ファイル)の注入文脈。無ければnull
+  drainInput = null, // () => ターン境界で割込ませる入力の配列(steering)。呼ぶたに取り出す
 }) {
   if (!messages) {
     const sys = buildSystemPrompt(agent, shellKind);
@@ -123,6 +124,14 @@ export async function runAgentLoop({
       const text = fresh.map((p) => `${p.from}: ${p.text}`).join("\n---\n");
       messages.push({ role: "user", content: `[ボード新着]\n${text.slice(0, 6000)}` });
     }
+    // ラウンド実行中に入ったユーザー入力をターン境界で割込ませる(steering: ZCode command-queue流)
+    if (drainInput) {
+      const inputs = drainInput();
+      for (const t of inputs) {
+        messages.push({ role: "user", content: `[入力] ${t}` });
+      }
+      if (inputs.length) bus.emit("agent.steered", { agent: agent.id, count: inputs.length });
+    }
 
     // microcompact(ZCode移植): 古いツール結果をプレースホルダへ(LLM不要)
     const mc = microcompact(messages, { contextWindow });
@@ -130,7 +139,8 @@ export async function runAgentLoop({
 
     let res;
     try {
-      res = await model.chat({ messages, tools: tools.specs });
+      // ストリーミング: 断片をbusへ流してUIのライブ表示に使う
+      res = await model.chat({ messages, tools: tools.specs, onDelta: (d) => bus.emit("agent.delta", { agent: agent.id, ...d }) });
     } catch (err) {
       releaseClaims("モデルエラー");
       bus.emit("agent.status", { agent: agent.id, status: "error" });
