@@ -182,6 +182,60 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     return { ok: true, id: name };
   };
 
+  // 流動ワーカー: backlogに応じてスレッドへ追加ワーカーを増員し、余ったワーカーは
+  // 請求ミス1回で早期退場させる(expendable)。並行度が仕事量に追従する。
+  const aliveWorkers = new Map(); // thread => Set(agentId)
+  const threadOfAgent = new Map();
+  bus.on("thread.opened", (p) => {
+    const set = aliveWorkers.get(p.name) ?? new Set();
+    for (const m of p.agents) { threadOfAgent.set(m.id, p.name); set.add(m.id); }
+    aliveWorkers.set(p.name, set);
+  });
+  bus.on("agent.spawned", (p) => {
+    const th = threadOfAgent.get(p.agent.parent);
+    if (th) { threadOfAgent.set(p.agent.id, th); aliveWorkers.get(th)?.add(p.agent.id); }
+  });
+  bus.on("agent.status", (ev) => {
+    const th = threadOfAgent.get(ev.agent);
+    if (th && ["done", "error", "budget-stop"].includes(ev.status)) aliveWorkers.get(th)?.delete(ev.agent);
+  });
+  bus.on("thread.closed", (p) => {
+    for (const [id, th] of [...threadOfAgent]) if (th === p.name) threadOfAgent.delete(id);
+    aliveWorkers.delete(p.name);
+  });
+  const autoscale = async () => {
+    const base = (config.chat?.workers ?? config.chat?.mains ?? ["alpha", "beta", "gamma"]).length;
+    const max = config.chat?.maxWorkersPerThread ?? 4;
+    const globalCap = config.hierarchy?.maxConcurrent ?? 6;
+    const open = tasks.list().open;
+    for (const [name, alive] of aliveWorkers) {
+      const th = threads.get(name);
+      if (!th) continue;
+      const nOpen = open.filter((t) => (t.project || "") === name).length;
+      const desired = nOpen === 0 ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil(nOpen / 2));
+      if (alive.size >= desired || manager.live.size >= globalCap) continue;
+      const member = th.host?.mains?.[0];
+      if (!member) continue;
+      const r = await manager.spawn({
+        parent: { id: `${name}-scale`, displayName: `スレッド ${name}`, depth: 1 },
+        board: th.board,
+        displayName: `追加ワーカー(${name})`,
+        role: "impl",
+        project: name,
+        expendable: true,
+        brief: `[自動増員] project ${name} の追加ワーカーです。スレッド目標: ${th.goal ?? ""}
+claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完了条件を満たしたら finish_task でマージしてください。他のワーカーと同じファイルを触らないよう、タスク本文をよく読んで割り当ててください。仕事が無くなったら速やかに終了します(請求ミス1回で退場)。`,
+      });
+      if (!r.error) {
+        threadOfAgent.set(r.id, name);
+        alive.add(r.id);
+        break; // 1tickにつき1体まで(急増防止)
+      }
+    }
+  };
+  const autoscaleTimer = config.chat?.autoscale === false ? null : setInterval(() => { void autoscale(); }, (config.chat?.autoscaleIntervalSec ?? 30) * 1000);
+  if (autoscaleTimer?.unref) autoscaleTimer.unref();
+
   // 前回実行で開いていたスレッドを無音で復元(ボード・メモリ・タブが復帰する)
   try {
     const registry = JSON.parse(readFileSync(registryPath, "utf8"));

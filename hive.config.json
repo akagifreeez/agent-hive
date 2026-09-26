@@ -14,8 +14,8 @@
   "compact": { "thresholdPercent": 90 },
   "workspace": "workspace",
   "worktrees": { "dir": "worktrees" },
-  "hierarchy": { "maxDepth": 2, "maxConcurrent": 6 },
-  "chat": { "lead": "lead", "workers": ["alpha", "beta", "gamma"], "mains": ["alpha", "beta", "gamma"], "maxTurnsPerRound": 12, "autoContinueRounds": 3, "idleClaimWaitSec": 45 },
+  "hierarchy": { "maxDepth": 2, "maxConcurrent": 12 },
+  "chat": { "lead": "lead", "workers": ["alpha", "beta", "gamma"], "mains": ["alpha", "beta", "gamma"], "maxTurnsPerRound": 12, "autoContinueRounds": 3, "idleClaimWaitSec": 45, "autoscale": true, "autoscaleIntervalSec": 30, "maxWorkersPerThread": 4 },
   "agents": [
     { "id": "alpha", "displayName": "アルファ", "role": "impl", "persona": "agents/alpha.md" },
     { "id": "delta", "displayName": "デルタ", "role": "impl", "persona": "agents/delta.md" },

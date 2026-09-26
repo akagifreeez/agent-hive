@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { TaskBlackboard, readMeta } from "../src/engine/tasks.js";
 import { Board, Bus } from "../src/engine/board.js";
 import { createTools } from "../src/engine/tools.js";
+import { runAgentLoop } from "../src/engine/loop.js";
 import { pushAgentLog, AGENT_LOG_LIMIT, buildMonitorSnapshot } from "../src/ui/server.js";
 import { OpenAIModel } from "../src/model/openai.js";
 
@@ -297,5 +298,20 @@ test("monitorスナップショット: スレッド進捗・タスク・エー�
   assert.equal(snap.agents[0].tokens, 1234);
   assert.equal(snap.merges[0].summary, "1ファイル +10");
   assert.equal(snap.recent[0].text, "進めて");
+  rmTree(ws);
+});
+
+test("runAgentLoop: claimMissesLimit=1なら請求ミス1回でidle終了(追加ワーカーの早期退場)", async () => {
+  const ws = mkdtempSync(join(tmpdir(), "hive-miss1-"));
+  const bus = new Bus();
+  const board = new Board(bus);
+  const tasks = new TaskBlackboard(ws, bus);
+  const agent = { id: "x-alpha", displayName: "アルファ", personaText: "# テストワーカー" };
+  const tools = createTools({ agent, workspace: ws, board, tasks, bus });
+  let calls = 0;
+  const model = { maxTokens: 4000, async chat() { calls += 1; return { content: "", toolCalls: [{ name: "claim_next_task", args: {} }], raw: { content: "" } }; } };
+  const r = await runAgentLoop({ agent, model, tools, board, tasks, bus, maxTurns: 5, messages: null, shellKind: "bash", claimMissesLimit: 1 });
+  assert.equal(r.endedBy, "idle");
+  assert.equal(calls, 1); // ミス1回で打ち切り(既定3なら2回目の呼出が発生する)
   rmTree(ws);
 });

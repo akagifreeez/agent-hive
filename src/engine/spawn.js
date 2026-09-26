@@ -52,7 +52,7 @@ export class SpawnManager {
 
   // ツールから呼ばれる。呼び出し元は待たせないので、ループは非同期で走らせる。
   // boardは呼び出し元のスレッドのボード(v6。省略時は構築時のboard=メイン)。
-  async spawn({ parent, board = null, displayName, role, brief, project = "" }) {
+  async spawn({ parent, board = null, displayName, role, brief, project = "", expendable = false }) {
     const depth = (parent.depth ?? 0) + 1;
     if (depth > this.hierarchy.maxDepth) {
       return { error: `深さの上限(${this.hierarchy.maxDepth})に達しています。あなたの配下には作れません。` };
@@ -83,6 +83,7 @@ export class SpawnManager {
       depth, parent: parent.id,
       personaText: WORKER_PERSONA(dn, role ?? "impl"),
       scenarioName: "chat",
+      expendable: Boolean(expendable), // trueなら請求ミス1回で早期退場(自動増員ワーカー用)
     };
     this.live.set(id, { displayName: dn, depth, parent: parent.id, status: "working" });
     // ブリーフ=このエージェントの請求済みタスク。finish_taskで完了→main自動マージまで繋がる
@@ -126,6 +127,7 @@ export class SpawnManager {
       contextWindow: this.contextWindow, thresholdPercent: this.thresholdPercent,
       messages,
       memory: mem || null, // 圧縮時の権威分離判定に使う
+      claimMissesLimit: agent.expendable ? 1 : 3,
     };
     let r = await runAgentLoop(loopOpts);
     // ターン上限での中断は1回だけ自動継続(同じworktree・同じ記憶で)
