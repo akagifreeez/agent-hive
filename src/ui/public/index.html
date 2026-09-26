@@ -212,6 +212,14 @@
   .agentcard .st.done { color: var(--ok); }
   .agentcard .st.error, .agentcard .st.budget-stop { color: var(--err); }
   .agentcard .meta { color: var(--label-tertiary); font-size: 11px; font-family: var(--font-mono); margin-top: 2px; }
+  .agentcard .wtdiff-btn { float: right; margin-right: 4px; background: var(--fill); border: 1px solid var(--separator); color: var(--label-secondary); border-radius: 4px; font-size: 10px; padding: 1px 6px; cursor: pointer; font-family: var(--font-ui); }
+  .agentcard .wtdiff-btn:hover { color: var(--label); border-color: var(--line-strong); }
+  .wtdiff { background: var(--recess); border: 1px solid var(--separator); border-radius: 4px; margin: 2px 0 8px; max-height: 55vh; overflow-y: auto; box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18); }
+  .wtdiff .wtdiff-head { display: flex; justify-content: space-between; align-items: center; padding: 3px 8px; background: var(--fill); font-family: var(--font-mono); font-size: 11px; color: var(--sub); position: sticky; top: 0; }
+  .wtdiff .wtdiff-head button { background: none; border: none; color: var(--label-tertiary); cursor: pointer; font-size: 13px; padding: 0 3px; }
+  .wtdiff .wtdiff-head button:hover { color: var(--label); }
+  .wtdiff pre { margin: 0; padding: 8px; font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; word-break: break-word; color: var(--label-secondary); }
+  .wtdiff pre.stat { border-bottom: 1px solid var(--separator); color: var(--label); }
 
   .alog { max-height: 46vh; overflow-y: auto; background: var(--recess); border: 1px solid var(--separator); border-radius: 4px; padding: 6px 8px; font-family: var(--font-mono); font-size: 11.5px; margin: 2px 0 8px; box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18); }
   .alog .entry { padding: 3px 0; border-bottom: 1px solid var(--separator); white-space: pre-wrap; word-break: break-word; }
@@ -745,6 +753,16 @@ function renderAgentsTab(body, state) {
     const label = a.displayName ?? NAMES[id] ?? id;
     card.innerHTML = `<span class="nm">${escapeHtml(label)}</span><span class="st ${(a.status ?? "idle").replace(/\s/g, "")}">${escapeHtml(statusJa(a.status))}</span>` +
       `<div class="meta">turn ${a.turn ?? 0}${a.lastTool ? ` / ${escapeHtml(a.lastTool)}` : ""}${a.tokens ? ` / ${a.tokens.toLocaleString()}tok / $${(a.costUsd ?? 0).toFixed(4)}` : ""}</div>`;
+    const wdb = document.createElement("button");
+    wdb.className = "wtdiff-btn";
+    wdb.textContent = "差分";
+    wdb.onclick = async (e) => {
+      e.stopPropagation();
+      const r = await (await fetch(`/api/wtdiff?agent=${encodeURIComponent(id)}`)).json();
+      if (r.error) { toast(r.error); return; }
+      showWtdiff(id, r);
+    };
+    card.appendChild(wdb);
     card.onclick = () => { selectedAgent = selectedAgent === id ? null : id; renderCtx(lastState); };
     body.appendChild(card);
     if (selectedAgent === id) body.appendChild(renderAgentLog(a));
@@ -755,6 +773,32 @@ function renderAgentsTab(body, state) {
     h.textContent = "このスレッドにはまだエージェントがいません。";
     body.appendChild(h);
   }
+}
+
+// /api/wtdiff の結果を等幅パネルで表示(stat部とpatch部を分離・末尾省略)
+function showWtdiff(id, r) {
+  const dlg = document.createElement("dialog");
+  dlg.className = "wtdiff";
+  const head = document.createElement("div");
+  head.className = "wtdiff-head";
+  const title = document.createElement("span");
+  title.textContent = `agent/${id} の差分` + (r.truncated ? "(末尾省略)" : "");
+  const close = document.createElement("button");
+  close.textContent = "×";
+  close.title = "閉じる";
+  close.onclick = () => dlg.close();
+  head.append(title, close);
+  dlg.appendChild(head);
+  const stat = document.createElement("pre");
+  stat.className = "stat";
+  stat.textContent = r.stat || "(差分なし)";
+  dlg.appendChild(stat);
+  const patch = document.createElement("pre");
+  patch.textContent = r.patch || "(パッチはありません)";
+  dlg.appendChild(patch);
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  dlg.onclose = () => dlg.remove();
 }
 
 function renderAgentLog(a) {
