@@ -1,7 +1,8 @@
 // シナリオ実行器: ワークスペース初期化(git blackboard化)→タスク/シード投入→
 // 発見器起動→全エージェント同時走行→最終プローブ→回収。
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Board, Bus } from "./engine/board.js";
 import { TaskBlackboard } from "./engine/tasks.js";
 import { createTools } from "./engine/tools.js";
@@ -17,6 +18,7 @@ import { ChatHost } from "./engine/chat.js";
 import { buildMemoryContext } from "./engine/memory.js";
 import { buildSkillsIndex } from "./engine/skills.js";
 import { McpHost } from "./engine/mcp.js";
+import { createWorkflowApi, runWorkflowScript } from "./engine/workflow.js";
 import { Hooks } from "./engine/hooks.js";
 import { ROOT } from "./config.js";
 
@@ -110,6 +112,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
 
   // サブスレッド: project名=スレッド名。3ワーカー( personas: workers )が専用ボードで並行作業
   const threads = new Map();
+  const workflowRuns = new Map(); // 実行中のワークフロー(同名の同時実行を防ぐ)
   const registryPath = join(stateDir, "threads.json");
   const writeRegistry = () => {
     try {
@@ -272,6 +275,43 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     setPermMode: (mode) => {
       gate.setMode(mode);
       return { ok: true, mode: gate.mode };
+    },
+    runWorkflow: (name) => {
+      const safe = String(name).replace(/[^\w-]/g, "");
+      if (!safe) return { error: "ワークフロー名が不正です" };
+      if (workflowRuns.has(safe)) return { error: `ワークフロー ${safe} は実行中です` };
+      const file = join(config.workspace, "workflows", safe + ".mjs");
+      if (!existsSync(file)) return { error: `ワークフローファイルがありません: ${file}` };
+      workflowRuns.set(safe, { startedAt: Date.now() });
+      const log = (t) => bus.emit("workflow.log", { name: safe, text: t });
+      bus.emit("workflow.started", { name: safe });
+      const api = createWorkflowApi({
+        openThread,
+        closeThread,
+        say: (text, thread) => (thread ? threads.get(thread)?.host : leadHost).say(text, thread),
+        tasks,
+        bus,
+        log,
+      });
+      void runWorkflowScript({ path: file, api, timeoutMs: 30 * 60000 })
+        .then(() => {
+          bus.emit("workflow.finished", { name: safe });
+          log("完了");
+        })
+        .catch((err) => {
+          bus.emit("workflow.failed", { name: safe, error: err.message });
+          log("失敗: " + err.message);
+        })
+        .finally(() => workflowRuns.delete(safe));
+      return { ok: true, name: safe };
+    },
+    listWorkflows: () => {
+      const dir = join(config.workspace, "workflows");
+      try {
+        return readdirSync(dir).filter((f) => f.endsWith(".mjs")).map((f) => f.replace(/\.mjs$/, ""));
+      } catch {
+        return [];
+      }
     },
     openThread,
     closeThread,

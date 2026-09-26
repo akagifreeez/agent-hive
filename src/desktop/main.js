@@ -77,6 +77,8 @@ async function bootstrap() {
       onCloseThread: (req) => controller?.closeThread(req),
       onModel: (patch) => controller?.setModel(patch),
       onPermMode: (mode) => controller?.setPermMode(mode),
+      onWorkflow: (name) => controller?.runWorkflow(name),
+      onListWorkflows: () => controller?.listWorkflows() ?? [],
       onModel: (patch) => controller?.setModel(patch),
       onPermMode: (mode) => controller?.setPermMode(mode),
     });
