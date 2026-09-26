@@ -18,7 +18,14 @@ export function estimateTokens(text) {
 }
 
 export function estimateMessagesTokens(messages) {
-  return messages.reduce((sum, m) => sum + estimateTokens(m.content) + 8, 0);
+  // 画像(マルチモーダルcontent配列)は1枚を概算1,000トークンとして数える
+  const count = (c) => {
+    if (Array.isArray(c)) {
+      return c.reduce((s, p) => s + (p.type === "image_url" ? 1000 : estimateTokens(p.text)), 0);
+    }
+    return estimateTokens(c);
+  };
+  return messages.reduce((sum, m) => sum + count(m.content) + 8, 0);
 }
 
 // ツール結果の間引き。messages配列を直接書き換える(ZCodeと同様、ローカル文脈の破壊的整理)。

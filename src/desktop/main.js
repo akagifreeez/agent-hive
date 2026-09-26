@@ -68,7 +68,7 @@ async function bootstrap() {
     // 既定: メインチャット常駐モード(v6: リーダー+サブスレッド)
     // thread.openedの取りこぼし防止のため、UIの待ち受けを先に立ててからrunChatする
     let controller = null;
-    await startUi({ config, bus, autoStart: false, onSay: (text, thread) => controller?.say(text, thread) });
+    await startUi({ config, bus, autoStart: false, onSay: (text, thread) => controller?.say(text, thread), onAttach: (path, dataUrl, note, thread) => controller?.attachImage(note, dataUrl, thread, path) });
     controller = await runChat({ config, bus });
   }
 

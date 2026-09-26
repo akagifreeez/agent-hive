@@ -125,12 +125,19 @@ export async function runAgentLoop({
       messages.push({ role: "user", content: `[ボード新着]\n${text.slice(0, 6000)}` });
     }
     // ラウンド実行中に入ったユーザー入力をターン境界で割込ませる(steering: ZCode command-queue流)
+    // 文字列は[入力]として、オブジェクト(画像などのマルチモーダルメッセージ)はそのまま注入
     if (drainInput) {
       const inputs = drainInput();
+      let steered = 0;
       for (const t of inputs) {
-        messages.push({ role: "user", content: `[入力] ${t}` });
+        if (typeof t === "string") {
+          messages.push({ role: "user", content: `[入力] ${t}` });
+        } else {
+          messages.push(t);
+        }
+        steered++;
       }
-      if (inputs.length) bus.emit("agent.steered", { agent: agent.id, count: inputs.length });
+      if (steered) bus.emit("agent.steered", { agent: agent.id, count: steered });
     }
 
     // microcompact(ZCode移植): 古いツール結果をプレースホルダへ(LLM不要)
