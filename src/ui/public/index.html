@@ -567,7 +567,7 @@ async function sendSay() {
 }
 
 // スラッシュコマンド: 入力欄からローカル操作(エージェントを起こさない)
-function handleCommand(text) {
+async function handleCommand(text) {
   const [cmd] = text.slice(1).split(/\s+/);
   const post = (t) => {
     const d = document.createElement("div");
