@@ -25,8 +25,8 @@
   "loop": { "maxTurns": 40 },
   "runner": { "timeoutSec": 900 },
   "discovery": {
-    "intervalSec": 30,
-    "testCommand": "node --test tests/*.test.mjs 2>&1"
+    "intervalSec": 120,
+    "testCommand": "npm test"
   },
   "permissions": {
     "askTimeoutSec": 120,

@@ -21,7 +21,7 @@ export function loadConfig(configPath) {
     agents: (raw.agents ?? []).map((a) => ({ ...a, personaPath: resolve(ROOT, a.persona ?? `agents/${a.id}.md`) })),
     loop: { maxTurns: 30, ...(raw.loop ?? {}) },
     runner: { timeoutSec: 480, ...(raw.runner ?? {}) },
-    ui: { port: 7789, ...(raw.ui ?? {}) },
+    ui: { port: 7789, monitorPort: 7791, monitorHost: "0.0.0.0", ...(raw.ui ?? {}) },
     discovery: { intervalSec: 30, testCommand: null, ...(raw.discovery ?? {}) },
     permissions: {
       askTimeoutSec: 120,
