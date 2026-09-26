@@ -6,11 +6,14 @@
 <style>
   :root {
     color-scheme: dark;
-    --bg: #161617; --panel: #1d1d1f; --panel2: #262629; --line: #2b2b2f; --line2: #3b3b41;
-    --label: #e9e9ea; --muted: #9d9da2; --faint: #6e6e73;
+    --bg: #19191b; --panel: #202023; --panel2: #2b2b30; --line: #2c2c31; --line2: #43434b;
+    --label: #eaeaea; --muted: #a3a3a8; --faint: #717177;
     --accent: #f5a35b; --accent-fill: rgba(245, 163, 91, 0.12); --accent-contrast: #1c1208;
     --ok: #86efac; --warn: #fbbf24; --err: #fca5a5;
     --usermsg: #30363d;
+    --recess: #131315;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.30), 0 2px 6px rgba(0, 0, 0, 0.18);
+    --inset-field: inset 0 1px 2px rgba(0, 0, 0, 0.28);
     --font-ui: system-ui, "Segoe UI", "Meiryo", "Noto Sans JP", sans-serif;
     --font-mono: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
   }
@@ -64,7 +67,7 @@
   .dot.error { background: var(--err); }
   @keyframes pulse { 50% { opacity: 0.4; } }
   #permzone { padding: 0 16px; }
-  .permcard { background: #2a1c1c; border: 1px solid var(--err); border-radius: 6px; padding: 8px 12px; margin-top: 10px; font-size: 12px; }
+  .permcard { background: var(--panel); border: 1px solid var(--err); border-radius: 6px; padding: 8px 12px; margin-top: 10px; font-size: 12px; box-shadow: var(--shadow-card); }
   .permcard .cmd { font-family: Consolas, monospace; color: var(--warn); margin: 4px 0 6px; }
   .permcard button { background: var(--panel2); border: 1px solid var(--line2); color: var(--label); border-radius: 4px; padding: 3px 12px; margin-right: 6px; cursor: pointer; }
   .permcard button.ok { background: var(--ok); border-color: var(--ok); color: var(--accent-contrast); font-weight: 600; }
@@ -75,17 +78,17 @@
   .msg.mine { background: var(--accent-fill); box-shadow: inset 2px 0 0 var(--accent); }
   .msg.mine .who { color: var(--accent); }
   .msg p { margin: 3px 0; }
-  .msg pre { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 8px; overflow-x: auto; font-size: 12px; font-family: var(--font-mono); }
-  .msg code { background: var(--bg); border-radius: 3px; padding: 0 4px; font-size: 12px; font-family: var(--font-mono); }
+  .msg pre { background: var(--recess); border: 1px solid var(--line); border-radius: 4px; padding: 8px; overflow-x: auto; font-size: 12px; font-family: var(--font-mono); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18); }
+  .msg code { background: var(--recess); border-radius: 3px; padding: 0 4px; font-size: 12px; font-family: var(--font-mono); }
   .msg img { max-width: 100%; min-height: 40px; border-radius: 4px; display: block; margin: 4px 0; background: var(--bg); }
   .sysline { font-size: 11px; color: var(--faint); padding: 3px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cmdout { align-self: flex-end; font-size: 12px; color: var(--faint); background: none; white-space: pre-wrap; max-width: 90%; }
 
   #composer { border-top: 1px solid var(--line2); padding: 10px 16px 12px; background: var(--panel); position: relative; }
   #composer .row { display: flex; gap: 8px; }
-  #say { flex: 1; background: var(--bg); border: 1px solid var(--line2); color: var(--label); border-radius: 6px; padding: 8px 12px; font-size: 13px; }
+  #say { flex: 1; background: var(--recess); border: 1px solid var(--line2); color: var(--label); border-radius: 6px; padding: 8px 12px; font-size: 13px; box-shadow: var(--inset-field); }
   #say:focus { outline: none; border-color: var(--accent); }
-  #send { background: var(--accent); border: none; color: var(--accent-contrast); border-radius: 6px; padding: 8px 16px; cursor: pointer; font-weight: 600; }
+  #send { background: var(--accent); border: none; color: var(--accent-contrast); border-radius: 6px; padding: 8px 16px; cursor: pointer; font-weight: 600; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 3px rgba(0, 0, 0, 0.35); }
   #composer .hint { font-size: 11px; color: var(--faint); margin-top: 4px; min-height: 14px; }
 
   /* 候補ポップアップ */
@@ -111,7 +114,7 @@
   .taskrow button { background: var(--panel2); border: 1px solid var(--line2); color: var(--label); border-radius: 4px; font-size: 10px; padding: 1px 7px; cursor: pointer; white-space: nowrap; }
   .taskrow button:hover { border-color: var(--accent); color: var(--accent); }
   #newtask { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; border-top: 1px solid var(--line2); padding-top: 10px; }
-  #newtask input, #newtask textarea { background: var(--bg); border: 1px solid var(--line2); color: var(--label); border-radius: 4px; padding: 4px 7px; font-size: 12px; }
+  #newtask input, #newtask textarea { background: var(--recess); border: 1px solid var(--line2); color: var(--label); border-radius: 4px; padding: 4px 7px; font-size: 12px; box-shadow: var(--inset-field); }
   #newtask textarea { min-height: 40px; resize: vertical; }
   #newtask button { align-self: flex-end; background: var(--accent); border: none; color: var(--accent-contrast); border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; font-weight: 600; }
   .agentcard { background: transparent; border-radius: 4px; padding: 6px 10px; margin-bottom: 2px; cursor: pointer; font-size: 12px; }
@@ -122,7 +125,7 @@
   .agentcard .st.working { color: var(--warn); }
   .agentcard .st.done { color: var(--ok); }
   .agentcard .meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
-  .alog { max-height: 44vh; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; font-family: var(--font-mono); font-size: 11.5px; }
+  .alog { max-height: 44vh; overflow-y: auto; background: var(--recess); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; font-family: var(--font-mono); font-size: 11.5px; box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18); }
   .alog .l { padding: 3px 0; white-space: pre-wrap; word-break: break-word; }
   .alog .l .k { display: inline-block; min-width: 38px; margin-right: 6px; font-size: 10px; color: var(--faint); }
   .alog .l.think { color: var(--muted); }
@@ -135,14 +138,14 @@
   ul.files { list-style: none; padding: 0; margin: 4px 0; font-size: 12px; }
   ul.files li { cursor: pointer; padding: 3px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
   ul.files li:hover { background: var(--panel2); color: var(--label); }
-  pre.fv { background: var(--bg); border-radius: 4px; padding: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
+  pre.fv { background: var(--recess); border-radius: 4px; padding: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
   #term { display: flex; flex-direction: column; height: 100%; }
-  #termout { flex: 1; background: var(--bg); border-radius: 4px; padding: 8px; font-size: 12px; overflow-y: auto; white-space: pre-wrap; color: var(--ok); }
-  #termin { margin-top: 6px; background: var(--bg); border: 1px solid var(--line2); color: var(--label); border-radius: 4px; padding: 5px 8px; font-size: 12px; font-family: Consolas, monospace; }
+  #termout { flex: 1; background: var(--recess); border-radius: 4px; padding: 8px; font-size: 12px; overflow-y: auto; white-space: pre-wrap; color: var(--ok); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18); }
+  #termin { margin-top: 6px; background: var(--recess); border: 1px solid var(--line2); color: var(--label); border-radius: 4px; padding: 5px 8px; font-size: 12px; font-family: Consolas, monospace; box-shadow: var(--inset-field); }
   .hintbox { font-size: 11px; color: var(--muted); margin: 6px 0; }
   /* 設定ウィンドウ */
   .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
-  .dialog { background: var(--panel); border: 1px solid var(--line2); border-radius: 8px; width: 520px; max-height: 86vh; overflow-y: auto; padding: 16px 20px; }
+  .dialog { background: var(--panel); border: 1px solid var(--line2); border-radius: 8px; width: 520px; max-height: 86vh; overflow-y: auto; padding: 16px 20px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
   .dialog h2 { margin: 0 0 12px; font-size: 14px; color: var(--accent); }
   .dialog .frow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
   .dialog .frow label { width: 150px; font-size: 12px; color: var(--muted); flex-shrink: 0; }
@@ -152,7 +155,7 @@
   .dialog .fbtns button { border-radius: 4px; padding: 5px 14px; cursor: pointer; font-size: 12px; border: 1px solid var(--line2); background: var(--panel2); color: var(--label); }
   .dialog .fbtns button.save { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); font-weight: 600; }
   .dialog h3 { margin: 14px 0 6px; font-size: 12px; color: var(--label); border-bottom: 1px solid var(--line2); padding-bottom: 4px; }
-  #toast { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--ok); color: var(--ok); border-radius: 6px; padding: 8px 18px; font-size: 12px; display: none; z-index: 99; }
+  #toast { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--ok); color: var(--ok); border-radius: 6px; padding: 8px 18px; font-size: 12px; display: none; z-index: 99; box-shadow: var(--shadow-card); }
   #gear { background: none; border: 1px solid var(--line2); border-radius: 4px; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 8px; margin-left: auto; }
   #gear:hover { color: var(--accent); border-color: var(--accent); }
 </style>
