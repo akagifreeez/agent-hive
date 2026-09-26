@@ -1,7 +1,7 @@
 // ローカルWebUI。依存ゼロ(node:http + SSE)。後からElectron殻で包む前提なので
 // 描画はブラウザ側に寄せ、サーバーは状態API+SSEストリームだけを持つ。
 import { createServer } from "node:http";
-import { readFileSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runScenario } from "../runner.js";
@@ -23,10 +23,11 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
 
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null }) {
   const live = {
-    // v6: エージェントは thread.opened/agent.spawned 登録時に出現する(事前登録しない。
+    // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
     // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
     agents: {},
-    board: [],
+    // 永続化済みのボード履歴を復元(再起動後も過去ログが見える)
+    board: loadPersistedBoardPosts(config.workspace),
     requests: [],
     threads: [],
     scenario: null,
@@ -290,17 +291,37 @@ function readFileSafe(workspace, p) {
   }
 }
 
-// state/usage.jsonへの蓄積(運用データ。直近200件)
-  function persistUsage(workspace, entry) {
+// state/配下のボードログ(board__main__.jsonl / board-<スレッド>.jsonl)を全件復元する
+export function loadPersistedBoardPosts(workspace) {
+  const dir = join(workspace, "state");
+  const out = [];
+  if (!existsSync(dir)) return out;
+  for (const f of readdirSync(dir)) {
+    if (!(f === "board__main__.jsonl" || /^board-.+\.jsonl$/.test(f))) continue;
     try {
-      const dir = join(workspace, "state");
-      mkdirSync(dir, { recursive: true });
+      for (const line of readFileSync(join(dir, f), "utf8").split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const p = JSON.parse(line);
+          if (p && typeof p.id === "number") out.push(p);
+        } catch {}
+      }
+    } catch {}
+  }
+  return out;
+}
+
+// state/usage.jsonへの蓄積(運用データ。直近200件)
+function persistUsage(workspace, entry) {
+  try {
+    const dir = join(workspace, "state");
+    mkdirSync(dir, { recursive: true });
       const file = join(dir, "usage.json");
       const history = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
       history.push(entry);
       writeFileSync(file, JSON.stringify(history.slice(-200), null, 1));
-    } catch {}
-  }
+  } catch {}
+}
 
 function readFileSyncSafe(p) {
   try {
