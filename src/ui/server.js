@@ -520,6 +520,7 @@ async function startMonitor({ config, live, tasks, startedAt }) {
 <script>
 const esc=(s)=>String(s??"").replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const rows=(a,f)=>a.map(f).join("");
+const hue=(s)=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))%360;return h;};
 async function tick(){
   try{
     const d=await (await fetch("/api/monitor")).json();
@@ -531,9 +532,9 @@ async function tick(){
       rows(d.tasks.claimed,(t)=>"<tr><td class='warn'>作業中</td><td class='mono'>"+esc(t.id)+"</td><td class='mono'>"+esc(t.agent)+"</td><td class='dim'>"+esc(t.summary)+"</td></tr>")+
       rows(d.tasks.open,(t)=>"<tr><td class='dim'>未着手</td><td class='mono'>"+esc(t.id)+"</td><td></td><td class='dim'>"+esc(t.summary)+"</td></tr>")+"</table>"+
       "<h2>エージェント</h2><table><tr><th>名前</th><th>状態</th><th>turn</th><th>直近ツール</th><th>消費</th><th>スレッド</th></tr>"+
-      (rows(d.agents,(a)=>"<tr><td>"+esc(a.displayName)+"</td><td>"+esc(a.status)+"</td><td class='mono'>"+a.turn+"</td><td class='mono'>"+esc(a.lastTool)+"</td><td class='mono'>"+a.tokens.toLocaleString()+"tok</td><td class='mono'>"+esc(a.thread)+"</td></tr>")||"<tr><td colspan='6' class='dim'>稼働中のエージェントはいません</td></tr>")+"</table>"+
+      (rows(d.agents,(a)=>"<tr><td style='color:hsl("+hue(a.id)+" 45% 72%)'>"+esc(a.displayName)+"</td><td>"+esc(a.status)+"</td><td class='mono'>"+a.turn+"</td><td class='mono'>"+esc(a.lastTool)+"</td><td class='mono'>"+a.tokens.toLocaleString()+"tok</td><td class='mono'>"+esc(a.thread)+"</td></tr>")||"<tr><td colspan='6' class='dim'>稼働中のエージェントはいません</td></tr>")+"</table>"+
       "<h2>直近のマージ</h2><div class='board'>"+(rows(d.merges,(m)=>"<div><b class='mono'>"+esc(m.taskId)+"</b> <span class='accent'>"+esc(m.summary)+"</span> <span class='dim'>by "+esc(m.agent)+"</span></div>")||"<div class='dim'>まだありません</div>")+"</div>"+
-      "<h2>ボードの新着(全スレッド・直近30件)</h2><div class='board'>"+rows(d.recent.slice().reverse(),(p)=>"<div><b>"+esc(p.from)+"</b> <span class='mono dim'>@"+esc(p.thread)+"</span> "+esc(p.text)+"</div>")+"</div>";
+      "<h2>ボードの新着(全スレッド・直近30件)</h2><div class='board'>"+rows(d.recent.slice().reverse(),(p)=>"<div><b style='color:hsl("+hue(p.from)+" 45% 72%)'>"+esc(p.from)+"</b> <span class='mono dim'>@"+esc(p.thread)+"</span> "+esc(p.text)+"</div>")+"</div>";
   }catch(e){ document.getElementById("body").textContent="取得に失敗: "+e.message; }
 }
 tick();setInterval(tick,3000);
