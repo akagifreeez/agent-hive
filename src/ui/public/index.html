@@ -79,6 +79,9 @@
   /* ============ 左: ナビ ============ */
   #nav { background: var(--bg-elevated); border-right: 1px solid var(--separator); display: flex; flex-direction: column; padding: 10px 8px; gap: 1px; min-height: 0; overflow-y: auto; }
   #nav .logo { padding: 4px 8px 12px; color: var(--label); font-weight: 700; font-size: 15px; }
+  #nav-search { background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 5px 8px; font-size: 12px; font-family: var(--font-ui); margin: 0 8px 4px; box-shadow: var(--inset-field); }
+  #nav-search:focus { outline: none; border-color: var(--accent); }
+  #nav-search::placeholder { color: var(--label-tertiary); }
   .navlabel { font-size: 11px; color: var(--label-tertiary); border-top: 1px solid var(--separator); margin: 8px 4px 0; padding: 8px 4px 3px; }
   #nav-main { margin-bottom: 2px; }
   .room { padding: 5px 8px 6px; border-radius: 4px; cursor: pointer; font-size: 13px; position: relative; transition: background var(--duration) var(--ease); }
@@ -221,6 +224,7 @@
 <body>
   <aside id="nav">
     <div class="logo">agent-hive</div>
+    <input id="nav-search" type="text" placeholder="スレッドを検索" autocomplete="off">
     <div id="nav-main"></div>
     <div class="navlabel" id="nav-thread-label">スレッド</div>
     <div id="nav-rooms"></div>
@@ -308,10 +312,13 @@ function escapeHtml(s) {
 }
 
 /* ================= 左ナビ ================= */
+let navQuery = "";
 function renderNav(threads) {
   // メインはスレッド一覧から分離してナビ最上部の独立セクションに置く
-  const ths = (threads ?? []).filter((t) => t.name !== "__main__");
-  $("nav-thread-label").textContent = `スレッド${ths.length ? ` (${ths.length})` : ""}`;
+  const all = (threads ?? []).filter((t) => t.name !== "__main__");
+  const q = navQuery.trim().toLowerCase();
+  const ths = q ? all.filter((t) => t.name.toLowerCase().includes(q) || (t.goal ?? "").toLowerCase().includes(q)) : all;
+  $("nav-thread-label").textContent = `スレッド${all.length ? ` (${ths.length}/${all.length})` : ""}`;
   const makeRoom = (parent, t) => {
     const d = document.createElement("div");
     d.className = "room" + (selectedThread === t.id ? " active" : "");
@@ -947,6 +954,8 @@ function refreshSoon() {
 }
 
 /* ================= イベント配線 ================= */
+$("nav-search").addEventListener("input", (e) => { navQuery = e.target.value; renderAll(); });
+
 const es = new EventSource("/events");
 es.onmessage = (e) => {
   const { type, payload } = JSON.parse(e.data);
