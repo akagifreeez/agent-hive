@@ -209,6 +209,16 @@
   pre.fileview { background: var(--recess); border-radius: 0; padding: 8px; font-family: var(--font-mono); font-size: 11.5px; overflow-x: auto; white-space: pre-wrap; margin: 0; max-height: 50vh; overflow-y: auto; }
 
   /* ダイアログとトースト */
+  #settings-dlg { background: var(--bg-elevated); color: var(--label); border: 1px solid var(--line-strong); border-radius: 8px; padding: 14px 16px; width: 420px; box-shadow: var(--shadow-overlay); }
+  #settings-dlg::backdrop { background: rgba(0, 0, 0, 0.5); }
+  #settings-dlg h3 { margin: 0 0 10px; font-size: 14px; }
+  #settings-dlg .set-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  #settings-dlg .set-row label { width: 110px; font-size: 12px; color: var(--sub); flex-shrink: 0; }
+  #settings-dlg .set-row input, #settings-dlg .set-row select { flex: 1; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 5px 8px; font-size: 12px; font-family: var(--font-ui); box-shadow: var(--inset-field); }
+  #settings-dlg .set-row input:focus, #settings-dlg .set-row select:focus { outline: none; border-color: var(--accent); }
+  #settings-dlg .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+  #settings-btn { position: absolute; right: 12px; top: 9px; background: var(--panel2); border: 1px solid var(--separator); color: var(--sub); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
+  #settings-btn:hover { color: var(--label); border-color: var(--line-strong); }
   #dlg { background: var(--bg-elevated); color: var(--label); border: 1px solid var(--line-strong); border-radius: 8px; padding: 14px 16px; width: 380px; box-shadow: var(--shadow-overlay); }
   #dlg::backdrop { background: rgba(0, 0, 0, 0.5); }
   #dlg h3 { margin: 0 0 6px; font-size: 14px; }
@@ -236,6 +246,7 @@
       <div id="room-title"></div>
       <div id="room-goal"></div>
       <div id="room-members"></div>
+      <button id="settings-btn" title="設定">設定</button>
     </header>
     <div id="permzone"></div>
     <div id="stream"></div>
@@ -261,6 +272,21 @@
     <div id="ctx-body"></div>
   </aside>
 
+  <dialog id="settings-dlg">
+    <h3>設定</h3>
+    <div class="set-row"><label>思考レベル</label>
+      <select id="set-effort"><option value="low">low(速い・安い)</option><option value="medium">medium</option><option value="high">high(じっくり)</option></select>
+    </div>
+    <div class="set-row"><label>モデル</label><input id="set-model" spellcheck="false"></div>
+    <div class="set-row"><label>フォールバック</label><input id="set-fallback" placeholder="カンマ区切り" disabled></div>
+    <div class="set-row"><label>権限モード</label>
+      <select id="set-perm"><option value="normal">normal(要承認)</option><option value="auto">auto(自動許可)</option></select>
+    </div>
+    <div class="row">
+      <button class="btn" id="settings-cancel">閉じる</button>
+      <button class="btn primary" id="settings-save">保存</button>
+    </div>
+  </dialog>
   <dialog id="dlg">
     <h3 id="dlg-title"></h3>
     <div class="body" id="dlg-body"></div>
@@ -955,6 +981,37 @@ function refreshSoon() {
 
 /* ================= イベント配線 ================= */
 $("nav-search").addEventListener("input", (e) => { navQuery = e.target.value; renderAll(); });
+
+/* ================= 設定ウィンドウ(エージェントを起こさない操作) ================= */
+function openSettings() {
+  $("set-effort").value = uiEffort ?? "low";
+  $("set-model").value = uiModelName ?? lastState?.model?.name ?? "";
+  $("set-fallback").value = (lastState?.model?.fallbacks ?? []).join(",");
+  $("set-perm").value = lastState?.live?.permMode ?? "normal";
+  $("settings-dlg").showModal();
+}
+$("settings-btn").onclick = openSettings;
+$("settings-cancel").onclick = () => $("settings-dlg").close();
+$("settings-dlg").addEventListener("click", (e) => { if (e.target === $("settings-dlg")) $("settings-dlg").close(); });
+$("settings-save").onclick = async () => {
+  const effort = $("set-effort").value;
+  const model = $("set-model").value.trim();
+  const perm = $("set-perm").value;
+  const re = await (await fetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ effort }) })).json();
+  if (re.error) { toast(re.error); return; }
+  uiEffort = re.effort;
+  const cur = uiModelName ?? lastState?.model?.name ?? "";
+  if (model && model !== cur) {
+    const rm = await (await fetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model }) })).json();
+    if (rm.error) { toast(rm.error); return; }
+    uiModelName = rm.model;
+  }
+  const rp = await (await fetch("/api/perm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: perm }) })).json();
+  if (rp.error) { toast(rp.error); return; }
+  $("settings-dlg").close();
+  toast("設定を保存しました", "ok");
+  await refresh();
+};
 
 const es = new EventSource("/events");
 es.onmessage = (e) => {
