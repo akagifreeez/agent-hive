@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import os from "node:os";
 import { runScenario } from "../runner.js";
 import { TaskBlackboard } from "../engine/tasks.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
@@ -23,6 +24,7 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
 }
 
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null }) {
+  const startedAt = Date.now();
   const live = {
     // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
     // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
@@ -381,6 +383,9 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     throw err;
   });
   console.log(`UI: http://localhost:${config.ui.port}${autoStart ? " (シナリオを自動開始します)" : ""}`);
+  if (config.ui.monitorPort) {
+    await startMonitor({ config, live, tasks, startedAt });
+  }
   if (autoStart) {
     // 待ち受けを邪魔しない走行
     runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
@@ -390,6 +395,108 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 function json(res, obj, status = 200) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(obj));
+}
+
+/* ============ 外部監視サーバ(読み取り専用) ============ */
+// LAN/Tailscale越しに進捗を見るための最小ページ。POST系APIは一切持たない
+// (exec/say等を公開しない)。unref付きなのでプロセス寿命には関与しない。
+export function buildMonitorSnapshot({ config, live, tasks, startedAt }) {
+  const list = tasks.list();
+  const prog = (project) => {
+    const all = [...list.open, ...list.claimed, ...list.done].filter((t) => (t.project || "") === project);
+    return { total: all.length, done: all.filter((t) => t.state === "done").length };
+  };
+  return {
+    at: new Date().toISOString(),
+    uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+    model: config.model.model,
+    permMode: live.permMode,
+    posts: live.board.length,
+    threads: (live.threads ?? []).map((t) => ({ name: t.name, folder: t.folder ?? null, goal: t.goal ?? "", ...prog(t.name) })),
+    tasks: {
+      open: list.open.map((t) => ({ id: t.id, project: t.project ?? "", summary: t.summary })),
+      claimed: list.claimed.map((t) => ({ id: t.id, project: t.project ?? "", agent: t.agent ?? "", summary: t.summary })),
+      doneCount: list.done.length,
+    },
+    agents: Object.entries(live.agents).map(([id, a]) => ({
+      id,
+      displayName: a.displayName ?? id,
+      thread: a.thread ?? "__main__",
+      status: a.status ?? "idle",
+      turn: a.turn ?? 0,
+      lastTool: a.lastTool ?? "",
+      tokens: a.tokens ?? 0,
+      costUsd: a.costUsd ?? 0,
+    })),
+    merges: (live.merges ?? []).slice(0, 10).map((m) => ({ taskId: m.taskId, agent: m.agent, summary: m.summary ?? "" })),
+    recent: live.board.slice(-30).map((p) => ({ from: p.from, thread: p.thread ?? "__main__", text: String(p.text).slice(0, 200) })),
+  };
+}
+
+async function startMonitor({ config, live, tasks, startedAt }) {
+  const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>agent-hive monitor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body{margin:0;background:#161617;color:#eaeaea;font-family:system-ui,"Segoe UI","Meiryo","Noto Sans JP",sans-serif;font-size:13px;line-height:1.45}
+  header{padding:10px 16px;border-bottom:1px solid #2c2c31;display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;background:#1d1d1f}
+  h1{font-size:15px;margin:0}.accent{color:#f5a35b}.sub{color:#a3a3a8;font-size:12px}
+  main{padding:12px 16px;max-width:1100px;margin:0 auto}
+  h2{font-size:11px;color:#6e6e73;margin:16px 0 6px;font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  td,th{text-align:left;padding:3px 8px;border-bottom:1px solid #232327}
+  th{color:#6e6e73;font-weight:600}
+  .mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:11px}
+  .ok{color:#86efac}.warn{color:#fbbf24}.err{color:#fca5a5}.dim{color:#a3a3a8}
+  .board div{padding:3px 0;border-bottom:1px solid #1d1d1f;color:#a3a3a8;white-space:pre-wrap;word-break:break-word}
+  .board b{color:#eaeaea;font-weight:600}
+</style></head><body>
+<header><h1>agent-hive <span class="accent">monitor</span></h1><span class="sub" id="meta">読み込み中...</span><span class="sub">読み取り専用・3秒ごとに更新</span></header>
+<main id="body"></main>
+<script>
+const esc=(s)=>String(s??"").replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const rows=(a,f)=>a.map(f).join("");
+async function tick(){
+  try{
+    const d=await (await fetch("/api/monitor")).json();
+    document.getElementById("meta").textContent="model: "+d.model+" / perm:"+esc(d.permMode)+" / 稼働 "+Math.floor(d.uptimeSec/60)+"分"+(d.uptimeSec%60)+"秒 / 投稿 "+d.posts+"件";
+    document.getElementById("body").innerHTML=
+      "<h2>スレッド</h2><table><tr><th>名前</th><th>フォルダ</th><th>進捗</th><th>目標</th></tr>"+
+      (rows(d.threads,(t)=>"<tr><td class='mono'># "+esc(t.name)+"</td><td>"+esc(t.folder??"")+"</td><td class='mono'>"+t.done+"/"+t.total+"</td><td class='dim'>"+esc(t.goal)+"</td></tr>")||"<tr><td colspan='4' class='dim'>開いているスレッドはありません</td></tr>")+"</table>"+
+      "<h2>タスク(未着手 "+d.tasks.open.length+" / 作業中 "+d.tasks.claimed.length+" / 完了 "+d.tasks.doneCount+")</h2><table><tr><th>状態</th><th>タスク</th><th>担当</th><th>内容</th></tr>"+
+      rows(d.tasks.claimed,(t)=>"<tr><td class='warn'>作業中</td><td class='mono'>"+esc(t.id)+"</td><td class='mono'>"+esc(t.agent)+"</td><td class='dim'>"+esc(t.summary)+"</td></tr>")+
+      rows(d.tasks.open,(t)=>"<tr><td class='dim'>未着手</td><td class='mono'>"+esc(t.id)+"</td><td></td><td class='dim'>"+esc(t.summary)+"</td></tr>")+"</table>"+
+      "<h2>エージェント</h2><table><tr><th>名前</th><th>状態</th><th>turn</th><th>直近ツール</th><th>消費</th><th>スレッド</th></tr>"+
+      (rows(d.agents,(a)=>"<tr><td>"+esc(a.displayName)+"</td><td>"+esc(a.status)+"</td><td class='mono'>"+a.turn+"</td><td class='mono'>"+esc(a.lastTool)+"</td><td class='mono'>"+a.tokens.toLocaleString()+"tok</td><td class='mono'>"+esc(a.thread)+"</td></tr>")||"<tr><td colspan='6' class='dim'>稼働中のエージェントはいません</td></tr>")+"</table>"+
+      "<h2>直近のマージ</h2><div class='board'>"+(rows(d.merges,(m)=>"<div><b class='mono'>"+esc(m.taskId)+"</b> <span class='accent'>"+esc(m.summary)+"</span> <span class='dim'>by "+esc(m.agent)+"</span></div>")||"<div class='dim'>まだありません</div>")+"</div>"+
+      "<h2>ボードの新着(全スレッド・直近30件)</h2><div class='board'>"+rows(d.recent.slice().reverse(),(p)=>"<div><b>"+esc(p.from)+"</b> <span class='mono dim'>@"+esc(p.thread)+"</span> "+esc(p.text)+"</div>")+"</div>";
+  }catch(e){ document.getElementById("body").textContent="取得に失敗: "+e.message; }
+}
+tick();setInterval(tick,3000);
+</script></body></html>`;
+  const server = createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url ?? "/", "http://monitor");
+      if (url.pathname === "/api/monitor") return json(res, buildMonitorSnapshot({ config, live, tasks, startedAt }));
+      if (req.method === "GET") {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        return res.end(html);
+      }
+      res.writeHead(405).end();
+    } catch (err) {
+      json(res, { error: err.message }, 500);
+    }
+  });
+  const host = config.ui.monitorHost ?? "0.0.0.0";
+  const port = config.ui.monitorPort ?? 0;
+  await new Promise((resolve) => server.listen(port, host, resolve));
+  server.unref();
+  console.log(`Monitor: http://localhost:${server.address().port} (読み取り専用・${host}で公開)`);
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const n of list ?? []) {
+      if (n.family === "IPv4" && !n.internal) console.log(`Monitor(LAN): http://${n.address}:${server.address().port}`);
+    }
+  }
+  return server;
 }
 
 function readFileSafe(workspace, p) {

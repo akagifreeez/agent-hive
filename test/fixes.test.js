@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { TaskBlackboard, readMeta } from "../src/engine/tasks.js";
 import { Board, Bus } from "../src/engine/board.js";
 import { createTools } from "../src/engine/tools.js";
-import { pushAgentLog, AGENT_LOG_LIMIT } from "../src/ui/server.js";
+import { pushAgentLog, AGENT_LOG_LIMIT, buildMonitorSnapshot } from "../src/ui/server.js";
 import { OpenAIModel } from "../src/model/openai.js";
 
 function mktmp() {
@@ -267,5 +267,35 @@ test("claim_next_task: 待ち行で後から投入されたタスクを請求で
   assert.equal(r.ok, true);
   assert.equal(r.claimMiss, undefined);
   assert.match(r.text, /タスク later-1 を請求しました/);
+  rmTree(ws);
+});
+
+test("monitorスナップショット: スレッド進捗・タスク・エージェント・マージを集約する", () => {
+  const ws = mkdtempSync(join(tmpdir(), "hive-mon-"));
+  const bus = new Bus();
+  const tasks = new TaskBlackboard(ws, bus);
+  const agent = { id: "m-alpha", displayName: "アルファ" };
+  tasks.create({ id: "mt1", project: "proj", body: "監視テスト用の仕事" });
+  tasks.create({ id: "mt2", project: "proj", body: "もう一件" });
+  assert.ok(tasks.claim(agent, { project: "proj" }));
+  const live = {
+    board: [{ id: 1, from: "you", text: "進めて", thread: "__main__" }],
+    threads: [{ name: "proj", folder: "engine", goal: "監視対象の取り組み" }],
+    agents: { "m-alpha": { displayName: "アルファ", status: "working", turn: 3, lastTool: "bash", tokens: 1234, costUsd: 0.001, thread: "proj" } },
+    merges: [{ taskId: "mt1", agent: "m-alpha", summary: "1ファイル +10", stat: "", patch: "" }],
+    permMode: "normal",
+  };
+  const snap = buildMonitorSnapshot({ config: { model: { model: "test-model" } }, live, tasks, startedAt: Date.now() - 65000 });
+  assert.equal(snap.model, "test-model");
+  assert.ok(snap.uptimeSec >= 65);
+  const th = snap.threads.find((t) => t.name === "proj");
+  assert.equal(th.folder, "engine");
+  assert.equal(th.total, 2);
+  assert.equal(th.done, 0);
+  assert.equal(snap.tasks.claimed.length, 1);
+  assert.equal(snap.tasks.claimed[0].agent, "m-alpha");
+  assert.equal(snap.agents[0].tokens, 1234);
+  assert.equal(snap.merges[0].summary, "1ファイル +10");
+  assert.equal(snap.recent[0].text, "進めて");
   rmTree(ws);
 });
