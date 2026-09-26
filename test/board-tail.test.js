@@ -1,7 +1,7 @@
 // ボード履歴の頁送りAPIの検証
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Board, Bus } from "../src/engine/board.js";
@@ -24,8 +24,6 @@ test("board API: /api/stateのboardは末尾200件に絞られ、/api/board?befo
   const ws = mktmp();
   const bus = new Bus();
   const board = new Board(bus);
-  // 250件投稿
-  for (let i = 1; i <= 250; i++) board.post("tester", `投稿${i}`);
   const tasks = new TaskBlackboard(ws, bus);
   const config = {
     workspace: ws,
@@ -36,6 +34,8 @@ test("board API: /api/stateのboardは末尾200件に絞られ、/api/board?befo
   };
   const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
   const base = `http://127.0.0.1:${config.ui.port}`;
+  // busハンドラ登録後(startUi後)に投稿しないとlive.boardに届かない
+  for (let i = 1; i <= 250; i++) board.post("tester", `投稿${i}`);
 
   const st = await fetchJson(`${base}/api/state`);
   assert.equal(st.status, 200);
@@ -54,7 +54,7 @@ test("board API: /api/stateのboardは末尾200件に絞られ、/api/board?befo
   assert.equal(pg.body.posts.at(-1).text, "投稿50");
   assert.equal(pg.body.posts[0].text, "投稿1");
   // 同型(既存board要素と同じキー)
-  for (const k of ["id", "from", "text", "ts"]) assert.ok(k in pg.body.posts[0], `key ${k}`);
+  for (const k of ["id", "from", "text", "at"]) assert.ok(k in pg.body.posts[0], `key ${k}`);
 
   // before未指定は末尾200件
   const pg2 = await fetchJson(`${base}/api/board`);
