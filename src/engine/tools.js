@@ -11,17 +11,18 @@ import { readSkill } from "./skills.js";
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0 }) {
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
   const specs = [
     {
       name: "claim_next_task",
-      description: "タスクボードから自分が担当できる次のタスクを1件請求(claim)する。成功でタスク本文、無ければ『請求できるタスクはありません』が返る。projectを指定するとその文脈のタスクだけを対象にする(別の取り組みの仕事を混ぜない)。",
+      description: "タスクボードから自分が担当できる次のタスクを1件請求(claim)する。成功でタスク本文、無ければ『請求できるタスクはありません』が返る。projectを指定するとその文脈のタスクだけを対象にする(別の取り組みの仕事を混ぜない)。タスクが無いときはエンジン側で新着を待ってから返る(待ち時間はトークン消費ゼロ)。",
       parameters: {
         type: "object",
         properties: {
           project: { type: "string", description: "文脈(プロジェクト)名。自分の担当する取り組みのタスクに絞るときに指定" },
+          wait_sec: { type: "number", description: "タスクが無い場合に新着を待つ秒数(0で待たない。省略時は設定値、最大120)" },
         },
         additionalProperties: false,
       },
@@ -239,7 +240,14 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     switch (name) {
       case "claim_next_task": {
         const opts = args.project ? { project: String(args.project) } : {};
-        const t = tasks.claim(agent, opts);
+        // 待ち行: 新規タスクの出現をエンジン側で待つ(LLMを起こさないので待ち時間のトークン消費はゼロ)
+        const waitSec = clamp(Math.floor(Number(args.wait_sec ?? idleClaimWaitSec) || 0), 0, 120);
+        const deadline = waitSec > 0 ? Date.now() + waitSec * 1000 : 0;
+        let t = tasks.claim(agent, opts);
+        while (!t && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 2000));
+          t = tasks.claim(agent, opts);
+        }
         if (!t) {
           return {
             ok: true,

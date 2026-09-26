@@ -65,6 +65,7 @@ ZCode OSS(`adapters/model`、`runtime/helpers`、`runtime/methods`)のコード�
 | **microcompact** | 直近5件のツール結果だけ残し、古いものはプレースホルダに置換。**LLM呼び出しなし**。発火は文脈推定が窓の90%超えたとき、最低削減256トークン | ZCode microcompact.ts(定数ごと移植) |
 | **autocompact** | provider usage(優先)/推定が「窓−出力予約(21Kキャップ)」の90%超えたら、モデルに構造化要約させて履歴を `[system, 要約, 直近4件]` に置換。連続3回失敗でサーキットブレーク | ZCode compact/policy.ts+prompt.ts |
 | **idle強制終了** | claim_next_taskの連続3回失敗を**エンジンが数えて**打ち切り(待ち専用エージェントの無駄呼び出しとウォールタイムを削る) | hive固有(v3実走の教訓) |
+| **請求待ち行(v6.14)** | claim_next_taskでタスクが無いとき、エンジン側で新着タスクの出現を待ってから返す(`chat.idleClaimWaitSec`、既定45秒・最大120)。**待ち時間中はLLMを起こさない**ので、アイドル時の再請求呼び出しが約1回/45秒に減る | hive固有(ZCodeのwait抽象をblackboard流に翻訳) |
 | **reasoning_effort** | `model.reasoningEffort: "low"`をリクエストに付与(思考トークンは課金対象) | Codexのmodel_reasoning_effort |
 | **エージェント別モデル** | `agents[].model` / `agents[].reasoningEffort`で上書き可 | OpenCodeのマルチモデル流 |
 | **予算ブレーキ** | `budget.maxTokensPerRun`超過でグレースフル停止(ボードに予算停止を告知)。**判定はこのラン(ループ実行)単位**(v5.4)——常駐chatのセッション累積で判定すると使い切り時にチャット全体が応答不能になるため | discord-agentsのbudget文化 |
