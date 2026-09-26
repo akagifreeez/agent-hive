@@ -1,7 +1,7 @@
 // v6.10: 画像対応(マルチモーダル入力/画像描画/トークン概算)の検証
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Board, Bus } from "../src/engine/board.js";
@@ -76,5 +76,18 @@ test("ChatHost attachImage: 画像メッセージがターン境界でマルチ�
   host.attachImage("スクショです", "data:image/png;base64,AAA");
   assert.ok(await waitUntil(() => seen.length >= 1, 8000), "画像メッセージがモデルへ届く");
   assert.match(seen[0], /スクショです/);
+  rmTree(ws);
+});
+
+test("loadPersistedBoardPosts: board__main__.jsonlも含めて全ボードを復元する", async () => {
+  const { loadPersistedBoardPosts } = await import("../src/ui/server.js");
+  const ws = mktmp();
+  mkdirSync(join(ws, "state"), { recursive: true });
+  writeFileSync(join(ws, "state", "board__main__.jsonl"), JSON.stringify({ id: 1, from: "you", text: "メインの投稿", at: 100, thread: "__main__" }) + "\n");
+  writeFileSync(join(ws, "state", "board-demo.jsonl"), JSON.stringify({ id: 1, from: "alpha", text: "スレッドの投稿", at: 200, thread: "demo" }) + "\n");
+  const posts = loadPersistedBoardPosts(ws);
+  assert.equal(posts.length, 2);
+  assert.deepEqual(posts.map((p) => p.thread).sort(), ["__main__", "demo"]);
+  // 脱出パス的な名前は読まない
   rmTree(ws);
 });

@@ -18,7 +18,7 @@
     t = t.replace(/~~([^~]+)~~/g, "<del>$1</del>");
     t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
     // 画像: /uploads/配下とdata:imageのみ許可(任意の外部URLはXSS/トラッキング避けで不許可)
-    t = t.replace(/!\[([^\]]*)\]\((\/uploads\/[A-Za-z0-9._-]+|data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+)\)/g, '<img src="$2" alt="$1" loading="lazy" style="max-width:100%">');
+    t = t.replace(/!\[([^\]]*)\]\((\/uploads\/[A-Za-z0-9._-]+|data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+)\)/g, '<img src="$2" alt="$1" loading="lazy" class="md-img">');
     t = t.replace(/\u0000(\d+)\u0000/g, (_, i) => "<code>" + codes[Number(i)] + "</code>");
     return t;
   }
