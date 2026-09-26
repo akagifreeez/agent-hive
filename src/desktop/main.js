@@ -90,7 +90,7 @@ async function bootstrap() {
     title: "agent-hive",
     backgroundColor: "#14171c",
     autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true },
+    webPreferences: { contextIsolation: true, webviewTag: true },
   });
   await win.loadURL(`http://localhost:${config.ui.port}`);
 

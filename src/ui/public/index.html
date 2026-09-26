@@ -175,6 +175,18 @@
   #ctx-tabs .ct { flex: 1; text-align: center; padding: 8px 0; font-size: 12px; color: var(--label-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: color var(--duration) var(--ease); }
   #ctx-tabs .ct:hover { color: var(--label); }
   #ctx-tabs .ct.active { color: var(--accent); border-bottom-color: var(--accent); }
+  body.nopanel { grid-template-columns: 240px 1fr; }
+  body.nopanel #ctx { display: none; }
+  body.widepanel { grid-template-columns: 240px 1fr 640px; }
+  #panel-btn { position: absolute; right: 126px; top: 9px; background: var(--panel2); border: 1px solid var(--separator); color: var(--sub); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
+  #panel-btn:hover { color: var(--label); border-color: var(--line-strong); }
+  #browserpane { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .bbar { display: flex; gap: 4px; padding: 5px; border-bottom: 1px solid var(--separator); }
+  .bbar input { flex: 1; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 4px 8px; font-size: 11px; font-family: var(--font-mono); box-shadow: var(--inset-field); }
+  .bbar input:focus { outline: none; border-color: var(--accent); }
+  .bbar button { background: var(--fill); border: none; color: var(--label); border-radius: 4px; padding: 3px 9px; font-size: 12px; cursor: pointer; }
+  .bbar button:hover { background: var(--fill-strong); }
+  #bview { width: 100%; flex: 1; }
   #ctx-body { flex: 1; overflow-y: auto; padding: 10px; }
   .sec { font-size: 11px; color: var(--label-tertiary); margin: 10px 0 3px; }
   .sec:first-child { margin-top: 0; }
@@ -265,6 +277,7 @@
       <div id="room-title"></div>
       <div id="room-goal"></div>
       <div id="room-members"></div>
+      <button id="panel-btn" title="右パネルの表示/非表示">パネル</button>
       <button id="monitor-btn" title="モニタ(読み取り専用ダッシュボード)">モニタ</button>
       <button id="settings-btn" title="設定">設定</button>
     </header>
@@ -294,8 +307,19 @@
       <div class="ct" data-tab="files">ファイル</div>
       <div class="ct" data-tab="status">状況</div>
       <div class="ct" data-tab="term">ターミナル</div>
+      <div class="ct" data-tab="browser">ブラウザ</div>
     </div>
     <div id="ctx-body"></div>
+    <div id="browserpane">
+      <div class="bbar">
+        <button id="bback" title="戻る">‹</button>
+        <button id="bfwd" title="進む">›</button>
+        <button id="breload" title="再読み込み">↻</button>
+        <input id="burl" placeholder="URLを入力してEnter(例: https://example.com)">
+        <button id="bgo">開く</button>
+      </div>
+      <webview id="bview" src="about:blank"></webview>
+    </div>
   </aside>
 
   <dialog id="settings-dlg">
@@ -601,6 +625,10 @@ function renderCtx(state) {
     b.classList.toggle("active", b.dataset.tab === ctxTab);
   }
   const body = $("ctx-body");
+  const browsing = ctxTab === "browser";
+  $("browserpane").style.display = browsing ? "flex" : "none";
+  body.style.display = browsing ? "none" : "";
+  document.body.classList.toggle("widepanel", browsing && !document.body.classList.contains("nopanel"));
   body.innerHTML = "";
   if (ctxTab === "tasks") renderTasksTab(body, state);
   if (ctxTab === "agents") renderAgentsTab(body, state);
@@ -1135,6 +1163,36 @@ $("monitor-btn").onclick = () => {
   }
 };
 $("monclose").onclick = () => { $("monview").style.display = "none"; };
+function applyPanel() {
+  const hidden = localStorage.getItem("hive.panel") === "hidden";
+  document.body.classList.toggle("nopanel", hidden);
+}
+$("panel-btn").onclick = () => {
+  const hidden = localStorage.getItem("hive.panel") === "hidden";
+  localStorage.setItem("hive.panel", hidden ? "shown" : "hidden");
+  applyPanel();
+  renderCtx(lastState);
+};
+applyPanel();
+let browserWired = false;
+function initBrowserPane() {
+  if (browserWired) return;
+  browserWired = true;
+  const v = $("bview");
+  const norm = (u) => {
+    u = u.trim();
+    if (!u) return u;
+    if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+    return u;
+  };
+  const go = () => { const u = norm($("burl").value); if (u) v.loadURL(u); };
+  $("bgo").onclick = go;
+  $("burl").addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+  $("bback").onclick = () => v.goBack();
+  $("bfwd").onclick = () => v.goForward();
+  $("breload").onclick = () => v.reload();
+  v.addEventListener("did-navigate", (e) => { $("burl").value = e.url; });
+}
 $("settings-cancel").onclick = () => $("settings-dlg").close();
 $("settings-dlg").addEventListener("click", (e) => { if (e.target === $("settings-dlg")) $("settings-dlg").close(); });
 $("settings-save").onclick = async () => {
