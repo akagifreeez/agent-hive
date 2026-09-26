@@ -17,12 +17,12 @@ export async function detectShell() {
   return cachedShell;
 }
 
-export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024 }) {
+export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null }) {
   const kind = await detectShell();
   const child =
     kind === "bash"
-      ? spawn("bash", ["-c", command], { cwd, windowsHide: true })
-      : spawn(command, { shell: true, cwd, windowsHide: true });
+      ? spawn("bash", ["-c", command], { cwd, windowsHide: true, env: env ? { ...process.env, ...env } : undefined })
+      : spawn(command, { shell: true, cwd, windowsHide: true, env: env ? { ...process.env, ...env } : undefined });
   let out = "";
   const append = (d) => {
     if (out.length < outputLimit) out += d.toString();

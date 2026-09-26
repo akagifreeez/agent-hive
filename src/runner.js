@@ -16,6 +16,7 @@ import { SpawnManager } from "./engine/spawn.js";
 import { ChatHost } from "./engine/chat.js";
 import { buildMemoryContext } from "./engine/memory.js";
 import { McpHost } from "./engine/mcp.js";
+import { Hooks } from "./engine/hooks.js";
 import { ROOT } from "./config.js";
 
 export function createModelFactory(config) {
@@ -77,6 +78,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     if (!r.ok) bus.emit("scenario.warn", { message: `MCPサーバー ${h.name} の起動に失敗: ${r.error}` });
   }
 
+  const hooks = new Hooks({ config, cwd: config.workspace, bus });
   const manager = new SpawnManager({
     mainWorkspace: config.workspace,
     worktreeRoot,
@@ -89,8 +91,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     thresholdPercent: config.compact?.thresholdPercent,
     memoryFn,
     mcpHosts,
+    hooks,
   });
-  const mcpTo = (extra) => ({ ...extra, mcpHosts });
+  const mcpTo = (extra) => ({ ...extra, mcpHosts, hooks });
 
   // サブスレッド: project名=スレッド名。3ワーカー( personas: workers )が専用ボードで並行作業
   const threads = new Map();
@@ -146,6 +149,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       staggerMs: config.chat?.staggerMs ?? 3000,
       project: name,
       autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
+      hooks,
     });
     host.worktreePaths = wtPaths;
     threads.set(name, { name, goal, host, board: threadBoard });
@@ -217,6 +221,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     staggerMs: config.chat?.staggerMs ?? 3000,
     project: null, // リーダーは請求しないので自動継続は実質発火しない
     autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
+    hooks,
   });
   leadHost.worktreePaths = leadWt;
   bus.emit("thread.opened", { name: "__main__", goal: "メインチャット(壁打ちと計画)", agents: [{ id: lead.id, displayName: lead.displayName }] });

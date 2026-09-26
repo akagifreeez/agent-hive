@@ -26,6 +26,7 @@ export class SpawnManager {
     contextWindow = 200000, thresholdPercent,
     memoryFn = null, // () => 永続記憶の注入文脈
     mcpHosts = null, // MCPサーバー群(外部ツール)
+    hooks = null, // ライフサイクルフック
   }) {
     this.mainWorkspace = mainWorkspace;
     this.worktreeRoot = worktreeRoot;
@@ -42,6 +43,7 @@ export class SpawnManager {
     this.thresholdPercent = thresholdPercent;
     this.memoryFn = memoryFn;
     this.mcpHosts = mcpHosts;
+    this.hooks = hooks;
     this.live = new Map(); // id => {displayName, depth, parent, status}
     this.counter = 0;
   }
@@ -105,6 +107,7 @@ export class SpawnManager {
       gate: this.gate,
       spawner: this,
       mcpHosts: this.mcpHosts,
+      hooks: this.hooks,
     });
     const shellKind = await tools.detectShell();
     const mem = this.memoryFn?.() ?? "";

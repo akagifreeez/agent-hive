@@ -1,7 +1,7 @@
 // ローカルWebUI。依存ゼロ(node:http + SSE)。後からElectron殻で包む前提なので
 // 描画はブラウザ側に寄せ、サーバーは状態API+SSEストリームだけを持つ。
 import { createServer } from "node:http";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runScenario } from "../runner.js";
@@ -88,6 +88,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (r) r.state = p.verdict === "approve" ? "approved" : "denied";
     },
     "scenario.started": (p) => { live.scenario = { name: p.name, phase: "running" }; },
+    "usage.summary": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), totals: p.usage ?? null }),
+    "usage.round": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), agent: p.agent, endedBy: p.endedBy ?? "ok", totals: p.totals ?? null }),
     "scenario.finished": () => { if (live.scenario) live.scenario.phase = "done"; },
   };
   for (const [type, fn] of Object.entries(record)) bus.on(type, fn);
@@ -181,6 +183,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
+      if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
       if (url.pathname === "/markdown.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
@@ -226,5 +229,25 @@ function readFileSafe(workspace, p) {
     return readFileSync(full, "utf8").slice(0, 200 * 1024);
   } catch {
     return "(ファイルがありません)";
+  }
+}
+
+// state/usage.jsonへの蓄積(運用データ。直近200件)
+  function persistUsage(workspace, entry) {
+    try {
+      const dir = join(workspace, "state");
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, "usage.json");
+      const history = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
+      history.push(entry);
+      writeFileSync(file, JSON.stringify(history.slice(-200), null, 1));
+    } catch {}
+  }
+
+function readFileSyncSafe(p) {
+  try {
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    return [];
   }
 }
