@@ -249,3 +249,23 @@ test("OpenAIModel: reasoning(思考テキスト)を応答に含める", async ()
     globalThis.fetch = origFetch;
   }
 });
+
+test("claim_next_task: 待ち行で後から投入されたタスクを請求できる(待ち時間はLLM呼出なし)", async () => {
+  const ws = mkdtempSync(join(tmpdir(), "hive-claimwait-"));
+  const bus = new Bus();
+  const tasks = new TaskBlackboard(ws, bus);
+  // 既定(idleClaimWaitSec未指定)は待たない=従来どおり即ミス
+  const tools0 = createTools({ agent: { id: "a", displayName: "A" }, workspace: ws, board: new Board(bus), tasks, bus });
+  const miss = await tools0.execute("claim_next_task", {});
+  assert.equal(miss.claimMiss, true);
+  // 設定あり: 待ち行の途中でタスクが投入されたらそれを請求する
+  const tools = createTools({ agent: { id: "b", displayName: "B" }, workspace: ws, board: new Board(bus), tasks, bus, idleClaimWaitSec: 5 });
+  const pending = tools.execute("claim_next_task", {});
+  await new Promise((r) => setTimeout(r, 500));
+  tasks.create({ id: "later-1", body: "後から投入された仕事" });
+  const r = await pending;
+  assert.equal(r.ok, true);
+  assert.equal(r.claimMiss, undefined);
+  assert.match(r.text, /タスク later-1 を請求しました/);
+  rmTree(ws);
+});

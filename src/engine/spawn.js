@@ -27,6 +27,7 @@ export class SpawnManager {
     memoryFn = null, // () => 永続記憶の注入文脈
     mcpHosts = null, // MCPサーバー群(外部ツール)
     hooks = null, // ライフサイクルフック
+    idleClaimWaitSec = 0, // 請求ミス時に新着タスクを待つ秒数(トークン消費ゼロの待ち行)
   }) {
     this.mainWorkspace = mainWorkspace;
     this.worktreeRoot = worktreeRoot;
@@ -44,6 +45,7 @@ export class SpawnManager {
     this.memoryFn = memoryFn;
     this.mcpHosts = mcpHosts;
     this.hooks = hooks;
+    this.idleClaimWaitSec = idleClaimWaitSec;
     this.live = new Map(); // id => {displayName, depth, parent, status}
     this.counter = 0;
   }
@@ -108,6 +110,7 @@ export class SpawnManager {
       spawner: this,
       mcpHosts: this.mcpHosts,
       hooks: this.hooks,
+      idleClaimWaitSec: this.idleClaimWaitSec,
     });
     const shellKind = await tools.detectShell();
     const mem = this.memoryFn?.() ?? "";

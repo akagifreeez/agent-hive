@@ -109,8 +109,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     memoryFn,
     mcpHosts,
     hooks,
+    idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0,
   });
-  const mcpTo = (extra) => ({ ...extra, mcpHosts, hooks });
+  const mcpTo = (extra) => ({ ...extra, mcpHosts, hooks, idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0 });
 
   // サブスレッド: project名=スレッド名。3ワーカー( personas: workers )が専用ボードで並行作業
   const threads = new Map();
