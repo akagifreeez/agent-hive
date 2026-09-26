@@ -526,7 +526,8 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
   // state/ はエンジン内部データ(ボードJSONL・threads等)の領域。エージェントの書き込み系ツールからは禁止
   function assertNotState(full, p) {
     const stateRoot = resolve(workspace, "state") + sep;
-    if (full === resolve(workspace, "state") || full.startsWith(stateRoot)) {
+    const cmp = process.platform === "win32" ? (x) => x.toLowerCase() : (x) => x;
+    if (cmp(full) === cmp(resolve(workspace, "state")) || cmp(full).startsWith(cmp(stateRoot))) {
       throw new Error(`state/ 配下はエンジン管理領域のため書き込めません: ${p}`);
     }
   }
