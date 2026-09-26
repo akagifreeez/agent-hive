@@ -486,13 +486,13 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         return { ok: true, text: clipped };
       }
       case "write_file": {
-        const p = safePath(args.path);
+        const p = safeWritePath(args.path);
         mkdirSync(dirname(p), { recursive: true });
         writeFileSync(p, String(args.content ?? ""));
         return { ok: true, text: `${args.path} に書き込みました(${String(args.content ?? "").length}文字)。` };
       }
       case "edit_file": {
-        const p = safePath(args.path);
+        const p = safeWritePath(args.path);
         const src = readFileSync(p, "utf8");
         const oldText = String(args.old_text ?? "");
         const count = src.split(oldText).length - 1;
@@ -523,12 +523,27 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     }
   }
 
+  // state/ はエンジン内部データ(ボードJSONL・threads等)の領域。エージェントの書き込み系ツールからは禁止
+  function assertNotState(full, p) {
+    const stateRoot = resolve(workspace, "state") + sep;
+    if (full === resolve(workspace, "state") || full.startsWith(stateRoot)) {
+      throw new Error(`state/ 配下はエンジン管理領域のため書き込めません: ${p}`);
+    }
+  }
+
   function safePath(p) {
     const root = resolve(workspace);
     const full = resolve(root, String(p ?? "."));
     if (full !== root && !full.startsWith(root + sep)) {
       throw new Error(`ワークスペース外のパスは扱えません: ${p}`);
     }
+    return full;
+  }
+
+  // 書き込み系ツール(write_file/edit_file)専用: safePathに加えてstate/を拒否
+  function safeWritePath(p) {
+    const full = safePath(p);
+    assertNotState(full, p);
     return full;
   }
 
