@@ -326,8 +326,9 @@
         <button id="breload" title="再読み込み">↻</button>
         <input id="burl" placeholder="URLを入力してEnter(例: https://example.com)">
         <button id="bgo">開く</button>
+        <button id="bwindow" title="フレーム表示を許可しないサイトはこちらから">ウィンドウ</button>
       </div>
-      <webview id="bview" src="about:blank"></webview>
+      <iframe id="bview" title="browser"></iframe>
     </div>
   </aside>
 
@@ -534,12 +535,8 @@ function renderStream(state) {
     shown = posts.slice(-boardWindow);
     const more = document.createElement("div");
     more.className = "loadmore";
-    more.textContent = `以前の投稿を読み込む(${posts.length - boardWindow}件)`;
-    more.onclick = () => {
-      anchorPid = shown[0]?.id ?? null;
-      boardWindow += BOARD_WINDOW;
-      renderStream(lastState);
-    };
+    more.textContent = `以前の投稿を読み込む(${Math.max(0, ((state.live.boardTotal ?? posts.length) - (state.live.board?.length ?? posts.length)) + (posts.length - boardWindow))}件)`;
+    more.onclick = () => loadOlderPosts(shown[0]?.id ?? null);
     stream.appendChild(more);
   }
   for (const p of shown) {
@@ -637,6 +634,7 @@ function renderCtx(state) {
   }
   const body = $("ctx-body");
   const browsing = ctxTab === "browser";
+  if (browsing) initBrowserPane();
   $("browserpane").style.display = browsing ? "flex" : "none";
   body.style.display = browsing ? "none" : "";
   document.body.classList.toggle("widepanel", browsing && !document.body.classList.contains("nopanel"));
@@ -1216,6 +1214,24 @@ function renderAll() {
   $("nav-foot").textContent = bits.join(" · ");
 }
 
+
+// 頁送りAPIで以前の投稿を取得し、表示に前置きする(アンカーへスクロール復帰)
+async function loadOlderPosts(beforeId) {
+  if (beforeId == null) return;
+  const r = await fetch(`/api/board?before=${beforeId}`);
+  if (!r.ok) return;
+  const data = await r.json();
+  const older = (data.posts ?? []).filter((p) => (p.thread ?? "__main__") === selectedThread);
+  if (!older.length) return;
+  // 取得した古い投稿をlastStateの先頭側へ統合し、窓を広げて再描画
+  const known = new Set(lastState.live.board.map((p) => p.id));
+  const fresh = older.filter((p) => !known.has(p.id));
+  if (fresh.length) lastState.live.board = [...fresh, ...lastState.live.board].sort((a, b) => a.id - b.id);
+  anchorPid = beforeId;
+  boardWindow += fresh.length || BOARD_WINDOW;
+  renderStream(lastState);
+}
+
 async function refresh() {
   lastState = await (await fetch("/api/state")).json();
   customCommands = lastState.commands ?? {};
@@ -1281,19 +1297,23 @@ function initBrowserPane() {
     if (!/^https?:\/\//i.test(u)) u = "https://" + u;
     return u;
   };
-  let pendingUrl = null;
-  v.addEventListener("dom-ready", () => { if (pendingUrl) { const u = pendingUrl; pendingUrl = null; v.loadURL(u); } });
-  const nav = (u) => {
-    if (typeof v.loadURL === "function") v.loadURL(u);
-    else { pendingUrl = u; v.setAttribute("src", u); }
+  // iframeはcross-originの履歴操作ができないため、URL履歴を自前で持つ
+  const history = [];
+  let pointer = -1;
+  let internal = false;
+  const show = (u, push = true) => {
+    if (push) { history.splice(pointer + 1); history.push(u); pointer = history.length - 1; }
+    $("burl").value = u;
+    internal = true;
+    v.src = u;
   };
-  const go = () => { const u = norm($("burl").value); if (u) { $("burl").value = u; nav(u); } };
+  const go = () => { const u = norm($("burl").value); if (u) show(u); };
   $("bgo").onclick = go;
   $("burl").addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
-  $("bback").onclick = () => { if (typeof v.goBack === "function") v.goBack(); };
-  $("bfwd").onclick = () => { if (typeof v.goForward === "function") v.goForward(); };
-  $("breload").onclick = () => { if (typeof v.reload === "function") v.reload(); else nav(v.getAttribute("src") || "about:blank"); };
-  v.addEventListener("did-navigate", (e) => { $("burl").value = e.url; });
+  $("bback").onclick = () => { if (pointer > 0) { pointer -= 1; show(history[pointer], false); } };
+  $("bfwd").onclick = () => { if (pointer < history.length - 1) { pointer += 1; show(history[pointer], false); } };
+  $("breload").onclick = () => { if (history[pointer]) show(history[pointer], false); };
+  $("bwindow").onclick = () => { if (history[pointer]) window.open(history[pointer], "_blank", "width=1100,height=800"); };
 }
 $("settings-cancel").onclick = () => $("settings-dlg").close();
 $("settings-dlg").addEventListener("click", (e) => { if (e.target === $("settings-dlg")) $("settings-dlg").close(); });
