@@ -10,7 +10,9 @@ import { readMeta } from "./tasks.js";
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null }) {
+  const mcpList = mcpHosts ?? [];
+  const mcpSpecs = mcpList.flatMap((h) => h.specs());
   const specs = [
     {
       name: "claim_next_task",
@@ -183,6 +185,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         additionalProperties: false,
       },
     },
+    ...mcpSpecs, // MCPサーバーが提供する外部ツール(mcp__<サーバー>__<ツール>)
     {
       name: "close_thread",
       description: "サブスレッドを閉じる(リーダー専用)。スレッド一覧から外れ、ワーカーは新規の起床を止める。成果物・タスク履歴・会話ログは消えない。",
@@ -197,6 +200,12 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
 
   async function execute(name, args = {}) {
     try {
+      // MCPツール(mcp__<サーバー>__<ツール>)は対応ホストへ委譲
+      if (name.startsWith("mcp__")) {
+        const host = mcpList.find((h) => h.handles(name));
+        if (!host) return { ok: false, text: `このMCPツールは接続されていません: ${name}` };
+        return await host.call(name, args);
+      }
       return await dispatch(name, args);
     } catch (err) {
       return { ok: false, text: `ツールエラー: ${err.message}` };
