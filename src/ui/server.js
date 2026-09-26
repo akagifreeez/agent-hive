@@ -176,7 +176,15 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
-      if (url.pathname === "/api/state") return json(res, { live, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace) });
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200) }, boardTotal: live.board.length, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace) });
+      // ボード履歴の頁送り: before=<id> でそのIDより前の投稿を返す(未指定は末尾200件)
+      if (url.pathname === "/api/board") {
+        const before = Number(url.searchParams.get("before"));
+        const all = [...live.board].sort((a, b) => a.id - b.id);
+        const idx = Number.isFinite(before) && before > 0 ? all.findIndex((p) => p.id === before) : -1;
+        const base = idx > 0 ? all.slice(0, idx) : all;
+        return json(res, { posts: base.slice(-200), total: all.length });
+      }
       if (url.pathname === "/api/thread" && req.method === "POST" && onThread) {
         let body = "";
         req.on("data", (d) => (body += d));
@@ -409,6 +417,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   if (config.ui.monitorPort) {
     await startMonitor({ config, live, tasks, startedAt });
   }
+  return { close: () => server.close() };
   if (autoStart) {
     // 待ち受けを邪魔しない走行
     runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
