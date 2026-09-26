@@ -6,6 +6,7 @@ import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runScenario } from "../runner.js";
 import { TaskBlackboard } from "../engine/tasks.js";
+import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -184,6 +185,25 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
+      if (url.pathname === "/api/session" && req.method === "POST") {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const { action, name } = JSON.parse(body);
+            let r;
+            if (action === "save") r = saveSession(config.workspace, String(name ?? ""));
+            else if (action === "load") r = loadSession(config.workspace, String(name ?? ""));
+            else if (action === "list") r = { ok: true, list: listSessions(config.workspace) };
+            else throw new Error(`不明なaction: ${action}`);
+            if (!r.ok) throw new Error(r.error ?? "失敗しました");
+            json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
       if (url.pathname === "/markdown.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });

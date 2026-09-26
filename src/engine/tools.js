@@ -6,6 +6,7 @@ import { resolve, join, dirname, sep } from "node:path";
 import { runCommand, detectShell } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
 import { readMeta } from "./tasks.js";
+import { readSkill } from "./skills.js";
 
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
@@ -186,6 +187,16 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       },
     },
     ...mcpSpecs, // MCPサーバーが提供する外部ツール(mcp__<サーバー>__<ツール>)
+    {
+      name: "use_skill",
+      description: "スキル(skills/配下のノウハウ文書)を読み込む。該当する作業があるときは着手前に読むこと。",
+      parameters: {
+        type: "object",
+        properties: { name: { type: "string", description: "スキル名(システムプロンプトの索引にあるもの)" } },
+        required: ["name"],
+        additionalProperties: false,
+      },
+    },
     {
       name: "close_thread",
       description: "サブスレッドを閉じる(リーダー専用)。スレッド一覧から外れ、ワーカーは新規の起床を止める。成果物・タスク履歴・会話ログは消えない。",
@@ -380,6 +391,11 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         } catch (err) {
           return { ok: false, text: `取得エラー: ${err.message}` };
         }
+      }
+      case "use_skill": {
+        const text = readSkill(workspace, String(args.name ?? ""));
+        if (!text) return { ok: false, text: `スキルが見つかりません: ${args.name}(索引にある名前を指定してください)` };
+        return { ok: true, text };
       }
       case "web_search": {
         const query = String(args.query ?? "").trim();
