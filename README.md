@@ -184,6 +184,13 @@ npm run desktop # デスクトップアプリ(v4): 窓+トレイ常駐+ネイテ
 - ネイティブ通知: シナリオ完了・**承認要求**(クリックで窓を前面に)
 - 単一インスタンスロック(二重起動すると既存窓へフォーカス)
 
+パッケージング(v7): `npx electron-builder` でWindows用配布物を作る。設定は package.json の `build` フィールド。
+
+```
+npm run desktop:pack  # 開発確認用: dist/win-unpacked/ に実行形式(ディレクトリ)
+npm run desktop:dist  # 配布用: NSISインストーラ+ポータブルexeを dist/ へ
+```
+
 検証: `npm run desktop:smoke`(窓を出さずにchat配線+サーバー起動のみ確認して終了。`HIVE_SMOKE_FILE`で結果ファイル出力)。
 
 エージェントの追加: `hive.config.json` の `agents` に `{id, displayName, role, persona}` を足し、`agents/<id>.md` に人格を書く。仕事の追加は `scenario.tasks` へ。ロールが一致するタスクを優先請求する。
