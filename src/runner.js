@@ -119,15 +119,16 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   const writeRegistry = () => {
     try {
       mkdirSync(stateDir, { recursive: true });
-      writeFileSync(registryPath, JSON.stringify([...threads.values()].map((t) => ({ name: t.name, goal: t.goal })), null, 1));
+      writeFileSync(registryPath, JSON.stringify([...threads.values()].map((t) => ({ name: t.name, goal: t.goal, folder: t.folder ?? null })), null, 1));
     } catch {
       // 簿記の失敗でスレッド運用を止めない
     }
   };
-  const openThread = async ({ project, goal }, opts = {}) => {
+  const openThread = async ({ project, goal, folder = null }, opts = {}) => {
     const name = String(project).trim();
     if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) return { error: "project(スレッド名)は英小文字数字とハイフンで40字以内" };
     if (threads.has(name)) return { error: `スレッド ${name} は既に開いています` };
+    const folderName = folder ? String(folder).trim().slice(0, 30) || null : null;
     const workerIds = config.chat?.workers ?? config.chat?.mains ?? ["alpha", "beta", "gamma"];
     const members = workerIds.map((w) => {
       const base = config.agents.find((a) => a.id === w) ?? { id: w, displayName: w, role: "impl" };
@@ -170,9 +171,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       hooks,
     });
     host.worktreePaths = wtPaths;
-    threads.set(name, { name, goal, host, board: threadBoard });
+    threads.set(name, { name, goal, folder: folderName, host, board: threadBoard });
     writeRegistry();
-    bus.emit("thread.opened", { name, goal, agents: members.map((m) => ({ id: m.id, displayName: m.displayName })) });
+    bus.emit("thread.opened", { name, goal, folder: folderName, agents: members.map((m) => ({ id: m.id, displayName: m.displayName })) });
     // 復元(silent)時はキックオフせず静かに開く。ユーザーが投稿したときにワーカーが起きる
     if (!opts.silent) {
       host.say(`[スレッド開始] project: ${name}\n目標: ${goal}\n\nタスクは claim_next_task で project: ${name} を指定して請求してください。`);
@@ -184,7 +185,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   try {
     const registry = JSON.parse(readFileSync(registryPath, "utf8"));
     for (const t of Array.isArray(registry) ? registry : []) {
-      await openThread({ project: t.name, goal: t.goal ?? "" }, { silent: true });
+      await openThread({ project: t.name, goal: t.goal ?? "", folder: t.folder ?? null }, { silent: true });
     }
   } catch {
     // registryが無ければ初回起動

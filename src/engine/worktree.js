@@ -45,6 +45,16 @@ export async function createWorktree({ mainWorkspace, worktreeRoot, agentId, exe
   return path;
 }
 
+// マージ差分の要約(--statの出力から「3ファイル +42 -3」形式の短文を作る)
+export function statSummary(statText) {
+  const m = (statText ?? "").match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
+  if (!m) return "";
+  const parts = [`${m[1]}ファイル`];
+  if (m[2]) parts.push(`+${m[2]}`);
+  if (m[3]) parts.push(`-${m[3]}`);
+  return parts.join(" ");
+}
+
 export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exec = runCommand }) {
   const branch = `agent/${agent.id}`;
   return queueMerge(async () => {
@@ -54,7 +64,10 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
       cwd: worktreePath,
       outputLimit: 2000,
     });
-    // 2) mainへマージ
+    // 2) mainのマージ前位置を控える(マージ後のdiffはここからの差分)
+    const pre = await exec({ command: "git rev-parse main", cwd: mainWorkspace, outputLimit: 200 });
+    const preSha = pre.ok ? (pre.text.split("\n")[1] ?? "").trim() : "";
+    // 3) mainへマージ
     const m = await exec({
       command: `git merge --no-ff ${branch} -m 'merge: ${taskId} by ${agent.id}'`,
       cwd: mainWorkspace,
@@ -65,6 +78,16 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
       await exec({ command: "git merge --abort", cwd: mainWorkspace, outputLimit: 1000 });
       return { ok: false, conflict: true, text: m.text };
     }
-    return { ok: true, merged: !/already up to date/i.test(m.text), text: m.text };
+    if (/already up to date/i.test(m.text)) return { ok: true, merged: false, text: m.text };
+    // 4) 差分(--stat要約+patch。patchは出力上限で丸められる)
+    let stat = "";
+    let patch = "";
+    if (preSha) {
+      const s = await exec({ command: `git diff --stat ${preSha} main`, cwd: mainWorkspace, outputLimit: 4000 });
+      const p = await exec({ command: `git diff ${preSha} main`, cwd: mainWorkspace, outputLimit: 60000 });
+      stat = s.ok ? s.text.split("\n").slice(1).join("\n").trim() : "";
+      patch = p.ok ? p.text.split("\n").slice(1).join("\n") : "";
+    }
+    return { ok: true, merged: true, text: m.text, stat, patch, summary: statSummary(stat) };
   });
 }

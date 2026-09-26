@@ -129,6 +129,12 @@
   .msg hr { border: none; border-top: 1px solid var(--separator); margin: 8px 0; }
   .msg img.md-img { min-height: 48px; max-width: 100%; object-fit: contain; background: var(--bg); border-radius: 4px; display: block; margin: 4px 0; }
   .sysline { font-size: 11px; color: var(--label-tertiary); padding: 3px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sysline.merge { cursor: pointer; border-radius: 4px; }
+  .sysline.merge:hover { background: var(--fill); color: var(--label-secondary); }
+  .mergediff { background: var(--recess); border: 1px solid var(--separator); border-radius: 4px; padding: 8px; margin: 2px 10px; font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow-y: auto; color: var(--label-secondary); }
+  .loadmore { align-self: center; font-size: 12px; color: var(--accent); cursor: pointer; padding: 6px 14px; border-radius: 4px; }
+  .loadmore:hover { background: var(--fill); }
+  .folder-h { font-size: 10px; color: var(--label-tertiary); padding: 8px 8px 2px; font-weight: 600; }
 
   #composer { border-top: 1px solid var(--separator); padding: 10px 16px 12px; background: var(--bg-elevated); position: relative; box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.14); }
   #suggest { position: absolute; bottom: 100%; left: 16px; right: 16px; background: var(--bg-elevated); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: var(--shadow-overlay); max-height: 240px; overflow-y: auto; z-index: 5; }
@@ -282,6 +288,11 @@ let ctxTab = "tasks";
 let projectFilter = "";
 const unread = {}; // thread => 件数
 let lastState = null;
+// ボード描画の窓(末尾N件)とマージ差分の展開状態。スレッド切替でリセット
+const BOARD_WINDOW = 200;
+let boardWindow = BOARD_WINDOW;
+const expandedMerges = new Set();
+let anchorPid = null;
 const NAMES = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ", delta: "デルタ", system: "システム", you: "あなた", lead: "リーダー" };
 const STATUS_JA = { idle: "待機", thinking: "思考中", working: "作業中", done: "完了", error: "エラー", "budget-stop": "停止" };
 const statusJa = (s) => STATUS_JA[s ?? "idle"] ?? (s ?? "idle");
@@ -323,6 +334,8 @@ function renderNav(threads) {
       unread[t.id] = 0;
       selectedAgent = null;
       projectFilter = t.id === "__main__" ? "" : t.id;
+      boardWindow = BOARD_WINDOW;
+      expandedMerges.clear();
       renderAll();
     };
     parent.appendChild(d);
@@ -332,7 +345,20 @@ function renderNav(threads) {
   makeRoom(mainBox, { id: "__main__", label: "メイン", sub: "リーダーと壁打ち・計画" });
   const list = $("nav-rooms");
   list.innerHTML = "";
-  for (const t of ths) makeRoom(list, { id: t.name, label: "# " + t.name, sub: t.goal });
+  if (ths.length && ths.some((t) => t.folder)) {
+    // フォルダが1つでもあるときはフォルダ単位でグループ化
+    const groups = {};
+    for (const t of ths) (groups[t.folder || "未分類"] ??= []).push(t);
+    for (const f of Object.keys(groups).sort((a, b) => a.localeCompare(b, "ja"))) {
+      const h = document.createElement("div");
+      h.className = "folder-h";
+      h.textContent = f;
+      list.appendChild(h);
+      for (const t of groups[f]) makeRoom(list, { id: t.name, label: "# " + t.name, sub: t.goal });
+    }
+  } else {
+    for (const t of ths) makeRoom(list, { id: t.name, label: "# " + t.name, sub: t.goal });
+  }
 }
 
 /* ================= 中央: 会話 ================= */
@@ -378,20 +404,57 @@ function renderRoomHead(state) {
 function renderStream(state) {
   const stream = $("stream");
   const nearBottom = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 120;
+  const prevTop = stream.scrollTop;
+  const prevHeight = stream.scrollHeight;
   stream.innerHTML = "";
-  for (const p of state.live.board) {
-    if ((p.thread ?? "__main__") !== selectedThread) continue;
+  // 描画は末尾200件に絞る(履歴が増えても軽く)。それより前は読み込みボタンで展開
+  const posts = state.live.board.filter((p) => (p.thread ?? "__main__") === selectedThread);
+  let shown = posts;
+  if (posts.length > boardWindow) {
+    shown = posts.slice(-boardWindow);
+    const more = document.createElement("div");
+    more.className = "loadmore";
+    more.textContent = `以前の投稿を読み込む(${posts.length - boardWindow}件)`;
+    more.onclick = () => {
+      anchorPid = shown[0]?.id ?? null;
+      boardWindow += BOARD_WINDOW;
+      renderStream(lastState);
+    };
+    stream.appendChild(more);
+  }
+  for (const p of shown) {
     if (p.from === "system") {
       const d = document.createElement("div");
       d.className = "sysline";
       d.textContent = p.text.replace(/^\[[^\]]+\]\s*/, "");
       d.title = p.text;
+      // マージ行はクリックでマージ差分を開閉できる
+      const tm = p.text.match(/^\[マージ\].*?タスク (\S+) の成果/);
+      const rec = tm && (state.live.merges ?? []).find((m) => m.taskId === tm[1]);
+      if (tm && rec && (rec.patch || rec.stat)) {
+        d.classList.add("merge");
+        d.title = "クリックでマージ差分";
+        d.onclick = () => {
+          if (expandedMerges.has(tm[1])) expandedMerges.delete(tm[1]);
+          else expandedMerges.add(tm[1]);
+          renderStream(lastState);
+        };
+        stream.appendChild(d);
+        if (expandedMerges.has(tm[1])) {
+          const pre = document.createElement("pre");
+          pre.className = "mergediff";
+          pre.textContent = (rec.stat ? rec.stat + "\n" : "") + (rec.patch ?? "");
+          stream.appendChild(pre);
+        }
+        continue;
+      }
       stream.appendChild(d);
       continue;
     }
     const mine = p.from === "you";
     const d = document.createElement("div");
     d.className = "msg" + (mine ? " mine" : "");
+    d.dataset.pid = p.id;
     const who = document.createElement("div");
     who.className = "who " + p.from;
     who.textContent = mine ? "あなた" : (NAMES[p.from] ?? p.from);
@@ -412,7 +475,18 @@ function renderStream(state) {
     d.append(who, body);
     stream.appendChild(d);
   }
+  if (anchorPid !== null) {
+    // 読み込み展開後は、展開前に見ていた先頭メッセージへスクロールを戻す
+    const el = stream.querySelector(`[data-pid="${anchorPid}"]`);
+    anchorPid = null;
+    if (el) {
+      stream.scrollTop = el.getBoundingClientRect().top - stream.getBoundingClientRect().top + stream.scrollTop - 12;
+      return;
+    }
+  }
   if (nearBottom) stream.scrollTop = stream.scrollHeight;
+  // 下端以外で再描画された場合は読書中の位置を保つ(最上部へのジャンプ防止)
+  else stream.scrollTop = stream.scrollHeight - prevHeight + prevTop;
 }
 
 function renderPerms(requests) {
@@ -867,7 +941,7 @@ es.onmessage = (e) => {
     }
     return;
   }
-  if (["agent.turn", "agent.delta", "tool.call", "tool.result", "agent.status", "agent.spawned", "thread.opened",
+  if (["agent.turn", "agent.delta", "tool.call", "tool.result", "agent.status", "agent.spawned", "thread.opened", "merge.completed",
        "task.claimed", "task.finished", "task.created", "task.released", "task.cancelled", "task.autoResolved",
        "scenario.started", "scenario.finished"].includes(type)) {
     refreshSoon();

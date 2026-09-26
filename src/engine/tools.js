@@ -69,6 +69,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         properties: {
           project: { type: "string", description: "スレッド名(=プロジェクト名)。英小文字数字とハイフン" },
           goal: { type: "string", description: "スレッドの目標と受け入れ条件(1〜3文)" },
+          folder: { type: "string", description: "ナビ表示用の分類(例: AI開発)。省略可" },
         },
         required: ["project", "goal"],
         additionalProperties: false,
@@ -266,8 +267,8 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
             };
           }
           if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
-          bus.emit("merge.completed", { agent: agent.id, taskId });
-          board.post("system", `[マージ] ${agent.displayName}(${agent.id}) がタスク ${taskId} の成果を main へ取り込みました。`);
+          bus.emit("merge.completed", { agent: agent.id, taskId, stat: m.stat ?? "", patch: m.patch ?? "", summary: m.summary ?? "" });
+          board.post("system", `[マージ] ${agent.displayName}(${agent.id}) がタスク ${taskId} の成果を main へ取り込みました${m.summary ? `(${m.summary})` : ""}。`);
         }
         const done = tasks.finish(agent, taskId);
         if (!done) return { ok: false, text: "タスクの完了確定に失敗しました。" };
@@ -301,7 +302,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(project)) return { ok: false, text: "project(スレッド名)は英小文字数字とハイフンで40字以内にしてください。" };
         const goal = String(args.goal ?? "").trim();
         if (!goal) return { ok: false, text: "goalが空です。" };
-        const tr = await threadOpener({ project, goal });
+        const tr = await threadOpener({ project, goal, folder: args.folder ? String(args.folder).trim() : null });
         if (tr.error) return { ok: false, text: `スレッドを開けません: ${tr.error}` };
         return { ok: true, text: `サブスレッド ${tr.id} を開きました。3エージェントが並行作業を始めました。` };
       }
