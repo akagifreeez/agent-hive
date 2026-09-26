@@ -526,12 +526,8 @@ function renderStream(state) {
     shown = posts.slice(-boardWindow);
     const more = document.createElement("div");
     more.className = "loadmore";
-    more.textContent = `以前の投稿を読み込む(${posts.length - boardWindow}件)`;
-    more.onclick = () => {
-      anchorPid = shown[0]?.id ?? null;
-      boardWindow += BOARD_WINDOW;
-      renderStream(lastState);
-    };
+    more.textContent = `以前の投稿を読み込む(${Math.max(0, ((state.live.boardTotal ?? posts.length) - (state.live.board?.length ?? posts.length)) + (posts.length - boardWindow))}件)`;
+    more.onclick = () => loadOlderPosts(shown[0]?.id ?? null);
     stream.appendChild(more);
   }
   for (const p of shown) {
@@ -1170,6 +1166,24 @@ function renderAll() {
   const mdl = uiModelName ?? lastState.model?.name ?? "";
   const bits = [mdl, effTxt, permTxt, lastState.live.scenario ? `[${lastState.live.scenario.phase}]` : null].filter(Boolean);
   $("nav-foot").textContent = bits.join(" · ");
+}
+
+
+// 頁送りAPIで以前の投稿を取得し、表示に前置きする(アンカーへスクロール復帰)
+async function loadOlderPosts(beforeId) {
+  if (beforeId == null) return;
+  const r = await fetch(`/api/board?before=${beforeId}`);
+  if (!r.ok) return;
+  const data = await r.json();
+  const older = (data.posts ?? []).filter((p) => (p.thread ?? "__main__") === selectedThread);
+  if (!older.length) return;
+  // 取得した古い投稿をlastStateの先頭側へ統合し、窓を広げて再描画
+  const known = new Set(lastState.live.board.map((p) => p.id));
+  const fresh = older.filter((p) => !known.has(p.id));
+  if (fresh.length) lastState.live.board = [...fresh, ...lastState.live.board].sort((a, b) => a.id - b.id);
+  anchorPid = beforeId;
+  boardWindow += fresh.length || BOARD_WINDOW;
+  renderStream(lastState);
 }
 
 async function refresh() {
