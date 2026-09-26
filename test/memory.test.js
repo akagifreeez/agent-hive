@@ -7,7 +7,7 @@ function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロッ�
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { memoryDir, listMemoryFiles, buildMemoryContext } from "../src/engine/memory.js";
+import { memoryDir, listMemoryFiles, buildMemoryContext, ensurePcRules, PC_RULES_FILENAME } from "../src/engine/memory.js";
 import { buildCompactRequest, COMPACT_SYSTEM_PROMPT } from "../src/engine/compact.js";
 import { startDiscovery, DISTILL_TASK_ID } from "../src/engine/discover.js";
 import { Board, Bus } from "../src/engine/board.js";
@@ -119,5 +119,22 @@ test("発見器distill: finishでマーカーが進み、再起票されない�
   assert.equal(existsSync(join(ws, "tasks/open", `${DISTILL_TASK_ID}.md`)), false);
   assert.ok(tasks.snapshot().done.some((f) => f.includes(`auto--${DISTILL_TASK_ID}`)));
   d.stop();
+  rmTree(ws);
+});
+
+test("ensurePcRules: 新規ワークスペースへ制限ルールをシードし、既存の手動編集は保持する", () => {
+  const ws = mktmp();
+  assert.equal(ensurePcRules(ws), true);
+  const p = join(memoryDir(ws), PC_RULES_FILENAME);
+  assert.ok(existsSync(p));
+  assert.match(readFileSync(p, "utf8"), /PC操作の制限/);
+  // 00-接頭でファイル順の先頭になり、6000字上限でも確実に注入される
+  const ctx = buildMemoryContext(ws);
+  assert.ok(ctx.includes("## " + PC_RULES_FILENAME));
+  assert.match(ctx, /bash は最終手段/);
+  // 2回目は上書きしない(ユーザーやエージェントの調整を尊重)
+  writeFileSync(p, "編集済み", "utf8");
+  assert.equal(ensurePcRules(ws), false);
+  assert.equal(readFileSync(p, "utf8"), "編集済み");
   rmTree(ws);
 });
