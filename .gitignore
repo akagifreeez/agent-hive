@@ -10,3 +10,4 @@ hive.local.json
 .env
 smoke-result.txt
 memory/.distilled
+dist/

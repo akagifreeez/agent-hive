@@ -13,10 +13,36 @@
     "run": "node src/index.js --run",
     "desktop": "electron .",
     "desktop:smoke": "electron . --smoke",
+    "desktop:pack": "electron-builder --dir",
+    "desktop:dist": "electron-builder",
     "test": "node --test \"test/*.test.js\"",
     "doctor": "node scripts/doctor.js"
   },
+  "build": {
+    "appId": "io.github.agent-hive.desktop",
+    "productName": "agent-hive",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "agents/**/*",
+      "scripts/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
   "devDependencies": {
-    "electron": "^37.10.3"
+    "electron": "^37.10.3",
+    "electron-builder": "^26.15.3"
   }
 }
