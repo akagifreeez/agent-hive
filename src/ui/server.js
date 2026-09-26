@@ -357,6 +357,10 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
+      if (url.pathname === "/api/wtdiff") {
+        const r = await handleWtdiff({ mainWorkspace: config.workspace, worktreeRoot: config.worktrees.dir, agentId: url.searchParams.get("agent"), limit: Number(url.searchParams.get("limit")) || undefined });
+        return json(res, r.body, r.status);
+      }
       if (url.pathname === "/api/session" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
@@ -414,6 +418,34 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 function json(res, obj, status = 200) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(obj));
+}
+
+
+/* ============ /api/wtdiff: worktreeとmainの差分 ============ */
+// agent/<id>ブランチのworktreeに対する main...agent/<id> の差分を返す。
+// 出力は上限(既定20KB)で打ち切る。agent指定が無い/不正/該当worktree無しは400。
+const WTDIFF_LIMIT_DEFAULT = 20 * 1024;
+
+export async function handleWtdiff({ mainWorkspace, worktreeRoot, agentId, limit = WTDIFF_LIMIT_DEFAULT }) {
+  const id = String(agentId ?? "").trim();
+  if (!id || !/^[a-z0-9][a-z0-9-]*$/i.test(id)) return { status: 400, body: { ok: false, error: "agent指定が無いか不正です" } };
+  const wtDir = join(resolve(worktreeRoot), id);
+  if (!existsSync(wtDir)) return { status: 400, body: { ok: false, error: `worktreeが存在しません: ${id}` } };
+  const cap = Math.max(1, Math.min(limit, 100 * 1024));
+  const run = (cmd) => runCommand({ command: cmd, cwd: wtDir, timeoutMs: 15000, outputLimit: cap });
+  const stat = await run(`git diff main...agent/${id} --stat`);
+  if (!stat.ok) return { status: 400, body: { ok: false, error: `git diff失敗: ${stat.text.slice(0, 500)}` } };
+  const patch = await run(`git diff main...agent/${id}`);
+  const truncated = patch.text.length >= cap;
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      stat: stat.text.slice(0, cap),
+      patch: patch.text.slice(0, cap),
+      truncated,
+    },
+  };
 }
 
 /* ============ 外部監視サーバ(読み取り専用) ============ */
