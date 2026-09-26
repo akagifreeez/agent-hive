@@ -318,8 +318,9 @@
         <button id="breload" title="再読み込み">↻</button>
         <input id="burl" placeholder="URLを入力してEnter(例: https://example.com)">
         <button id="bgo">開く</button>
+        <button id="bwindow" title="フレーム表示を許可しないサイトはこちらから">ウィンドウ</button>
       </div>
-      <webview id="bview" src="about:blank"></webview>
+      <iframe id="bview" title="browser"></iframe>
     </div>
   </aside>
 
@@ -629,6 +630,7 @@ function renderCtx(state) {
   }
   const body = $("ctx-body");
   const browsing = ctxTab === "browser";
+  if (browsing) initBrowserPane();
   $("browserpane").style.display = browsing ? "flex" : "none";
   body.style.display = browsing ? "none" : "";
   document.body.classList.toggle("widepanel", browsing && !document.body.classList.contains("nopanel"));
@@ -1237,19 +1239,23 @@ function initBrowserPane() {
     if (!/^https?:\/\//i.test(u)) u = "https://" + u;
     return u;
   };
-  let pendingUrl = null;
-  v.addEventListener("dom-ready", () => { if (pendingUrl) { const u = pendingUrl; pendingUrl = null; v.loadURL(u); } });
-  const nav = (u) => {
-    if (typeof v.loadURL === "function") v.loadURL(u);
-    else { pendingUrl = u; v.setAttribute("src", u); }
+  // iframeはcross-originの履歴操作ができないため、URL履歴を自前で持つ
+  const history = [];
+  let pointer = -1;
+  let internal = false;
+  const show = (u, push = true) => {
+    if (push) { history.splice(pointer + 1); history.push(u); pointer = history.length - 1; }
+    $("burl").value = u;
+    internal = true;
+    v.src = u;
   };
-  const go = () => { const u = norm($("burl").value); if (u) { $("burl").value = u; nav(u); } };
+  const go = () => { const u = norm($("burl").value); if (u) show(u); };
   $("bgo").onclick = go;
   $("burl").addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
-  $("bback").onclick = () => { if (typeof v.goBack === "function") v.goBack(); };
-  $("bfwd").onclick = () => { if (typeof v.goForward === "function") v.goForward(); };
-  $("breload").onclick = () => { if (typeof v.reload === "function") v.reload(); else nav(v.getAttribute("src") || "about:blank"); };
-  v.addEventListener("did-navigate", (e) => { $("burl").value = e.url; });
+  $("bback").onclick = () => { if (pointer > 0) { pointer -= 1; show(history[pointer], false); } };
+  $("bfwd").onclick = () => { if (pointer < history.length - 1) { pointer += 1; show(history[pointer], false); } };
+  $("breload").onclick = () => { if (history[pointer]) show(history[pointer], false); };
+  $("bwindow").onclick = () => { if (history[pointer]) window.open(history[pointer], "_blank", "width=1100,height=800"); };
 }
 $("settings-cancel").onclick = () => $("settings-dlg").close();
 $("settings-dlg").addEventListener("click", (e) => { if (e.target === $("settings-dlg")) $("settings-dlg").close(); });
