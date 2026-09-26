@@ -33,6 +33,19 @@ test("write_file: state/ 配下への書き込みは拒否される", async () =
   rmTree(ws);
 });
 
+test("write_file: 大文字小文字を変えた STATE/ も非区別FSでは拒否される", async () => {
+  const ws = mktmp();
+  const tools = makeTools(ws);
+  const r = await tools.execute("write_file", { path: "STATE/x.json", content: "x" });
+  if (process.platform === "win32") {
+    assert.equal(r.ok, false);
+    assert.match(r.text, /state/i);
+  } else {
+    assert.equal(r.ok, true); // 区別するFSでは別パスとして扱われる
+  }
+  rmTree(ws);
+});
+
 test("edit_file: state/ 配下のファイルは編集できない", async () => {
   const ws = mktmp();
   const tools = makeTools(ws);
