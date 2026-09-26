@@ -15,6 +15,7 @@ import { OpenAIModel, FallbackModel } from "./model/openai.js";
 import { SpawnManager } from "./engine/spawn.js";
 import { ChatHost } from "./engine/chat.js";
 import { buildMemoryContext } from "./engine/memory.js";
+import { McpHost } from "./engine/mcp.js";
 import { ROOT } from "./config.js";
 
 export function createModelFactory(config) {
@@ -67,6 +68,15 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     board.post("system", `[worktree保持] worktrees/${agentId} に前回実行の未コミット変更があるため初期化をスキップしました。引き継ぐ場合はそのまま作業するか、確定させてください。\n\n${detail}`);
   };
 
+  // MCPサーバー(config.mcp.servers)を起動してツールとして接続(失敗してもhiveは続行)
+  const mcpHosts = Object.entries(config.mcp?.servers ?? {}).map(([name, def]) =>
+    new McpHost({ name, bus, ...(typeof def === "string" ? { command: def } : def) })
+  );
+  for (const h of mcpHosts) {
+    const r = await h.start();
+    if (!r.ok) bus.emit("scenario.warn", { message: `MCPサーバー ${h.name} の起動に失敗: ${r.error}` });
+  }
+
   const manager = new SpawnManager({
     mainWorkspace: config.workspace,
     worktreeRoot,
@@ -78,7 +88,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     contextWindow: config.model.contextWindow ?? 200000,
     thresholdPercent: config.compact?.thresholdPercent,
     memoryFn,
+    mcpHosts,
   });
+  const mcpTo = (extra) => ({ ...extra, mcpHosts });
 
   // サブスレッド: project名=スレッド名。3ワーカー( personas: workers )が専用ボードで並行作業
   const threads = new Map();
@@ -118,13 +130,13 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       mains: members,
       mainWorkspace: config.workspace,
       modelFactory: modelFor,
-      toolsFactory: (agent) => createTools({
+      toolsFactory: (agent) => createTools(mcpTo({
         agent,
         workspace: wtPaths[agent.id],
         mainWorkspace: config.workspace,
         board: threadBoard, tasks, bus, gate,
         spawner: manager,
-      }),
+      })),
       board: threadBoard, tasks, bus, ledger,
       budget: config.budget,
       maxTurnsPerRound: config.chat?.maxTurnsPerRound ?? 12,
@@ -187,7 +199,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     mains: [lead],
     mainWorkspace: config.workspace,
     modelFactory: modelFor,
-    toolsFactory: (agent) => createTools({
+    toolsFactory: (agent) => createTools(mcpTo({
       agent,
       workspace: leadWt[lead.id],
       mainWorkspace: config.workspace,
@@ -195,7 +207,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       spawner: manager,
       threadOpener: openThread,
       threadCloser: closeThread,
-    }),
+    })),
     board: mainBoard, tasks, bus, ledger,
     budget: config.budget,
     maxTurnsPerRound: config.chat?.maxTurnsPerRound ?? 12,
@@ -209,6 +221,16 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   leadHost.worktreePaths = leadWt;
   bus.emit("thread.opened", { name: "__main__", goal: "メインチャット(壁打ちと計画)", agents: [{ id: lead.id, displayName: lead.displayName }] });
 
+  // 定期実行(cron): chat.schedules = [{everyMinutes, text, thread?}]。thread省略でリーダーへ
+  for (const sch of config.chat?.schedules ?? []) {
+    const every = Math.max(0.02, Number(sch.everyMinutes ?? 30));
+    const timer = setInterval(() => {
+      const target = sch.thread ? threads.get(sch.thread) : null;
+      (target ? target.host : leadHost).say(`[定期] ${sch.text}`);
+    }, every * 60000);
+    if (timer.unref) timer.unref();
+  }
+
   bus.emit("scenario.started", { name: `chat:${config.scenario.name}`, tasks: [] });
   return {
     say: (text, thread = null) => {
@@ -220,6 +242,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     closeThread,
     listThreads: () => [...threads.keys()],
     manager,
+    mcpHosts,
     bus,
   };
 }

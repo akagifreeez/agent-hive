@@ -25,6 +25,7 @@ export class SpawnManager {
     hierarchy = { maxDepth: 2, maxConcurrent: 6 }, modelFactory, maxTurns = 40,
     contextWindow = 200000, thresholdPercent,
     memoryFn = null, // () => 永続記憶の注入文脈
+    mcpHosts = null, // MCPサーバー群(外部ツール)
   }) {
     this.mainWorkspace = mainWorkspace;
     this.worktreeRoot = worktreeRoot;
@@ -40,6 +41,7 @@ export class SpawnManager {
     this.contextWindow = contextWindow;
     this.thresholdPercent = thresholdPercent;
     this.memoryFn = memoryFn;
+    this.mcpHosts = mcpHosts;
     this.live = new Map(); // id => {displayName, depth, parent, status}
     this.counter = 0;
   }
@@ -102,6 +104,7 @@ export class SpawnManager {
       bus: this.bus,
       gate: this.gate,
       spawner: this,
+      mcpHosts: this.mcpHosts,
     });
     const shellKind = await tools.detectShell();
     const mem = this.memoryFn?.() ?? "";
