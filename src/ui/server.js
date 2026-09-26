@@ -37,6 +37,9 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     merges: [],
     scenario: null,
     permMode: "normal",
+    // runtimeでのモデル/思考レベル切替(/model・/effort・設定ウィンドウ)。nullはconfig値
+    modelName: null,
+    modelEffort: null,
   };
   const tasks = new TaskBlackboard(config.workspace, bus);
   const clients = new Set();
@@ -83,6 +86,11 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (t) t.folder = p.folder ?? null;
     },
     "perm.mode": (p) => { live.permMode = p.mode; },
+    "model.changed": (p) => {
+      // /model・/effort・設定ウィンドウからの切替。nullはconfig値に戻す操作なので反映しない
+      if (p.model) live.modelName = p.model;
+      if (p.effort) live.modelEffort = p.effort;
+    },
     "thread.opened": (p) => {
       live.threads.push({ name: p.name, goal: p.goal, folder: p.folder ?? null });
       for (const a of p.agents) {
