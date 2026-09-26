@@ -23,7 +23,7 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
-export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null }) {
   const startedAt = Date.now();
   const live = {
     // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
@@ -77,6 +77,10 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       for (const [id, a] of Object.entries(live.agents)) {
         if (id.startsWith(p.name + "-") || id === p.name) delete live.agents[id];
       }
+    },
+    "thread.folder": (p) => {
+      const t = live.threads.find((x) => x.name === p.name);
+      if (t) t.folder = p.folder ?? null;
     },
     "perm.mode": (p) => { live.permMode = p.mode; },
     "thread.opened": (p) => {
@@ -182,6 +186,21 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
             const r = onThread({ project: String(project ?? ""), goal: String(goal ?? ""), folder: folder ? String(folder) : null });
             if (r.error) throw new Error(r.error);
             json(res, { ok: true, id: r.id });
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/folder" && req.method === "POST" && onFolder) {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const { project, folder } = JSON.parse(body);
+            const r = onFolder({ project: String(project ?? ""), folder: folder ? String(folder) : null });
+            if (r.error) throw new Error(r.error);
+            json(res, r);
           } catch (err) {
             json(res, { error: err.message }, 400);
           }

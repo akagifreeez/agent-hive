@@ -75,12 +75,11 @@ async function bootstrap() {
       onAttach: (path, dataUrl, note, thread) => controller?.attachImage(note, dataUrl, thread, path),
       onThread: (req) => controller?.openThread(req),
       onCloseThread: (req) => controller?.closeThread(req),
+      onFolder: (req) => controller?.setThreadFolder(req),
       onModel: (patch) => controller?.setModel(patch),
       onPermMode: (mode) => controller?.setPermMode(mode),
       onWorkflow: (name) => controller?.runWorkflow(name),
       onListWorkflows: () => controller?.listWorkflows() ?? [],
-      onModel: (patch) => controller?.setModel(patch),
-      onPermMode: (mode) => controller?.setPermMode(mode),
     });
     controller = await runChat({ config, bus });
   }
