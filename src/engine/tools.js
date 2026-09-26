@@ -10,7 +10,7 @@ import { readMeta } from "./tasks.js";
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null }) {
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
   const specs = [
@@ -200,13 +200,24 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
 
   async function execute(name, args = {}) {
     try {
+      // beforeToolフック: 非ゼロ終了でツールをブロックできる(コードによる強制ルール)
+      if (hooks?.has("beforeTool")) {
+        const h = await hooks.run("beforeTool", { AGENT: agent.id, TOOL: name, ARGS: JSON.stringify(args ?? {}) });
+        if (h.blocked) return { ok: false, text: `ツール ${name} はhooksによりブロックされました:\n${h.text}` };
+      }
+      let out;
       // MCPツール(mcp__<サーバー>__<ツール>)は対応ホストへ委譲
       if (name.startsWith("mcp__")) {
         const host = mcpList.find((h) => h.handles(name));
         if (!host) return { ok: false, text: `このMCPツールは接続されていません: ${name}` };
-        return await host.call(name, args);
+        out = await host.call(name, args);
+      } else {
+        out = await dispatch(name, args);
       }
-      return await dispatch(name, args);
+      if (hooks?.has("afterTool")) {
+        await hooks.run("afterTool", { AGENT: agent.id, TOOL: name, OK: out.ok ? "1" : "0", BRIEF: out.text.slice(0, 200) });
+      }
+      return out;
     } catch (err) {
       return { ok: false, text: `ツールエラー: ${err.message}` };
     }

@@ -22,6 +22,7 @@ export class ChatHost {
     memoryFn = null, // () => 永続記憶の注入文脈。ラウンド開始ごとに読み直す(distill反映のため)
     project = null, // スレッドスコープ(自動継続の「まだ仕事があるか」判定に使う)
     autoContinueRounds = 3, // ターン上限でも仕事が残っていれば自動で次ラウンドへ(0=従来どおり停止)
+    hooks = null, // Hooksインスタンス(roundEndフック)
   }) {
     this.mains = mains;
     this.mainWorkspace = mainWorkspace;
@@ -40,6 +41,7 @@ export class ChatHost {
     this.memoryFn = memoryFn;
     this.project = project;
     this.autoContinueRounds = autoContinueRounds;
+    this.hooks = hooks;
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
     this.memories = new Map(); // id => messages配列(ラウンド間で保持)
     this.seen = new Map(); // id => ボード既読位置(ラウンド間で保持。配信はボード注入の1経路のみ)
@@ -136,6 +138,7 @@ export class ChatHost {
     this.autoRounds.set(main.id, 0); // ユーザー/ボード起点のラウンドでは連続回数をリセット
     const run = async () => {
       if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
+      let r = null; // 最後のラウンド結果(roundEndフックで参照)
       for (;;) {
         const messages = this.memory(main);
         // ラウンド開始ごとにシステムプロンプトを張り直す(永続記憶がdistillで更新されても次ラウンドから反映)
@@ -144,7 +147,6 @@ export class ChatHost {
           messages[0] = { role: "system", content: mem ? `${buildSystemPrompt(main, this.shellKind)}\n\n${mem}` : buildSystemPrompt(main, this.shellKind) };
         }
         messages.push({ role: "user", content: kickoffText });
-        let r = null;
         try {
           r = await runAgentLoop({
             agent: main,
@@ -165,9 +167,15 @@ export class ChatHost {
           drainInput: () => st.pending.splice(0), // ラウンド実行中の入力はターン境界で割込む(steering)
         });
           // 既読位置をラウンド間で保持(同じ入力の二重配信を防ぐ)
-          if (typeof r.seenBoard === "number") this.seen.set(main.id, r.seenBoard);
-          // 会話メモリを永続化(再起動後も続きから)
-          this.saveMemories(main);
+        if (typeof r.seenBoard === "number") this.seen.set(main.id, r.seenBoard);
+        // 会話メモリを永続化(再起動後も続きから)
+        this.saveMemories(main);
+        // ラウンドごとの消費を運用データとして記録(state/usage.json)
+        if (this.ledger) {
+          try {
+            this.bus.emit("usage.round", { agent: main.id, endedBy: r?.endedBy ?? "ok", totals: this.ledger.agent(main.id) });
+          } catch {}
+        }
           // メインが自ら直接作業した場合の受け皿: ラウンド終了時にmainへ自動マージ
           if (this.mainWorkspace) {
             const m = await mergeAgentWork({
@@ -202,6 +210,10 @@ export class ChatHost {
           this.autoRounds.set(main.id, 0);
         }
         if (!again) break;
+      }
+      // ラウンド終了フック(通知・記録などに使う。ブロックはしない)
+      if (this.hooks?.has("roundEnd")) {
+        await this.hooks.run("roundEnd", { AGENT: main.id, THREAD: this.board.name, ENDED_BY: r?.endedBy ?? "ok" }).catch(() => {});
       }
       st.running = false;
       const next = st.pending.shift();
