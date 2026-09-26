@@ -5,7 +5,9 @@
 <title>agent-hive</title>
 <script src="/markdown.js"></script>
 <style>
-  /* ZCode TUIテーマ(dark既定)。apps/zcode-cli/packages/tui/src/theme/defaults.ts のパレットを採用 */
+  /* 構造はDiscord、素材はZCode TUI(ダークパレットは維持)。
+     設計上の要点: UIはサンセリフ/等幅はログ・ID・コードのみ、絵文字は使わない、
+     案内文は書かずhoverと色で示す、サイズは11/12/13/15の4段階 */
   :root {
     color-scheme: dark;
     --bg: #0f1419;
@@ -21,16 +23,14 @@
     --fill-strong: rgba(125, 211, 252, 0.16);
     --accent: #7dd3fc;
     --accent-fill: rgba(125, 211, 252, 0.10);
-    --accent-strong: #7dd3fc;
     --ok: #86efac; --warn: #fbbf24; --err: #fca5a5; --info: #93c5fd; --violet: #c4b5fd;
-    --usermsg-bg: #30363d;
-    --radius-control: 4px;
-    --radius-container: 6px;
     --bg-elevated: #161b22;
     --sub: #94a3b8;
     --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.50);
     --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
     --duration: 150ms;
+    --font-ui: system-ui, "Segoe UI", "Meiryo", "Noto Sans JP", sans-serif;
+    --font-mono: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -48,131 +48,155 @@
       --accent: #0969da;
       --accent-fill: rgba(9, 105, 218, 0.08);
       --ok: #1a7f37; --warn: #9a6700; --err: #cf222e; --info: #0969da; --violet: #8250df;
-      --usermsg-bg: #e0f2fe;
+      --bg-elevated: #ffffff;
     }
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; height: 100vh; overflow: hidden;
-    font-family: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", "Noto Sans Mono CJK JP", "Meiryo", monospace;
+    font-family: var(--font-ui);
     background: var(--bg); color: var(--label);
-    display: grid; grid-template-columns: 230px 1fr 360px;
+    display: grid; grid-template-columns: 240px 1fr 340px;
     grid-template-rows: minmax(0, 1fr);
-    font-size: 13px; line-height: 1.5;
+    font-size: 13px; line-height: 1.45;
   }
+  .mono { font-family: var(--font-mono); }
+
+  .btn { background: var(--fill); border: none; color: var(--label); border-radius: 4px; padding: 4px 12px; font-size: 12px; font-family: var(--font-ui); cursor: pointer; transition: background var(--duration) var(--ease); }
+  .btn:hover { background: var(--fill-strong); }
+  .btn.primary { background: var(--accent); color: #0f1419; font-weight: 600; }
+  .btn.primary:hover { filter: brightness(1.08); }
 
   /* ============ 左: ナビ ============ */
-  #nav { background: var(--bg-elevated); border-right: 1px solid var(--separator); display: flex; flex-direction: column; padding: 14px 10px; gap: 2px; min-height: 0; overflow-y: auto; }
-  #nav .logo { padding: 2px 8px 14px; color: var(--label); font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
-  .navlabel { font-size: 12px; color: var(--label-secondary); padding: 12px 8px 4px; }
-  .room { padding: 8px 10px; border-radius: var(--radius-control); cursor: pointer; font-size: 13px; position: relative; transition: background var(--duration) var(--ease); }
+  #nav { background: var(--bg-elevated); border-right: 1px solid var(--separator); display: flex; flex-direction: column; padding: 10px 8px; gap: 1px; min-height: 0; overflow-y: auto; }
+  #nav .logo { padding: 4px 8px 12px; color: var(--label); font-weight: 700; font-size: 15px; }
+  .navlabel { font-size: 11px; color: var(--label-tertiary); padding: 10px 8px 3px; }
+  .room { padding: 5px 8px 6px; border-radius: 4px; cursor: pointer; font-size: 13px; position: relative; transition: background var(--duration) var(--ease); }
   .room:hover { background: var(--fill); }
-  .room.active { background: var(--accent); color: #fff; }
-  .room .sub { display: block; font-size: 12px; color: var(--label-secondary); margin-top: 2px; }
-  .room.active .sub { color: rgba(255, 255, 255, 0.75); }
-  .badge { position: absolute; right: 8px; top: 8px; background: var(--err); color: #fff; border-radius: 9px; font-size: 10px; padding: 1px 6px; }
-  #nav .foot { margin-top: auto; font-size: 12px; color: var(--label-tertiary); padding: 8px; }
+  .room.active { background: var(--fill-strong); box-shadow: inset 2px 0 0 var(--accent); }
+  .room .sub { display: block; font-size: 11px; color: var(--label-tertiary); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .room.active .sub { color: var(--label-secondary); }
+  .badge { position: absolute; right: 8px; top: 6px; background: var(--err); color: #0f1419; border-radius: 8px; font-size: 10px; font-weight: 700; padding: 0 5px; }
+  #nav .foot { margin-top: auto; font-size: 11px; color: var(--label-tertiary); padding: 8px; }
 
   /* ============ 中央: 会話 ============ */
   #chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  #roomhead { border-bottom: 1px solid var(--separator); padding: 12px 18px; background: var(--bg-elevated); }
-  #room-title { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
-  #room-goal { font-size: 12px; color: var(--label-secondary); margin-top: 2px; }
-  #room-members { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-  .member { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; background: var(--fill); border: none; border-radius: 14px; padding: 3px 10px; cursor: pointer; color: var(--label); transition: background var(--duration) var(--ease), box-shadow var(--duration) var(--ease); }
+  #roomhead { border-bottom: 1px solid var(--separator); padding: 9px 16px; background: var(--bg-elevated); }
+  #room-title { font-size: 15px; font-weight: 700; }
+  #room-goal { font-size: 12px; color: var(--label-secondary); margin-top: 1px; }
+  #room-members { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; align-items: center; }
+  .member { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; background: var(--fill); border: none; border-radius: 12px; padding: 2px 9px; cursor: pointer; color: var(--label); transition: background var(--duration) var(--ease), box-shadow var(--duration) var(--ease); }
   .member:hover { background: var(--fill-strong); }
   .member.sel { background: var(--accent-fill); box-shadow: 0 0 0 1px var(--accent); }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--label-tertiary); }
+  .member.passive { cursor: default; color: var(--label-secondary); }
+  .member.passive:hover { background: var(--fill); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--label-tertiary); flex-shrink: 0; }
   .dot.working { background: var(--warn); }
   .dot.done { background: var(--ok); }
   .dot.error, .dot.budget-stop { background: var(--err); }
-  #permzone { padding: 0 18px; }
-  .permcard { background: var(--bg-elevated); border: 1px solid var(--separator); border-radius: var(--radius-container); padding: 10px 12px; margin-top: 10px; font-size: 13px; }
-  .permcard b { color: var(--err); }
-  .permcard .cmd { font-family: ui-monospace, Consolas, monospace; color: var(--label); margin: 4px 0 8px; word-break: break-all; }
-  .permcard button { background: var(--fill); border: none; color: var(--label); border-radius: var(--radius-control); padding: 4px 14px; margin-right: 6px; cursor: pointer; font-size: 13px; transition: filter var(--duration) var(--ease); }
-  .permcard button:hover { filter: brightness(0.95); }
-  .permcard button.ok { background: var(--accent); color: #fff; }
+  #permzone { padding: 0 16px; }
+  .permcard { background: var(--bg-elevated); border: 1px solid var(--line-strong); border-radius: 6px; padding: 8px 12px; margin-top: 10px; font-size: 13px; }
+  .permcard b { color: var(--err); font-size: 12px; }
+  .permcard .cmd { font-family: var(--font-mono); font-size: 12px; color: var(--label); margin: 4px 0 8px; word-break: break-all; }
+  .permcard .btn { margin-right: 6px; }
 
-  #stream { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
-  .msg { max-width: 82%; border-radius: var(--radius-container); padding: 9px 13px; font-size: 13px; background: var(--bg-elevated); }
-  .msg .who { font-size: 12px; color: var(--label-secondary); margin-bottom: 3px; font-weight: 600; }
-  .msg p { margin: 4px 0; }
+  #stream { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 1px; }
+  .msg { padding: 5px 10px; font-size: 13px; border-radius: 4px; }
+  .msg:hover { background: var(--fill); }
+  .msg .who { font-size: 12px; color: var(--label-secondary); margin-bottom: 2px; font-weight: 600; }
+  .msg.mine { background: var(--accent-fill); box-shadow: inset 2px 0 0 var(--accent); }
+  .msg.mine .who { color: var(--accent); }
+  .msg p { margin: 3px 0; }
   .msg h1, .msg h2, .msg h3, .msg h4 { margin: 8px 0 4px; font-size: 13px; color: var(--label); }
-  .msg ul, .msg ol { margin: 4px 0; padding-left: 20px; }
-  .msg blockquote { border-left: 2px solid var(--separator); margin: 4px 0; padding: 2px 10px; color: var(--label-secondary); }
-  .msg code { background: var(--fill); border-radius: 4px; padding: 0 4px; font-size: 12px; }
-  .msg img.md-img { min-height: 48px; object-fit: contain; background: var(--bg); border-radius: 6px; display: block; margin: 4px 0; }
-  .msg pre { background: var(--bg); border-radius: var(--radius-control); padding: 8px; overflow-x: auto; font-size: 12px; }
+  .msg ul, .msg ol { margin: 3px 0; padding-left: 20px; }
+  .msg blockquote { border-left: 2px solid var(--separator); margin: 3px 0; padding: 2px 10px; color: var(--label-secondary); }
+  .msg code { background: var(--fill); border-radius: 3px; padding: 0 4px; font-family: var(--font-mono); font-size: 12px; }
+  .msg pre { background: var(--bg); border: 1px solid var(--separator); border-radius: 4px; padding: 8px; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; }
   .msg pre code { padding: 0; background: none; }
-  .msg table { border-collapse: collapse; margin: 6px 0; font-size: 12px; }
-  .msg th, .msg td { border: 1px solid var(--separator); padding: 3px 8px; text-align: left; }
+  .msg table { border-collapse: collapse; margin: 5px 0; font-size: 12px; }
+  .msg th, .msg td { border: 1px solid var(--separator); padding: 2px 8px; text-align: left; }
   .msg a { color: var(--accent); }
   .msg hr { border: none; border-top: 1px solid var(--separator); margin: 8px 0; }
-  .msg.mine { align-self: flex-end; background: var(--accent-fill); }
-  .msg.mine .who { color: var(--accent); text-align: right; }
-  .sysline { align-self: center; font-size: 12px; color: var(--label-tertiary); padding: 2px 10px; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg img.md-img { min-height: 48px; max-width: 100%; object-fit: contain; background: var(--bg); border-radius: 4px; display: block; margin: 4px 0; }
+  .sysline { font-size: 11px; color: var(--label-tertiary); padding: 3px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  #composer { border-top: 1px solid var(--separator); padding: 10px 18px 14px; background: var(--bg-elevated); position: relative; }
-  #suggest { position: absolute; bottom: 100%; left: 18px; right: 18px; background: var(--bg-elevated); border: 1px solid var(--separator); border-radius: 8px; box-shadow: var(--shadow-overlay); max-height: 240px; overflow-y: auto; z-index: 5; }
-  #suggest .sug { padding: 5px 12px; cursor: pointer; font-size: 12px; color: var(--label); }
-  #suggest .sug .d { color: var(--sub); margin-left: 8px; font-size: 11px; }
-  #suggest .sug:hover { background: var(--accent-fill); }
-  .msg img.md-img { min-height: 48px; max-width: 100%; border-radius: 6px; display: block; margin: 4px 0; background: var(--bg); }
-  .room .prog { display: block; font-size: 11px; color: var(--ok); margin-top: 1px; }
-  #composer .row { display: flex; gap: 8px; }
-  #saytext { flex: 1; background: var(--bg); border: 1px solid var(--separator); color: var(--label); border-radius: var(--radius-control); padding: 8px 12px; font-size: 13px; }
+  #composer { border-top: 1px solid var(--separator); padding: 10px 16px 12px; background: var(--bg-elevated); position: relative; }
+  #suggest { position: absolute; bottom: 100%; left: 16px; right: 16px; background: var(--bg-elevated); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: var(--shadow-overlay); max-height: 240px; overflow-y: auto; z-index: 5; }
+  #suggest .sug { padding: 4px 12px; cursor: pointer; font-size: 12px; color: var(--label); }
+  #suggest .sug b { font-family: var(--font-mono); font-weight: 600; }
+  #suggest .sug .d { color: var(--label-tertiary); margin-left: 8px; font-size: 11px; }
+  #suggest .sug:hover, #suggest .sug.sel { background: var(--accent-fill); }
+  #composer .row { display: flex; gap: 6px; }
+  #saytext { flex: 1; background: var(--bg); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 7px 10px; font-size: 13px; font-family: var(--font-ui); }
   #saytext:focus { outline: none; border-color: var(--accent); }
-  #saybtn { background: var(--accent); border: none; color: #fff; border-radius: var(--radius-control); padding: 8px 18px; cursor: pointer; font-size: 13px; transition: filter var(--duration) var(--ease); }
-  #saybtn:hover { filter: brightness(1.08); }
-  #composer .hint { font-size: 12px; color: var(--label-tertiary); margin-top: 5px; }
+  #attachbtn { width: 34px; flex-shrink: 0; background: var(--fill); border: none; color: var(--label-secondary); border-radius: 4px; font-size: 16px; cursor: pointer; transition: background var(--duration) var(--ease), color var(--duration) var(--ease); }
+  #attachbtn:hover { background: var(--fill-strong); color: var(--label); }
+  #composer .hint { font-size: 11px; color: var(--label-tertiary); margin-top: 5px; }
 
   /* ============ 右: 状況パネル ============ */
   #ctx { background: var(--bg-elevated); border-left: 1px solid var(--separator); display: flex; flex-direction: column; min-height: 0; }
   #ctx-tabs { display: flex; border-bottom: 1px solid var(--separator); }
-  #ctx-tabs .ct { flex: 1; text-align: center; padding: 10px 0; font-size: 13px; color: var(--label-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: color var(--duration) var(--ease); }
+  #ctx-tabs .ct { flex: 1; text-align: center; padding: 8px 0; font-size: 12px; color: var(--label-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: color var(--duration) var(--ease); }
+  #ctx-tabs .ct:hover { color: var(--label); }
   #ctx-tabs .ct.active { color: var(--accent); border-bottom-color: var(--accent); }
-  #ctx-body { flex: 1; overflow-y: auto; padding: 12px; }
-  .sec { font-size: 12px; color: var(--label-secondary); margin: 12px 0 4px; }
+  #ctx-body { flex: 1; overflow-y: auto; padding: 10px; }
+  .sec { font-size: 11px; color: var(--label-tertiary); margin: 10px 0 3px; }
   .sec:first-child { margin-top: 0; }
-  .proj { font-size: 13px; color: var(--label); font-weight: 600; margin: 10px 0 2px; }
-  .taskrow { display: flex; align-items: baseline; gap: 6px; padding: 3px 4px; border-radius: 6px; font-size: 13px; }
+  .proj { font-size: 12px; color: var(--label); font-weight: 700; margin: 10px 0 2px; }
+  .taskrow { display: flex; align-items: baseline; gap: 6px; padding: 2px 4px; border-radius: 4px; font-size: 12px; min-height: 24px; }
   .taskrow:hover { background: var(--fill); }
-  .taskrow .tid { color: var(--accent); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 52%; flex-shrink: 0; }
+  .taskrow .tid { font-family: var(--font-mono); font-size: 11px; color: var(--accent); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 52%; flex-shrink: 0; }
   .taskrow .tsum { flex: 1; color: var(--label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .taskrow button { background: var(--fill); border: none; color: var(--label); border-radius: 6px; font-size: 11px; padding: 2px 8px; cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: filter var(--duration) var(--ease); }
-  .taskrow button:hover { filter: brightness(0.95); }
-  select.filter { width: 100%; background: var(--bg); border: 1px solid var(--separator); color: var(--label); border-radius: var(--radius-control); padding: 4px 6px; font-size: 12px; }
-  #newtask { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; border-top: 1px solid var(--separator); padding-top: 12px; }
-  #newtask input, #newtask textarea { background: var(--bg); border: 1px solid var(--separator); color: var(--label); border-radius: var(--radius-control); padding: 5px 7px; font-size: 12px; }
+  .taskrow .btn { padding: 1px 8px; font-size: 11px; flex-shrink: 0; }
+  select.filter { width: 100%; background: var(--bg); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 4px 6px; font-size: 12px; font-family: var(--font-ui); }
+  #newtask { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; border-top: 1px solid var(--separator); padding-top: 10px; }
+  #newtask input, #newtask textarea { background: var(--bg); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 5px 7px; font-size: 12px; font-family: var(--font-ui); }
   #newtask input:focus, #newtask textarea:focus { outline: none; border-color: var(--accent); }
   #newtask textarea { min-height: 44px; resize: vertical; }
-  #newtask button { align-self: flex-end; background: var(--accent); border: none; color: #fff; border-radius: var(--radius-control); padding: 5px 12px; cursor: pointer; font-size: 12px; transition: filter var(--duration) var(--ease); }
-  #newtask button:hover { filter: brightness(1.08); }
+  #newtask .btn { align-self: flex-end; }
 
-  .agentcard { background: var(--bg); border-radius: var(--radius-control); padding: 8px 10px; margin-bottom: 8px; cursor: pointer; font-size: 12px; transition: background var(--duration) var(--ease), box-shadow var(--duration) var(--ease); }
+  .agentcard { background: transparent; border-radius: 4px; padding: 6px 8px; margin-bottom: 2px; cursor: pointer; font-size: 12px; transition: background var(--duration) var(--ease), box-shadow var(--duration) var(--ease); }
   .agentcard:hover { background: var(--fill); }
-  .agentcard.sel { background: var(--accent-fill); box-shadow: 0 0 0 1px var(--accent); }
+  .agentcard.sel { background: var(--accent-fill); box-shadow: inset 2px 0 0 var(--accent); }
   .agentcard .nm { font-weight: 600; }
   .agentcard .st { float: right; color: var(--label-secondary); font-size: 11px; }
   .agentcard .st.working { color: var(--warn); }
   .agentcard .st.done { color: var(--ok); }
   .agentcard .st.error, .agentcard .st.budget-stop { color: var(--err); }
-  .agentcard .meta { color: var(--label-secondary); font-size: 11px; margin-top: 3px; }
+  .agentcard .meta { color: var(--label-tertiary); font-size: 11px; font-family: var(--font-mono); margin-top: 2px; }
 
-  .alog { max-height: 46vh; overflow-y: auto; background: var(--bg); border-radius: var(--radius-control); padding: 6px 8px; font-size: 12px; }
+  .alog { max-height: 46vh; overflow-y: auto; background: var(--bg); border: 1px solid var(--separator); border-radius: 4px; padding: 6px 8px; font-family: var(--font-mono); font-size: 11.5px; margin: 2px 0 8px; }
   .alog .entry { padding: 3px 0; border-bottom: 1px solid var(--separator); white-space: pre-wrap; word-break: break-word; }
   .alog .entry:last-child { border-bottom: none; }
-  .alog .entry .k { color: var(--label-tertiary); margin-right: 4px; }
+  .alog .entry .k { display: inline-block; min-width: 38px; margin-right: 6px; color: var(--label-tertiary); font-size: 10px; }
+  .alog .entry.think .k { color: var(--violet); }
+  .alog .entry.say .k { color: var(--accent); }
+  .alog .entry.tool .k { color: var(--info); }
   .alog .entry.think .txt { color: var(--label-secondary); }
   .alog .entry.say .txt { color: var(--label); }
-  .alog .entry.tool .txt, .alog .entry.result .txt { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--label-secondary); }
-  .alog .entry.compact .txt { color: var(--label-secondary); font-size: 11px; }
-  .hint { color: var(--label-tertiary); font-size: 12px; padding: 6px 2px; }
+  .alog .entry.tool .txt, .alog .entry.result .txt { color: var(--label-secondary); }
+  .alog .entry.compact .txt { color: var(--label-secondary); }
+  .hint { color: var(--label-tertiary); font-size: 11px; padding: 6px 2px; }
   ul.files { list-style: none; padding: 0; margin: 4px 0; font-size: 12px; }
-  ul.files li { cursor: pointer; padding: 3px 6px; border-radius: 6px; }
-  ul.files li:hover { background: var(--fill); }
-  pre.fileview { background: var(--bg); border-radius: var(--radius-control); padding: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
+  ul.files li { cursor: pointer; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 11.5px; color: var(--label-secondary); }
+  ul.files li:hover { background: var(--fill); color: var(--label); }
+  .filepanel { margin-top: 8px; border: 1px solid var(--separator); border-radius: 6px; overflow: hidden; }
+  .filepanel .filehead { display: flex; justify-content: space-between; align-items: center; padding: 3px 8px; background: var(--fill); font-family: var(--font-mono); font-size: 11px; color: var(--sub); }
+  .filepanel .filehead button { background: none; border: none; color: var(--label-tertiary); cursor: pointer; font-size: 13px; padding: 0 3px; }
+  .filepanel .filehead button:hover { color: var(--label); }
+  pre.fileview { background: var(--bg); border-radius: 0; padding: 8px; font-family: var(--font-mono); font-size: 11.5px; overflow-x: auto; white-space: pre-wrap; margin: 0; max-height: 50vh; overflow-y: auto; }
+
+  /* ダイアログとトースト */
+  #dlg { background: var(--bg-elevated); color: var(--label); border: 1px solid var(--line-strong); border-radius: 8px; padding: 14px 16px; width: 380px; box-shadow: var(--shadow-overlay); }
+  #dlg::backdrop { background: rgba(0, 0, 0, 0.5); }
+  #dlg h3 { margin: 0 0 6px; font-size: 14px; }
+  #dlg .body { font-size: 12px; color: var(--sub); margin-bottom: 10px; white-space: pre-wrap; }
+  #dlg input { display: block; width: 100%; background: var(--bg); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 6px 8px; font-size: 13px; font-family: var(--font-ui); margin-bottom: 12px; }
+  #dlg input:focus { outline: none; border-color: var(--accent); }
+  #dlg .row { display: flex; justify-content: flex-end; gap: 8px; }
+  #toasts { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+  .toast { background: var(--panel2); border: 1px solid var(--line-strong); border-left: 3px solid var(--accent); color: var(--label); border-radius: 6px; padding: 8px 12px; font-size: 12px; box-shadow: var(--shadow-overlay); max-width: 340px; }
+  .toast.err { border-left-color: var(--err); }
 </style>
 </head>
 <body>
@@ -195,8 +219,8 @@
       <div id="suggest" style="display:none"></div>
       <div class="row">
         <input id="saytext" placeholder="メッセージ">
-        <button id="attachbtn" title="画像を添付">📎</button>
-        <button id="saybtn">送信</button>
+        <button id="attachbtn" title="画像を添付">+</button>
+        <button id="saybtn" class="btn primary">送信</button>
         <input type="file" id="attachfile" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none">
       </div>
       <div class="hint" id="composer-hint"></div>
@@ -212,6 +236,17 @@
     </div>
     <div id="ctx-body"></div>
   </aside>
+
+  <dialog id="dlg">
+    <h3 id="dlg-title"></h3>
+    <div class="body" id="dlg-body"></div>
+    <input id="dlg-input">
+    <div class="row">
+      <button class="btn" id="dlg-cancel">キャンセル</button>
+      <button class="btn primary" id="dlg-ok">決定</button>
+    </div>
+  </dialog>
+  <div id="toasts"></div>
 
 <script>
 /* ================= 状態 ================= */
@@ -237,6 +272,9 @@ let projectFilter = "";
 const unread = {}; // thread => 件数
 let lastState = null;
 const NAMES = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ", delta: "デルタ", system: "システム", you: "あなた", lead: "リーダー" };
+const STATUS_JA = { idle: "待機", thinking: "思考中", working: "作業中", done: "完了", error: "エラー", "budget-stop": "停止" };
+const statusJa = (s) => STATUS_JA[s ?? "idle"] ?? (s ?? "idle");
+const KIND_JA = { think: "思考", say: "発言", tool: "ツール", result: "結果", status: "状態", compact: "要約" };
 const threadOf = (a) => a?.thread ?? "__main__";
 const $ = (id) => document.getElementById(id);
 
@@ -249,8 +287,8 @@ function renderNav(threads) {
   const el = $("nav-rooms");
   el.innerHTML = "";
   const rooms = [
-    { id: "__main__", label: "🤝 メイン", sub: "リーダーと壁打ち・計画" },
-    ...(threads ?? []).filter((t) => t.name !== "__main__").map((t) => ({ id: t.name, label: "🧵 " + t.name, sub: t.goal })),
+    { id: "__main__", label: "メイン", sub: "リーダーと壁打ち・計画" },
+    ...(threads ?? []).filter((t) => t.name !== "__main__").map((t) => ({ id: t.name, label: "# " + t.name, sub: t.goal })),
   ];
   for (const t of rooms) {
     const d = document.createElement("div");
@@ -291,10 +329,10 @@ function currentMembers(state) {
 function renderRoomHead(state) {
   const th = (state.live.threads ?? []).find((t) => t.name === selectedThread);
   if (selectedThread === "__main__") {
-    $("room-title").textContent = "🤝 メイン(壁打ち)";
-    $("room-goal").textContent = "リーダーと計画を固める。実行はサブスレッドへ";
+    $("room-title").textContent = "メイン";
+    $("room-goal").textContent = "リーダーと壁打ち・計画。実行はサブスレッドへ";
   } else {
-    $("room-title").textContent = "🧵 " + selectedThread;
+    $("room-title").textContent = "# " + selectedThread;
     $("room-goal").textContent = th?.goal ?? "";
   }
   const mem = $("room-members");
@@ -307,22 +345,19 @@ function renderRoomHead(state) {
     const chip = document.createElement("span");
     chip.className = "member" + (selectedAgent === id ? " sel" : "");
     chip.innerHTML = `<span class="dot ${(a.status ?? "idle").replace(/\s/g, "")}"></span>${escapeHtml(a.displayName ?? NAMES[id] ?? id)}`;
-    chip.title = `${a.status ?? "idle"} / turn ${a.turn ?? 0} — クリックで思考と活動`;
+    chip.title = `${statusJa(a.status)} · turn ${a.turn ?? 0} · クリックでログ`;
     chip.onclick = () => { selectedAgent = selectedAgent === id ? null : id; ctxTab = "agents"; renderAll(); };
     mem.appendChild(chip);
   }
   if (sumTokens > 0) {
     const s = document.createElement("span");
-    s.className = "member";
-    s.style.cursor = "default";
-    s.innerHTML = `Σ ${sumTokens.toLocaleString()}tok / $${sumCost.toFixed(4)}`;
+    s.className = "member passive";
+    s.innerHTML = `計 ${sumTokens.toLocaleString()} tok · $${sumCost.toFixed(4)}`;
     s.title = "このスレッドのメンバーの合計消費";
     mem.appendChild(s);
   }
   const hint = $("composer-hint");
-  hint.textContent = selectedThread === "__main__"
-    ? "このメッセージは リーダー に届きます"
-    : `このメッセージは ${selectedThread} のメンバー全員に届きます`;
+  hint.textContent = selectedThread === "__main__" ? "宛先: リーダー" : `宛先: ${selectedThread} のメンバー全員`;
   $("saytext").placeholder = selectedThread === "__main__" ? "リーダーへメッセージ" : `${selectedThread} のメンバーへメッセージ`;
 }
 
@@ -335,7 +370,7 @@ function renderStream(state) {
     if (p.from === "system") {
       const d = document.createElement("div");
       d.className = "sysline";
-      d.textContent = "⚙ " + p.text.replace(/^\[[^\]]+\]\s*/, "");
+      d.textContent = p.text.replace(/^\[[^\]]+\]\s*/, "");
       d.title = p.text;
       stream.appendChild(d);
       continue;
@@ -345,7 +380,7 @@ function renderStream(state) {
     d.className = "msg" + (mine ? " mine" : "");
     const who = document.createElement("div");
     who.className = "who " + p.from;
-    who.textContent = (mine ? "あなた" : (NAMES[p.from] ?? p.from)) + (mine ? "" : ` #${p.id}`);
+    who.textContent = mine ? "あなた" : (NAMES[p.from] ?? p.from);
     const body = document.createElement("div");
     body.innerHTML = renderMarkdown(p.text);
     d.append(who, body);
@@ -357,7 +392,7 @@ function renderStream(state) {
     d.className = "msg mine";
     const who = document.createElement("div");
     who.className = "who";
-    who.textContent = "⌘";
+    who.textContent = "/";
     const body = document.createElement("div");
     body.textContent = e.text;
     d.append(who, body);
@@ -372,12 +407,13 @@ function renderPerms(requests) {
   for (const r of (requests ?? []).filter((x) => x.state === "pending")) {
     const d = document.createElement("div");
     d.className = "permcard";
-    d.innerHTML = `<b>🔐 コマンドの承認要求 #${r.id}</b><div class="cmd">${escapeHtml(r.command)}</div>`;
+    d.innerHTML = `<b>承認要求 #${r.id}</b><div class="cmd">${escapeHtml(r.command)}</div>`;
     const ok = document.createElement("button");
-    ok.className = "ok";
+    ok.className = "btn primary";
     ok.textContent = "承認";
     ok.onclick = () => decide(r.id, true);
     const no = document.createElement("button");
+    no.className = "btn";
     no.textContent = "拒否";
     no.onclick = () => decide(r.id, false);
     d.append(ok, no);
@@ -407,7 +443,7 @@ function renderTasksTab(body, state) {
   if (inThread) {
     const s = document.createElement("div");
     s.className = "sec";
-    s.textContent = `このスレッド(${selectedThread})のタスク`;
+    s.textContent = `${selectedThread} のタスク`;
     body.appendChild(s);
   } else {
     const sel = document.createElement("select");
@@ -438,7 +474,7 @@ function renderTasksTab(body, state) {
     if (!inProj.length) continue;
     const ph = document.createElement("div");
     ph.className = "proj";
-    ph.textContent = "◆ " + label;
+    ph.textContent = label;
     body.appendChild(ph);
     for (const [st, stLabel, btn] of secs) {
       const rows = inProj.filter((t) => t.state === st);
@@ -460,15 +496,17 @@ function renderTasksTab(body, state) {
         sum.textContent = t.summary;
         sum.onclick = () => showTaskBody(t);
         const mv = document.createElement("button");
+        mv.className = "btn";
         mv.textContent = "移動";
         mv.title = "プロジェクトを付け替える";
         mv.onclick = async (e) => {
           e.stopPropagation();
-          const p = prompt(`プロジェクト名(空欄で未分類):`, t.project || "");
+          const p = await askText({ title: "プロジェクトを付け替え", label: `${t.id} のプロジェクト名(空欄で未分類)`, value: t.project || "" });
           if (p === null) return;
           await taskAction({ action: "reproject", path: t.path, project: p });
         };
         const b = document.createElement("button");
+        b.className = "btn";
         const spec = btn(t);
         b.textContent = spec.label;
         b.onclick = (e) => { e.stopPropagation(); taskAction({ action: spec.action, id: t.id, agent: t.agent }); };
@@ -481,27 +519,23 @@ function renderTasksTab(body, state) {
   const form = document.createElement("div");
   form.id = "newtask";
   form.innerHTML = `
-    <div class="sec">新しいタスクを投入${inThread ? `(project: ${escapeHtml(selectedThread)})` : ""}</div>
+    <div class="sec">新しいタスク${inThread ? ` · ${escapeHtml(selectedThread)}` : ""}</div>
     <input id="nt-id" placeholder="task_id(空欄で自動採番)">
     ${inThread ? "" : '<input id="nt-project" placeholder="project(任意、例: cuda-compress)">'}
     <input id="nt-role" placeholder="role(impl/review等、空欄で誰でも)">
     <textarea id="nt-body" placeholder="何を / どう確認するか / 完了条件"></textarea>
-    <button id="nt-add">投入(トークン消費なし)</button>`;
+    <button id="nt-add" class="btn">投入(トークン消費なし)</button>`;
   body.appendChild(form);
   form.querySelector("#nt-add").onclick = createTask;
 }
 
 function renderAgentsTab(body, state) {
   const members = currentMembers(state);
-  const sel = document.createElement("div");
-  sel.className = "sec";
-  sel.textContent = "このスレッドのエージェント(クリックで思考ログ)";
-  body.appendChild(sel);
   for (const [id, a] of members) {
     const card = document.createElement("div");
     card.className = "agentcard" + (selectedAgent === id ? " sel" : "");
     const label = a.displayName ?? NAMES[id] ?? id;
-    card.innerHTML = `<span class="nm">${escapeHtml(label)}</span><span class="st ${(a.status ?? "idle").replace(/\s/g, "")}">${escapeHtml(a.status ?? "idle")}</span>` +
+    card.innerHTML = `<span class="nm">${escapeHtml(label)}</span><span class="st ${(a.status ?? "idle").replace(/\s/g, "")}">${escapeHtml(statusJa(a.status))}</span>` +
       `<div class="meta">turn ${a.turn ?? 0}${a.lastTool ? ` / ${escapeHtml(a.lastTool)}` : ""}${a.tokens ? ` / ${a.tokens.toLocaleString()}tok / $${(a.costUsd ?? 0).toFixed(4)}` : ""}</div>`;
     card.onclick = () => { selectedAgent = selectedAgent === id ? null : id; renderCtx(lastState); };
     body.appendChild(card);
@@ -518,23 +552,22 @@ function renderAgentsTab(body, state) {
 function renderAgentLog(a) {
   const wrap = document.createElement("div");
   wrap.className = "alog";
-  const icons = { think: "💭", say: "💬", tool: "🔧", result: "↳", status: "●", compact: "🗜" };
   if (a.live && (a.live.think || a.live.say)) {
     const d = document.createElement("div");
     d.className = "entry think";
     const k = document.createElement("span");
     k.className = "k";
-    k.textContent = "⚡";
+    k.textContent = KIND_JA.think;
     const t = document.createElement("span");
     t.className = "txt";
-    t.textContent = (a.live.think ? "思考中: " + a.live.think.slice(-400) : "") + (a.live.say ? (a.live.think ? "\n" : "") + "生成中: " + a.live.say.slice(-400) : "");
+    t.textContent = [a.live.think?.slice(-400), a.live.say?.slice(-400)].filter(Boolean).join("\n");
     d.append(k, t);
     wrap.appendChild(d);
   }
   if (!a.log?.length && !(a.live && (a.live.think || a.live.say))) {
     const h = document.createElement("div");
     h.className = "hint";
-    h.textContent = "まだ活動がありません。稼働すると思考(💭)・発言(💬)・ツール(🔧)・結果(↳)が流れます。";
+    h.textContent = "まだログはありません。";
     wrap.appendChild(h);
   }
   for (const e of a.log ?? []) {
@@ -542,7 +575,7 @@ function renderAgentLog(a) {
     d.className = "entry " + e.kind;
     const k = document.createElement("span");
     k.className = "k";
-    k.textContent = icons[e.kind] ?? "•";
+    k.textContent = KIND_JA[e.kind] ?? "·";
     const t = document.createElement("span");
     t.className = "txt";
     t.textContent = e.text;
@@ -560,40 +593,49 @@ async function renderFilesTab(body) {
   for (const f of files) {
     const li = document.createElement("li");
     li.textContent = f;
-    li.onclick = async () => {
-      const r = await (await fetch("/api/file?path=" + encodeURIComponent(f))).json();
-      let pre = body.querySelector("pre.fileview");
-      if (pre) pre.remove();
-      pre = document.createElement("pre");
-      pre.className = "fileview";
-      pre.textContent = r.content ?? "";
-      body.appendChild(pre);
-    };
+    li.onclick = () => showFile(body, f);
     ul.appendChild(li);
   }
   body.appendChild(ul);
-  const h = document.createElement("div");
-  h.className = "hint";
-  h.textContent = "ファイル名をクリックすると内容が下に表示されます。";
-  body.appendChild(h);
+}
+
+async function showFile(body, path) {
+  const r = await (await fetch("/api/file?path=" + encodeURIComponent(path))).json();
+  body.querySelector(".filepanel")?.remove();
+  body.appendChild(buildFilePanel(path, r.content ?? ""));
+}
+
+function buildFilePanel(title, content) {
+  const wrap = document.createElement("div");
+  wrap.className = "filepanel";
+  const head = document.createElement("div");
+  head.className = "filehead";
+  const name = document.createElement("span");
+  name.textContent = title;
+  const close = document.createElement("button");
+  close.textContent = "×";
+  close.title = "閉じる";
+  close.onclick = () => wrap.remove();
+  head.append(name, close);
+  const pre = document.createElement("pre");
+  pre.className = "fileview";
+  pre.textContent = content;
+  wrap.append(head, pre);
+  return wrap;
 }
 
 async function showTaskBody(t) {
   const r = await (await fetch("/api/file?path=" + encodeURIComponent(t.path))).json();
   ctxTab = "tasks";
   const body = $("ctx-body");
-  let pre = body.querySelector("pre.fileview");
-  if (pre) pre.remove();
-  pre = document.createElement("pre");
-  pre.className = "fileview";
-  pre.textContent = `# ${t.id}\n\n` + (r.content ?? "");
-  body.appendChild(pre);
+  body.querySelector(".filepanel")?.remove();
+  body.appendChild(buildFilePanel(t.id, r.content ?? ""));
 }
 
 /* ================= アクション ================= */
 async function taskAction(payload) {
   const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })).json();
-  if (r.error) alert(r.error);
+  if (r.error) toast(`エラー: ${r.error}`);
   refresh();
 }
 
@@ -603,9 +645,9 @@ async function createTask() {
   const project = projectInput ? projectInput.value.trim() : selectedThread === "__main__" ? "" : selectedThread;
   const role = $("nt-role").value.trim();
   const body = $("nt-body").value.trim();
-  if (!body) { alert("本文(何を/完了条件)を書いてください"); return; }
+  if (!body) { toast("本文(何を/完了条件)を書いてください"); return; }
   const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, project, role, body }) })).json();
-  if (r.error) { alert(r.error); return; }
+  if (r.error) { toast(`エラー: ${r.error}`); return; }
   $("nt-id").value = "";
   if (projectInput) projectInput.value = "";
   $("nt-role").value = "";
@@ -649,7 +691,7 @@ function pushEphemeral(text) {
 }
 
 async function handleCommand(text) {
-  const [cmd] = text.slice(1).split(/\s+/);
+  const [cmd, ...args] = text.slice(1).split(/\s+/);
   const post = (t) => {
     pushEphemeral(t);
     renderStream(lastState ?? { live: { board: [] } });
@@ -681,14 +723,14 @@ async function handleCommand(text) {
   } else if (cmd === "usage") {
     if (!lastState) return post("まだ状態を取得していません");
     const rows = Object.entries(lastState.live.agents).map(([id, a]) =>
-      `${a.displayName ?? id}: ${a.status} / ${a.tokens?.toLocaleString() ?? 0}tok / $${(a.costUsd ?? 0).toFixed(4)}`);
+      `${a.displayName ?? id}: ${statusJa(a.status)} / ${a.tokens?.toLocaleString() ?? 0}tok / $${(a.costUsd ?? 0).toFixed(4)}`);
     post(rows.length ? rows.join("\n") : "usageはまだありません");
   } else if (cmd === "threads") {
     const ts = lastState?.live.threads ?? [];
     post(ts.map((t) => `${t.name} — ${t.goal}`).join("\n") || "開いているスレッドはありません");
   } else if (cmd === "thread") {
     const rest = text.slice(("/" + cmd).length).trim();
-    const sp = rest.indexOf(/\s/);
+    const sp = rest.search(/\s/);
     const name = sp === -1 ? rest : rest.slice(0, sp);
     const goal = sp === -1 ? "" : rest.slice(sp + 1).trim();
     if (!name) { post("スレッド名を指定してください(/thread <名前> <目標>)"); return; }
@@ -738,6 +780,35 @@ async function handleCommand(text) {
   } else {
     post(`不明なコマンド: ${cmd}(/help で一覧)`);
   }
+}
+
+/* ================= ダイアログとトースト ================= */
+function toast(msg, kind = "err") {
+  const t = document.createElement("div");
+  t.className = "toast " + kind;
+  t.textContent = msg;
+  $("toasts").appendChild(t);
+  setTimeout(() => t.remove(), 4200);
+}
+
+// ブラウザ標準のpromptの代替。テキスト入力つきダイアログ。キャンセル/Escはnull
+function askText({ title, label, value = "", ok = "決定" }) {
+  return new Promise((resolve) => {
+    const dlg = $("dlg");
+    $("dlg-title").textContent = title;
+    $("dlg-body").textContent = label;
+    const inp = $("dlg-input");
+    inp.value = value;
+    $("dlg-ok").textContent = ok;
+    dlg.showModal();
+    inp.focus();
+    inp.select();
+    const done = (v) => { dlg.close(); resolve(v); };
+    $("dlg-ok").onclick = () => done(inp.value.trim());
+    $("dlg-cancel").onclick = () => done(null);
+    dlg.oncancel = () => resolve(null);
+    inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); $("dlg-ok").click(); } };
+  });
 }
 
 /* ================= 全体描画 ================= */
@@ -817,17 +888,14 @@ const ALL_COMMANDS = () => ({
   function renderTerminalTab() {
     const body = document.getElementById("ctx-body");
     body.innerHTML = "";
-    const hint = document.createElement("div");
-    hint.className = "hint";
-    hint.textContent = "ワークスペース直下でコマンドを実行(120秒タイムアウト)";
-    body.appendChild(hint);
     const out = document.createElement("pre");
-    out.className = "fileview";
+    out.className = "fileview mono";
     out.style.minHeight = "200px";
+    out.style.marginTop = "8px";
     out.textContent = window.__termOut ?? "";
     const input = document.createElement("input");
-    input.className = "filter";
-    input.placeholder = "コマンドを入力してEnter";
+    input.className = "filter mono";
+    input.placeholder = "コマンド(ワークスペース直下で実行)";
     input.addEventListener("keydown", async (e) => {
       if (e.key !== "Enter" || !input.value.trim()) return;
       const cmd = input.value.trim();
@@ -844,7 +912,7 @@ const ALL_COMMANDS = () => ({
   }
   $("saybtn").onclick = sendSay;
 $("saytext").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) sendSay(); });
-// 画像添付: 📎ボタン or 入力欄へのペースト。dataURL化してからサーバーへ保存させる
+// 画像添付: 添付ボタン or 入力欄へのペースト。dataURL化してからサーバーへ保存させる
 let pendingImage = null;
 const attachFile = document.getElementById("attachfile");
 $("attachbtn").onclick = () => attachFile.click();
@@ -852,7 +920,7 @@ attachFile.onchange = () => {
   const f = attachFile.files[0];
   if (!f) return;
   const reader = new FileReader();
-  reader.onload = () => { pendingImage = { dataUrl: reader.result, name: f.name }; $("composer-hint").textContent = `添付: ${f.name} — 送信で画像ごと届きます`; };
+  reader.onload = () => { pendingImage = { dataUrl: reader.result, name: f.name }; $("composer-hint").textContent = `添付: ${f.name} — 送信で一緒に届きます`; };
   reader.readAsDataURL(f);
 };
 $("saytext").addEventListener("paste", (e) => {
@@ -862,7 +930,7 @@ $("saytext").addEventListener("paste", (e) => {
   if (!f) return;
   e.preventDefault();
   const reader = new FileReader();
-  reader.onload = () => { pendingImage = { dataUrl: reader.result, name: "paste.png" }; $("composer-hint").textContent = `添付: 画像(ペースト) — 送信で画像ごと届きます`; };
+  reader.onload = () => { pendingImage = { dataUrl: reader.result, name: "paste.png" }; $("composer-hint").textContent = `添付: 画像(ペースト) — 送信で一緒に届きます`; };
   reader.readAsDataURL(f);
 });
 for (const b of document.querySelectorAll("#ctx-tabs .ct")) {
