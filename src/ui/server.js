@@ -22,7 +22,7 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
-export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onModel = null, onPermMode = null }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null }) {
   const live = {
     // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
     // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
@@ -149,7 +149,22 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
-      if (url.pathname === "/api/state") return json(res, { live, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace) });
+      if (url.pathname === "/api/workflow" && req.method === "POST" && onWorkflow) {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const { name } = JSON.parse(body);
+            const r = onWorkflow(String(name ?? ""));
+            if (r.error) throw new Error(r.error);
+            json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/state") return json(res, { live, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace) });
       if (url.pathname === "/api/thread" && req.method === "POST" && onThread) {
         let body = "";
         req.on("data", (d) => (body += d));

@@ -207,6 +207,7 @@ let selectedThread = "__main__";
 // スラッシュコマンドの定義(/helpはこの一覧から自動生成)
 const COMMANDS = {
   help: "コマンド一覧",
+  workflow: "ワークフロー実行(/workflow <名前>)",
   tasks: "現在のタスク一覧",
   usage: "エージェント別の消費",
   threads: "スレッド一覧",
@@ -685,6 +686,15 @@ async function handleCommand(text) {
     if (!name) { post("スレッド名を指定してください"); return; }
     const r = await (await fetch("/api/close", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: name }) })).json();
     post(r.error ? `エラー: ${r.error}` : `スレッド ${name} を閉じました`);
+  } else if (cmd === "workflow") {
+    const name = args[0];
+    if (!name) {
+      const list = lastState?.workflows ?? [];
+      post(list.length ? "実行可能なワークフロー:\n" + list.join("\n") : "ワークフローがありません(workspace/workflows/ に <名前>.mjs を置いてください)");
+      return;
+    }
+    const r = await (await fetch("/api/workflow", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })).json();
+    post(r.error ? `エラー: ${r.error}` : `ワークフロー ${name} を実行開始しました`);
   } else if (cmd === "model") {
     const m = lastState?.model;
     if (!args[0]) {
