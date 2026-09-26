@@ -406,7 +406,12 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(config.ui.port, "127.0.0.1", () => { server.off("error", reject); resolve(); });
+    server.listen(config.ui.port ?? 0, "127.0.0.1", () => {
+      server.off("error", reject);
+      // port 0(自動割当)時に実際のポートを反映(テスト等でURLを組み立てられるように)
+      config.ui.port = server.address().port;
+      resolve();
+    });
   }).catch((err) => {
     if (err.code === "EADDRINUSE") {
       throw new Error(`ポート${config.ui.port}は既に使用中です。別のagent-hive(または以前のプロセス残骸)が動いていませんか?`);
