@@ -77,9 +77,15 @@ test("diff検出(reviewed..main)→reviewタスク生成、レビュー完了→
   assert.ok(claimed);
   const id = claimed.replace(/\.md$/, "").split("--").slice(1).join("--");
   tasks.finish({ id: "beta" }, id);
-  await new Promise((r) => setTimeout(r, 400)); // タグ移動は非同期
-  const tag = await runCommand({ command: "git rev-parse reviewed", cwd: ws, outputLimit: 500 });
-  const main = await runCommand({ command: "git rev-parse main", cwd: ws, outputLimit: 500 });
+  // タグ移動は非同期。高負荷でもフレークしないよう一致するまでポーリングする
+  let tag = null;
+  let main = null;
+  for (let i = 0; i < 50; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    tag = await runCommand({ command: "git rev-parse reviewed", cwd: ws, outputLimit: 500 });
+    main = await runCommand({ command: "git rev-parse main", cwd: ws, outputLimit: 500 });
+    if (tag.ok && main.ok && tag.text.trim() === main.text.trim()) break;
+  }
   assert.equal(tag.text.trim(), main.text.trim());
   d.stop();
   rmTree(ws);

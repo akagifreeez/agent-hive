@@ -78,6 +78,7 @@ export async function runAgentLoop({
   seenBoard = null, // 前回までの既読位置(chat常駐時はホストが保持。nullならラウンド開始時点まで既読)
   memory = null, // 永続記憶(memory/の権威ファイル)の注入文脈。無ければnull
   drainInput = null, // () => ターン境界で割込ませる入力の配列(steering)。呼ぶたに取り出す
+  claimMissesLimit = 3, // 連続請求ミス何回でidle終了するか(追加ワーカーは1で早期退場)
 }) {
   if (!messages) {
     const sys = buildSystemPrompt(agent, shellKind);
@@ -191,9 +192,9 @@ export async function runAgentLoop({
         }
       }
       messages.push(...reminders.splice(0));
-      if (claimMisses >= 3) {
+      if (claimMisses >= claimMissesLimit) {
         releaseClaims("idle待機終了");
-        board.post(agent.id, `[待機終了] 請求できるタスクが3回連続で無かったため終了します。`);
+        board.post(agent.id, `[待機終了] 請求できるタスクが${claimMissesLimit}回連続で無かったため終了します。`);
         bus.emit("agent.status", { agent: agent.id, status: "done" });
         return { ok: true, endedBy: "idle", seenBoard: seen };
       }
