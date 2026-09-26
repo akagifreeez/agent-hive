@@ -39,9 +39,17 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       pushAgentLog(live.agents[p.agent], "status", p.status);
     },
     "agent.turn": (p) => {
-      live.agents[p.agent] = { ...live.agents[p.agent], turn: p.turn };
+      live.agents[p.agent] = { ...live.agents[p.agent], turn: p.turn, live: null };
       if (p.reasoning) pushAgentLog(live.agents[p.agent], "think", p.reasoning);
       if (p.content) pushAgentLog(live.agents[p.agent], "say", p.content);
+    },
+    "agent.delta": (p) => {
+      // ストリーミング断片(ライブ表示用)。ログには残さず現在有効なバッファのみ保持
+      const a = live.agents[p.agent];
+      if (!a) return;
+      a.live = a.live ?? {};
+      const buf = (a.live[p.kind] ?? "") + p.text;
+      a.live[p.kind] = buf.length > 4000 ? buf.slice(-4000) : buf;
     },
     "tool.call": (p) => {
       live.agents[p.agent] = { ...live.agents[p.agent], lastTool: `${p.tool}` };

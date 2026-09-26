@@ -147,10 +147,11 @@ export class ChatHost {
             shellKind: this.shellKind,
             contextWindow: this.contextWindow,
             thresholdPercent: this.thresholdPercent,
-            messages,
-            seenBoard: this.seen.get(main.id) ?? null,
-            memory: this.memoryFn?.() ?? null, // 圧縮時の権威分離判定に使う
-          });
+          messages,
+          seenBoard: this.seen.get(main.id) ?? null,
+          memory: this.memoryFn?.() ?? null, // 圧縮時の権威分離判定に使う
+          drainInput: () => st.pending.splice(0), // ラウンド実行中の入力はターン境界で割込む(steering)
+        });
           // 既読位置をラウンド間で保持(同じ入力の二重配信を防ぐ)
           if (typeof r.seenBoard === "number") this.seen.set(main.id, r.seenBoard);
           // 会話メモリを永続化(再起動後も続きから)

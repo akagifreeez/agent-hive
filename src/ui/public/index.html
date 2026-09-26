@@ -458,7 +458,19 @@ function renderAgentLog(a) {
   const wrap = document.createElement("div");
   wrap.className = "alog";
   const icons = { think: "💭", say: "💬", tool: "🔧", result: "↳", status: "●", compact: "🗜" };
-  if (!a.log?.length) {
+  if (a.live && (a.live.think || a.live.say)) {
+    const d = document.createElement("div");
+    d.className = "entry think";
+    const k = document.createElement("span");
+    k.className = "k";
+    k.textContent = "⚡";
+    const t = document.createElement("span");
+    t.className = "txt";
+    t.textContent = (a.live.think ? "思考中: " + a.live.think.slice(-400) : "") + (a.live.say ? (a.live.think ? "\n" : "") + "生成中: " + a.live.say.slice(-400) : "");
+    d.append(k, t);
+    wrap.appendChild(d);
+  }
+  if (!a.log?.length && !(a.live && (a.live.think || a.live.say))) {
     const h = document.createElement("div");
     h.className = "hint";
     h.textContent = "まだ活動がありません。稼働すると思考(💭)・発言(💬)・ツール(🔧)・結果(↳)が流れます。";
@@ -590,7 +602,7 @@ es.onmessage = (e) => {
     }
     return;
   }
-  if (["agent.turn", "tool.call", "tool.result", "agent.status", "agent.spawned", "thread.opened",
+  if (["agent.turn", "agent.delta", "tool.call", "tool.result", "agent.status", "agent.spawned", "thread.opened",
        "task.claimed", "task.finished", "task.created", "task.released", "task.cancelled", "task.autoResolved",
        "scenario.started", "scenario.finished"].includes(type)) {
     refreshSoon();
