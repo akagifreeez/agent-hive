@@ -196,6 +196,18 @@
 <script>
 /* ================= 状態 ================= */
 let selectedThread = "__main__";
+// スラッシュコマンドの定義(/helpはこの一覧から自動生成)
+const COMMANDS = {
+  help: "コマンド一覧",
+  tasks: "現在のタスク一覧",
+  usage: "エージェント別の消費",
+  threads: "スレッド一覧",
+  session: "セッションの保存/復元(/session save <名前>)",
+  model: "現在のモデル表示",
+  thread: "スレッドを直接開く(/thread <名前> <目標>)",
+  close: "スレッドを閉じる(/close <名前>)",
+};
+let customCommands = {};
 let selectedAgent = null;
 let ctxTab = "tasks";
 let projectFilter = "";
@@ -560,6 +572,10 @@ async function decide(id, approve) {
   refresh();
 }
 
+function sendSayText(t) {
+  return fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: t, thread: selectedThread === "__main__" ? null : selectedThread }) });
+}
+
 async function sendSay() {
   const el = $("saytext");
   const text = el.value.trim();
@@ -575,7 +591,7 @@ async function sendSay() {
     refresh();
     return;
   }
-  await fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, thread: selectedThread === "__main__" ? null : selectedThread }) });
+  await sendSayText(text);
 }
 
 // スラッシュコマンド: 入力欄からローカル操作(エージェントを起こさない)
@@ -593,7 +609,10 @@ async function handleCommand(text) {
     $("stream").scrollTop = $("stream").scrollHeight;
   };
   if (cmd === "help") {
-    post("/tasks 現在のタスク一覧\n/usage エージェント別の消費\n/threads スレッド一覧\n/session save <名前> 状態を保存\n/session load <名前> 状態を復元(再起動で反映)\n/sessions 保存済み一覧\n/help この一覧");
+    const rows = Object.entries(COMMANDS).map(([c, d]) => `/${c} — ${d}`);
+    const custom = Object.entries(lastState?.commands ?? {});
+    if (custom.length) rows.push(...custom.map(([c, d]) => `/${c} — ${d}(カスタム)`));
+    post("コマンド一覧:\n" + rows.join("\n"));
   } else if (cmd === "session" || cmd === "sessions") {
     const arg = text.slice(("/" + cmd).length).trim();
     const [op, ...rest] = arg.split(/\s+/);
@@ -621,6 +640,25 @@ async function handleCommand(text) {
   } else if (cmd === "threads") {
     const ts = lastState?.live.threads ?? [];
     post(ts.map((t) => `${t.name} — ${t.goal}`).join("\n") || "開いているスレッドはありません");
+  } else if (cmd === "thread") {
+    const rest = text.slice(("/" + cmd).length).trim();
+    const sp = rest.indexOf(/\s/);
+    const name = sp === -1 ? rest : rest.slice(0, sp);
+    const goal = sp === -1 ? "" : rest.slice(sp + 1).trim();
+    if (!name) { post("スレッド名を指定してください(/thread <名前> <目標>)"); return; }
+    const r = await (await fetch("/api/thread", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: name, goal }) })).json();
+    post(r.error ? `エラー: ${r.error}` : `スレッド ${name} を開きました(3ワーカー並行開始)`);
+  } else if (cmd === "close") {
+    const name = text.slice(("/" + cmd).length).trim();
+    if (!name) { post("スレッド名を指定してください"); return; }
+    const r = await (await fetch("/api/close", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: name }) })).json();
+    post(r.error ? `エラー: ${r.error}` : `スレッド ${name} を閉じました`);
+  } else if (cmd === "model") {
+    const m = lastState?.model;
+    post(m ? `モデル: ${m.name}${m.fallbacks?.length ? `(フォールバック: ${m.fallbacks.join(" → ")})` : ""}` : "モデル情報なし");
+  } else if (customCommands[cmd]) {
+    // configで定義したカスタムプロンプトコマンド → リーダーへ送信
+    sendSayText(customCommands[cmd].replace(/\$ARGS/g, text.slice(cmd.length + 2).trim()));
   } else {
     post(`不明なコマンド: ${cmd}(/help で一覧)`);
   }
@@ -639,6 +677,7 @@ function renderAll() {
 
 async function refresh() {
   lastState = await (await fetch("/api/state")).json();
+  customCommands = lastState.commands ?? {};
   renderAll();
 }
 
