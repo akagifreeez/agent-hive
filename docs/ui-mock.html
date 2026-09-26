@@ -32,6 +32,7 @@
   #newthread { margin: 2px 4px 8px; }
   #newthread button { width: 100%; background: none; border: 1px dashed var(--line2); color: var(--muted); border-radius: 6px; padding: 6px; cursor: pointer; font-size: 12px; }
   #newthread button:hover { color: var(--accent); border-color: var(--accent); }
+  .folder-h { font-size: 10px; color: var(--violet); padding: 6px 8px 2px; font-weight: 600; }
   .room { padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; position: relative; border-left: 2px solid transparent; }
   .room:hover { background: var(--panel2); }
   .room.active { background: var(--panel2); border-left-color: var(--accent); }
@@ -152,6 +153,8 @@
 <body>
   <aside id="nav">
     <div class="logo">agent-hive<small>UIモック</small></div>
+    <div class="navlabel">検索</div>
+    <input id="navsearch" placeholder="スレッドを検索…" style="margin: 2px 4px 6px; background: var(--bg); border: 1px solid var(--line2); color: var(--label); border-radius: 4px; padding: 4px 8px; font-size: 12px; width: calc(100% - 8px);">
     <div class="navlabel">スレッド</div>
     <button id="newthread">＋ 新しいスレッド</button>
     <div id="rooms"></div>
@@ -221,9 +224,9 @@
 // ============ モックデータ ============
 const S = {
   rooms: [
-    { id: "__main__", name: "🤝 メイン", goal: "リーダーと壁打ち・計画", pinned: true },
-    { id: "cuda", name: "🧵 cuda-compress", goal: "CUDA圧縮ツールの実装と検証", prog: "3/9", unread: 0 },
-    { id: "cal", name: "🧵 calendar-app", goal: "カレンダーMVPの実装", prog: "2/4", unread: 2 },
+    { id: "__main__", name: "🤝 メイン", goal: "リーダーと壁打ち・計画", pinned: true, folder: null },
+    { id: "cuda", name: "🧵 cuda-compress", goal: "CUDA圧縮ツールの実装と検証", prog: "3/9", unread: 0, folder: "AI開発" },
+    { id: "cal", name: "🧵 calendar-app", goal: "カレンダーMVPの実装", prog: "2/4", unread: 2, folder: "アプリ" },
   ],
   sel: "__main__",
   agents: {
@@ -276,6 +279,7 @@ const S = {
   },
 };
 let sel = "__main__";
+let searchQuery = "";
 let selAgent = null;
 let ctxTab = "tasks";
 
@@ -521,11 +525,16 @@ $("rt-close").onclick = () => {
     render();
   }
 };
-$("newthread").onclick = () => {
+document.getElementById("navsearch").addEventListener("input", (e) => {
+    searchQuery = e.target.value;
+    renderRooms();
+  });
+  $("newthread").onclick = () => {
+  const folder = prompt("フォルダ名(空欄で未分類):") ?? "";
   const name = prompt("スレッド名(英数字):");
   if (!name) return;
   const goal = prompt("目標:") ?? "";
-  S.rooms.push({ id: name, name: "🧵 " + name, goal });
+  S.rooms.push({ id: name, name: "🧵 " + name, goal, folder: folder || null });
   sel = name;
   S.agents[name + "-alpha"] = { name: "アルファ", status: "idle", thread: name };
   render();
