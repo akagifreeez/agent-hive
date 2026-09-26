@@ -503,7 +503,10 @@ export function buildMonitorSnapshot({ config, live, tasks, startedAt }) {
       const pr = prog(t.name);
       const claimed = claimedIn[t.name] ?? 0;
       const state = pr.total > 0 && pr.done === pr.total ? "done" : (pr.done + claimed > 0 ? "working" : (pr.total > 0 ? "waiting" : "idle"));
-      return { name: t.name, folder: t.folder ?? null, goal: t.goal ?? "", claimed, state, percent: pr.total ? Math.round((pr.done / pr.total) * 100) : 0, ...pr };
+      const members = Object.entries(live.agents)
+        .filter(([, a]) => (a.thread ?? "__main__") === t.name)
+        .map(([id, a]) => ({ id, displayName: a.displayName ?? id, status: a.status ?? "idle" }));
+      return { name: t.name, folder: t.folder ?? null, goal: t.goal ?? "", claimed, state, percent: pr.total ? Math.round((pr.done / pr.total) * 100) : 0, members, ...pr };
     }),
     tasks: {
       open: list.open.map((t) => ({ id: t.id, project: t.project ?? "", summary: t.summary })),
@@ -522,7 +525,7 @@ async function startMonitor({ config, live, tasks, startedAt }) {
 <style>
   body{margin:0;background:#161617;color:#eaeaea;font-family:system-ui,"Segoe UI","Meiryo","Noto Sans JP",sans-serif;font-size:13px;line-height:1.45}
   header{padding:10px 16px;border-bottom:1px solid #2c2c31;display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;background:#1d1d1f}
-  h1{font-size:15px;margin:0}.accent{color:#f5a35b}.ph{font-size:16px;font-weight:700}.bar{height:6px;background:#26262a;border-radius:3px;width:90px;display:inline-block;vertical-align:middle;margin-right:6px}.bar i{display:block;height:100%;background:#f5a35b;border-radius:3px}.sub{color:#a3a3a8;font-size:12px}
+  h1{font-size:15px;margin:0}.accent{color:#f5a35b}.mem1{white-space:nowrap;margin-right:8px}.mdot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px}.ph{font-size:16px;font-weight:700}.bar{height:6px;background:#26262a;border-radius:3px;width:90px;display:inline-block;vertical-align:middle;margin-right:6px}.bar i{display:block;height:100%;background:#f5a35b;border-radius:3px}.sub{color:#a3a3a8;font-size:12px}
   main{padding:12px 16px;max-width:1100px;margin:0 auto}
   h2{font-size:11px;color:#6e6e73;margin:16px 0 6px;font-weight:600}
   table{width:100%;border-collapse:collapse;font-size:12px}
@@ -549,8 +552,8 @@ async function tick(){
     pe.style.color=ph[1];
     document.getElementById("meta").textContent="model: "+d.model+" / perm:"+esc(d.permMode)+" / 稼働 "+Math.floor(d.uptimeSec/60)+"分"+(d.uptimeSec%60)+"秒 / 投稿 "+d.posts+"件"+(d.lastActivitySec!=null?" / 最終活動 "+(d.lastActivitySec<60?d.lastActivitySec+"秒前":Math.floor(d.lastActivitySec/60)+"分前"):"");
     document.getElementById("body").innerHTML=
-      "<h2>スレッド</h2><table><tr><th>状態</th><th>名前</th><th>フォルダ</th><th>進捗</th><th>目標</th></tr>"+
-      (rows(d.threads,(t)=>{const st={done:["完了","#86efac"],working:["作業中","#fbbf24"],waiting:["未着手","#a3a3a8"],idle:["—","#6e6e73"]}[t.state]||["—","#6e6e73"];return "<tr><td style='color:"+st[1]+"'>"+st[0]+"</td><td class='mono'># "+esc(t.name)+"</td><td>"+esc(t.folder??"")+"</td><td><div class='bar'><i style='width:"+t.percent+"%'></i></div><span class='dim mono'>"+t.done+"/"+t.total+"</span></td><td class='dim'>"+esc(t.goal)+"</td></tr>";})||"<tr><td colspan='5' class='dim'>開いているスレッドはありません</td></tr>")+"</table>"+
+      "<h2>スレッド</h2><table><tr><th>状態</th><th>名前</th><th>フォルダ</th><th>進捗</th><th>メンバー</th><th>目標</th></tr>"+
+      (rows(d.threads,(t)=>{const st={done:["完了","#86efac"],working:["作業中","#fbbf24"],waiting:["未着手","#a3a3a8"],idle:["—","#6e6e73"]}[t.state]||["—","#6e6e73"];return "<tr><td style='color:"+st[1]+"'>"+st[0]+"</td><td class='mono'># "+esc(t.name)+"</td><td>"+esc(t.folder??"")+"</td><td><div class='bar'><i style='width:"+t.percent+"%'></i></div><span class='dim mono'>"+t.done+"/"+t.total+"</span></td><td>"+rows(t.members??[],(m)=>{const sc={idle:"#a3a3a8",working:"#fbbf24",done:"#86efac",error:"#fca5a5","budget-stop":"#fca5a5"}[m.status]||"#a3a3a8";return "<span class='mem1' title='"+esc(m.status)+"'><i class='mdot' style='background:"+sc+"'></i><span style='color:hsl("+hue(m.id)+" 45% 72%)'>"+esc(m.displayName)+"</span></span>";})+"</td><td class='dim'>"+esc(t.goal)+"</td></tr>";})||"<tr><td colspan='6' class='dim'>開いているスレッドはありません</td></tr>")+"</table>"+
       "<h2>タスク(未着手 "+d.tasks.open.length+" / 作業中 "+d.tasks.claimed.length+" / 完了 "+d.tasks.doneCount+")</h2><table><tr><th>状態</th><th>タスク</th><th>担当</th><th>内容</th></tr>"+
       rows(d.tasks.claimed,(t)=>"<tr><td class='warn'>作業中</td><td class='mono'>"+esc(t.id)+"</td><td class='mono'>"+esc(t.agent)+"</td><td class='dim'>"+esc(t.summary)+"</td></tr>")+
       rows(d.tasks.open,(t)=>"<tr><td class='dim'>未着手</td><td class='mono'>"+esc(t.id)+"</td><td></td><td class='dim'>"+esc(t.summary)+"</td></tr>")+"</table>"+
