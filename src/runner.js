@@ -15,7 +15,7 @@ import { UsageLedger } from "./engine/usage.js";
 import { OpenAIModel, FallbackModel } from "./model/openai.js";
 import { SpawnManager } from "./engine/spawn.js";
 import { ChatHost } from "./engine/chat.js";
-import { buildMemoryContext } from "./engine/memory.js";
+import { buildMemoryContext, ensurePcRules } from "./engine/memory.js";
 import { buildSkillsIndex } from "./engine/skills.js";
 import { McpHost } from "./engine/mcp.js";
 import { createWorkflowApi, runWorkflowScript } from "./engine/workflow.js";
@@ -41,6 +41,8 @@ export function createModelFactory(config) {
 // コントローラ { say(text, thread?), openThread, listThreads, manager } を返す。
 export async function runChat({ config, bus = new Bus(), modelFactory = null }) {
   mkdirSync(config.workspace, { recursive: true });
+  // PC操作の制限ルールをmemory/へシード(既存があれば触らない)。全エージェントに常時注入される
+  ensurePcRules(config.workspace);
   // チャットの永続化先(workspace/state/。git除外済み)。再起動後も会話を復帰できる
   const stateDir = join(config.workspace, "state");
   const mainBoard = new Board(bus, "__main__", join(stateDir, "board__main__.jsonl"));
@@ -324,6 +326,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
 
 export async function runScenario({ config, modelFactory, bus = new Bus() }) {
   mkdirSync(config.workspace, { recursive: true });
+  ensurePcRules(config.workspace);
   const board = new Board(bus);
   const tasks = new TaskBlackboard(config.workspace, bus);
   const gate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
