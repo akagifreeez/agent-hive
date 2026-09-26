@@ -11,19 +11,24 @@ import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
 import { setupWorktrees } from "./engine/worktree.js";
 import { runCommand } from "./engine/exec.js";
 import { UsageLedger } from "./engine/usage.js";
-import { OpenAIModel } from "./model/openai.js";
+import { OpenAIModel, FallbackModel } from "./model/openai.js";
 import { SpawnManager } from "./engine/spawn.js";
 import { ChatHost } from "./engine/chat.js";
 import { buildMemoryContext } from "./engine/memory.js";
 import { ROOT } from "./config.js";
 
 export function createModelFactory(config) {
-  return (agent = {}) =>
-    new OpenAIModel({
+  return (agent = {}) => {
+    const mk = (model, effort) => new OpenAIModel({
       ...config.model,
-      model: agent.model ?? config.model.model,
-      reasoningEffort: agent.reasoningEffort ?? config.model.reasoningEffort,
+      model: model ?? config.model.model,
+      reasoningEffort: effort ?? agent.reasoningEffort ?? config.model.reasoningEffort,
     });
+    const primary = agent.model ? mk(agent.model) : mk();
+    // フォールバック列(config.model.fallbackModels)があれば、終端エラー時に順に試す(ZCode model-selection流)
+    const fallbacks = (config.model.fallbackModels ?? []).map((m) => mk(m));
+    return fallbacks.length ? new FallbackModel({ primary, fallbacks }) : primary;
+  };
 }
 
 // メインチャット常駐モード(v6): リーダー1体がメインチャットで壁打ちと計画を担い、

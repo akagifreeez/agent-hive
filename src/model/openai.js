@@ -110,7 +110,11 @@ export class OpenAIModel {
   }
 }
 
-// SSEストリームの解析。delta.content/reasoning/tool_callsを累積し、断片をonDeltaへ流す
+// SSEストリームの解析。delta.content/reasoning/tool_callsを累積し、断片をonDeltaへ流す。
+// readがidleタイムアウト(ZCodeと同様既定600秒)を過ぎたら例外→chat()のリトライで最初からやり直す。
+function streamIdleTimeoutMs() {
+  return Number(process.env.HIVE_STREAM_IDLE_TIMEOUT_MS ?? 600_000);
+}
 async function consumeStream(res, onDelta) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -120,7 +124,7 @@ async function consumeStream(res, onDelta) {
   let usage = null;
   const toolAcc = new Map(); // index => {id, name, args}
   for (;;) {
-    const { done, value } = await reader.read();
+    const { done, value } = await readChunkWithIdleTimeout(reader);
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     let nl;
@@ -166,6 +170,52 @@ async function consumeStream(res, onDelta) {
     usage,
     rawToolCalls: toolCalls.map((t) => ({ id: t.id, type: "function", function: { name: t.name, arguments: JSON.stringify(t.arguments) } })),
   };
+}
+
+function readChunkWithIdleTimeout(reader) {
+  const idle = streamIdleTimeoutMs();
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`ストリームが${Math.round(idle / 1000)}秒間無出力です(stall)`)), idle);
+  });
+  return Promise.race([
+    reader.read().then((v) => {
+      clearTimeout(timer);
+      return v;
+    }),
+    timeout,
+  ]);
+}
+
+// 成功したモデルを記憶して固定するフェイルオーバー(ZCode model-selection流)。
+// primaryが終端エラー(retry使い切り等)のときだけfallbacksを順に試す。
+export class FallbackModel {
+  constructor({ primary, fallbacks = [] }) {
+    if (!primary) throw new Error("primaryモデルがありません");
+    this.primary = primary;
+    this.fallbacks = fallbacks;
+    this.current = primary;
+  }
+
+  get maxTokens() {
+    return this.current.maxTokens;
+  }
+
+  async chat(opts) {
+    const chain = [this.current, ...this.fallbacks.filter((f) => f !== this.current)];
+    let lastErr;
+    for (const m of chain) {
+      try {
+        const r = await m.chat(opts);
+        this.current = m;
+        return r;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    this.current = this.primary;
+    throw lastErr;
+  }
 }
 
 // ===== リトライ(ZCode adapters/model の移植) =====

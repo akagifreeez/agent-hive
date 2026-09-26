@@ -562,7 +562,44 @@ async function sendSay() {
   const text = el.value.trim();
   if (!text) return;
   el.value = "";
+  if (text.startsWith("/")) { handleCommand(text); return; }
   await fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, thread: selectedThread === "__main__" ? null : selectedThread }) });
+}
+
+// スラッシュコマンド: 入力欄からローカル操作(エージェントを起こさない)
+function handleCommand(text) {
+  const [cmd] = text.slice(1).split(/\s+/);
+  const post = (t) => {
+    const d = document.createElement("div");
+    d.className = "msg";
+    d.style.maxWidth = "100%";
+    d.innerHTML = `<div class="who">⌘ コマンド</div>`;
+    const body = document.createElement("div");
+    body.textContent = t;
+    d.appendChild(body);
+    $("stream").appendChild(d);
+    $("stream").scrollTop = $("stream").scrollHeight;
+  };
+  if (cmd === "help") {
+    post("/tasks 現在のタスク一覧\n/usage エージェント別の消費\n/threads スレッド一覧\n/help この一覧");
+  } else if (cmd === "tasks") {
+    if (!lastState) return post("まだ状態を取得していません");
+    const l = lastState.taskList;
+    const rows = [...l.open, ...l.claimed, ...l.done]
+      .filter((t) => selectedThread === "__main__" || (t.project || "") === selectedThread)
+      .map((t) => `${t.state}: ${t.id}${t.project ? ` (${t.project})` : ""}`);
+    post(rows.length ? rows.join("\n") : "タスクはありません");
+  } else if (cmd === "usage") {
+    if (!lastState) return post("まだ状態を取得していません");
+    const rows = Object.entries(lastState.live.agents).map(([id, a]) =>
+      `${a.displayName ?? id}: ${a.status} / ${a.tokens?.toLocaleString() ?? 0}tok / $${(a.costUsd ?? 0).toFixed(4)}`);
+    post(rows.length ? rows.join("\n") : "usageはまだありません");
+  } else if (cmd === "threads") {
+    const ts = lastState?.live.threads ?? [];
+    post(ts.map((t) => `${t.name} — ${t.goal}`).join("\n") || "開いているスレッドはありません");
+  } else {
+    post(`不明なコマンド: ${cmd}(/help で一覧)`);
+  }
 }
 
 /* ================= 全体描画 ================= */
