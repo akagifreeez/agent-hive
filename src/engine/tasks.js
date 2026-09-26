@@ -24,7 +24,7 @@ export class TaskBlackboard {
     if (existsSync(f)) return false;
     const meta = metaLines(project, role);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
-    this.bus?.emit("task.created", { taskId: id });
+    this.bus?.emit("task.created", { taskId: id, project: String(project ?? "") });
     return true;
   }
 
@@ -65,25 +65,34 @@ export class TaskBlackboard {
 
   // role一致を優先して請求(無ければrole指定なし)。opts.projectで文脈(プロジェクト)を絞れる——
   // 指定した文脈のタスクだけを請求対象にするので、別の取り組みのタスクと混ざらない。
+  // 文脈内に何も無い場合、発見器起票の共通仕事(fix-/review-/distill-)へだけフォールバックする
+  // (放置されると誰にも消化されないため。ユーザー/他プロジェクトのタスクは混ざらせない)。
   claim(agent, opts = {}) {
-    const all = readdirSync(this.open).filter((f) => f.endsWith(".md")).sort();
-    const files = opts.project ? all.filter((f) => readMeta(join(this.open, f)).project === opts.project) : all;
-    for (const pass of [(r) => r === agent.role, (r) => r === null]) {
-      for (const f of files) {
-        if (!pass(readMeta(join(this.open, f)).role)) continue;
-        const src = join(this.open, f);
-        const dst = join(this.claimed, `${agent.id}--${f}`);
-        try {
-          renameSync(src, dst);
-          const id = f.replace(/\.md$/, "");
-          this.bus?.emit("task.claimed", { agent: agent.id, taskId: id });
-          return { id, body: readFileSync(dst, "utf8") };
-        } catch {
-          // 先を越された。次の候補へ。
+    const attempt = (files) => {
+      for (const pass of [(r) => r === agent.role, (r) => r === null]) {
+        for (const f of files) {
+          if (!pass(readMeta(join(this.open, f)).role)) continue;
+          const src = join(this.open, f);
+          const dst = join(this.claimed, `${agent.id}--${f}`);
+          try {
+            renameSync(src, dst);
+            const id = f.replace(/\.md$/, "");
+            this.bus?.emit("task.claimed", { agent: agent.id, taskId: id });
+            return { id, body: readFileSync(dst, "utf8") };
+          } catch {
+            // 先を越された。次の候補へ。
+          }
         }
       }
-    }
-    return null;
+      return null;
+    };
+    const all = readdirSync(this.open).filter((f) => f.endsWith(".md")).sort();
+    const scoped = opts.project ? all.filter((f) => readMeta(join(this.open, f)).project === opts.project) : all;
+    const got = attempt(scoped);
+    if (got) return got;
+    if (!opts.project) return null;
+    const shared = all.filter((f) => /^(fix-|review-|distill-)/.test(f));
+    return attempt(shared);
   }
 
   finish(agent, taskId) {
