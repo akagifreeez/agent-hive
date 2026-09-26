@@ -467,34 +467,52 @@ export async function handleWtdiff({ mainWorkspace, worktreeRoot, agentId, limit
 // (exec/say等を公開しない)。unref付きなのでプロセス寿命には関与しない。
 export function buildMonitorSnapshot({ config, live, tasks, startedAt }) {
   const list = tasks.list();
+  const all = [...list.open, ...list.claimed, ...list.done];
   const prog = (project) => {
-    const all = [...list.open, ...list.claimed, ...list.done].filter((t) => (t.project || "") === project);
-    return { total: all.length, done: all.filter((t) => t.state === "done").length };
+    const inP = all.filter((t) => (t.project || "") === project);
+    return { total: inP.length, done: inP.filter((t) => t.state === "done").length };
   };
+  const claimedIn = {};
+  for (const t of list.claimed) {
+    const k = t.project || "";
+    claimedIn[k] = (claimedIn[k] ?? 0) + 1;
+  }
+  const agents = Object.entries(live.agents).map(([id, a]) => ({
+    id,
+    displayName: a.displayName ?? id,
+    thread: a.thread ?? "__main__",
+    status: a.status ?? "idle",
+    turn: a.turn ?? 0,
+    lastTool: a.lastTool ?? "",
+    tokens: a.tokens ?? 0,
+    costUsd: a.costUsd ?? 0,
+  }));
+  const agentsWorking = agents.filter((a) => a.status === "working").length;
+  const lastAt = live.board.reduce((m, p) => Math.max(m, p.at ?? 0), 0);
+  const phase = (list.open.length + list.claimed.length > 0 || agentsWorking > 0) ? "working" : (list.done.length > 0 ? "done" : "idle");
   return {
     at: new Date().toISOString(),
     uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
     model: config.model.model,
     permMode: live.permMode,
     posts: live.board.length,
-    threads: (live.threads ?? []).map((t) => ({ name: t.name, folder: t.folder ?? null, goal: t.goal ?? "", ...prog(t.name) })),
+    phase,
+    lastActivitySec: lastAt ? Math.floor((Date.now() - lastAt) / 1000) : null,
+    totalTasks: all.length,
+    threads: (live.threads ?? []).map((t) => {
+      const pr = prog(t.name);
+      const claimed = claimedIn[t.name] ?? 0;
+      const state = pr.total > 0 && pr.done === pr.total ? "done" : (pr.done + claimed > 0 ? "working" : (pr.total > 0 ? "waiting" : "idle"));
+      return { name: t.name, folder: t.folder ?? null, goal: t.goal ?? "", claimed, state, percent: pr.total ? Math.round((pr.done / pr.total) * 100) : 0, ...pr };
+    }),
     tasks: {
       open: list.open.map((t) => ({ id: t.id, project: t.project ?? "", summary: t.summary })),
       claimed: list.claimed.map((t) => ({ id: t.id, project: t.project ?? "", agent: t.agent ?? "", summary: t.summary })),
       doneCount: list.done.length,
     },
-    agents: Object.entries(live.agents).map(([id, a]) => ({
-      id,
-      displayName: a.displayName ?? id,
-      thread: a.thread ?? "__main__",
-      status: a.status ?? "idle",
-      turn: a.turn ?? 0,
-      lastTool: a.lastTool ?? "",
-      tokens: a.tokens ?? 0,
-      costUsd: a.costUsd ?? 0,
-    })),
+    agents,
     merges: (live.merges ?? []).slice(0, 10).map((m) => ({ taskId: m.taskId, agent: m.agent, summary: m.summary ?? "" })),
-    recent: live.board.slice(-30).map((p) => ({ from: p.from, thread: p.thread ?? "__main__", text: String(p.text).slice(0, 200) })),
+    recent: live.board.slice(-30).map((p) => ({ from: p.from, thread: p.thread ?? "__main__", text: String(p.text).slice(0, 200), at: p.at ?? null })),
   };
 }
 
@@ -504,7 +522,7 @@ async function startMonitor({ config, live, tasks, startedAt }) {
 <style>
   body{margin:0;background:#161617;color:#eaeaea;font-family:system-ui,"Segoe UI","Meiryo","Noto Sans JP",sans-serif;font-size:13px;line-height:1.45}
   header{padding:10px 16px;border-bottom:1px solid #2c2c31;display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;background:#1d1d1f}
-  h1{font-size:15px;margin:0}.accent{color:#f5a35b}.sub{color:#a3a3a8;font-size:12px}
+  h1{font-size:15px;margin:0}.accent{color:#f5a35b}.ph{font-size:16px;font-weight:700}.bar{height:6px;background:#26262a;border-radius:3px;width:90px;display:inline-block;vertical-align:middle;margin-right:6px}.bar i{display:block;height:100%;background:#f5a35b;border-radius:3px}.sub{color:#a3a3a8;font-size:12px}
   main{padding:12px 16px;max-width:1100px;margin:0 auto}
   h2{font-size:11px;color:#6e6e73;margin:16px 0 6px;font-weight:600}
   table{width:100%;border-collapse:collapse;font-size:12px}
@@ -515,7 +533,7 @@ async function startMonitor({ config, live, tasks, startedAt }) {
   .board div{padding:3px 0;border-bottom:1px solid #1d1d1f;color:#a3a3a8;white-space:pre-wrap;word-break:break-word}
   .board b{color:#eaeaea;font-weight:600}
 </style></head><body>
-<header><h1>agent-hive <span class="accent">monitor</span></h1><span class="sub" id="meta">読み込み中...</span><span class="sub">読み取り専用・3秒ごとに更新</span></header>
+<header><h1>agent-hive <span class="accent">monitor</span></h1><span id="phase" class="ph"></span><span class="sub" id="meta">読み込み中...</span><span class="sub">読み取り専用・3秒ごとに更新</span></header>
 <main id="body"></main>
 <script>
 const esc=(s)=>String(s??"").replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -524,15 +542,20 @@ const hue=(s)=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))%360;re
 async function tick(){
   try{
     const d=await (await fetch("/api/monitor")).json();
-    document.getElementById("meta").textContent="model: "+d.model+" / perm:"+esc(d.permMode)+" / 稼働 "+Math.floor(d.uptimeSec/60)+"分"+(d.uptimeSec%60)+"秒 / 投稿 "+d.posts+"件";
+    const ph={working:["作業中","#fbbf24"],done:["完了","#86efac"],idle:["待機","#6e6e73"]}[d.phase]||["?","#6e6e73"];
+    const remain=d.tasks.open.length+d.tasks.claimed.length;
+    const pe=document.getElementById("phase");
+    pe.textContent=ph[0]+(d.phase==="working"?"(残り"+remain+"件)":"");
+    pe.style.color=ph[1];
+    document.getElementById("meta").textContent="model: "+d.model+" / perm:"+esc(d.permMode)+" / 稼働 "+Math.floor(d.uptimeSec/60)+"分"+(d.uptimeSec%60)+"秒 / 投稿 "+d.posts+"件"+(d.lastActivitySec!=null?" / 最終活動 "+(d.lastActivitySec<60?d.lastActivitySec+"秒前":Math.floor(d.lastActivitySec/60)+"分前"):"");
     document.getElementById("body").innerHTML=
-      "<h2>スレッド</h2><table><tr><th>名前</th><th>フォルダ</th><th>進捗</th><th>目標</th></tr>"+
-      (rows(d.threads,(t)=>"<tr><td class='mono'># "+esc(t.name)+"</td><td>"+esc(t.folder??"")+"</td><td class='mono'>"+t.done+"/"+t.total+"</td><td class='dim'>"+esc(t.goal)+"</td></tr>")||"<tr><td colspan='4' class='dim'>開いているスレッドはありません</td></tr>")+"</table>"+
+      "<h2>スレッド</h2><table><tr><th>状態</th><th>名前</th><th>フォルダ</th><th>進捗</th><th>目標</th></tr>"+
+      (rows(d.threads,(t)=>{const st={done:["完了","#86efac"],working:["作業中","#fbbf24"],waiting:["未着手","#a3a3a8"],idle:["—","#6e6e73"]}[t.state]||["—","#6e6e73"];return "<tr><td style='color:"+st[1]+"'>"+st[0]+"</td><td class='mono'># "+esc(t.name)+"</td><td>"+esc(t.folder??"")+"</td><td><div class='bar'><i style='width:"+t.percent+"%'></i></div><span class='dim mono'>"+t.done+"/"+t.total+"</span></td><td class='dim'>"+esc(t.goal)+"</td></tr>";})||"<tr><td colspan='5' class='dim'>開いているスレッドはありません</td></tr>")+"</table>"+
       "<h2>タスク(未着手 "+d.tasks.open.length+" / 作業中 "+d.tasks.claimed.length+" / 完了 "+d.tasks.doneCount+")</h2><table><tr><th>状態</th><th>タスク</th><th>担当</th><th>内容</th></tr>"+
       rows(d.tasks.claimed,(t)=>"<tr><td class='warn'>作業中</td><td class='mono'>"+esc(t.id)+"</td><td class='mono'>"+esc(t.agent)+"</td><td class='dim'>"+esc(t.summary)+"</td></tr>")+
       rows(d.tasks.open,(t)=>"<tr><td class='dim'>未着手</td><td class='mono'>"+esc(t.id)+"</td><td></td><td class='dim'>"+esc(t.summary)+"</td></tr>")+"</table>"+
       "<h2>エージェント</h2><table><tr><th>名前</th><th>状態</th><th>turn</th><th>直近ツール</th><th>消費</th><th>スレッド</th></tr>"+
-      (rows(d.agents,(a)=>"<tr><td style='color:hsl("+hue(a.id)+" 45% 72%)'>"+esc(a.displayName)+"</td><td>"+esc(a.status)+"</td><td class='mono'>"+a.turn+"</td><td class='mono'>"+esc(a.lastTool)+"</td><td class='mono'>"+a.tokens.toLocaleString()+"tok</td><td class='mono'>"+esc(a.thread)+"</td></tr>")||"<tr><td colspan='6' class='dim'>稼働中のエージェントはいません</td></tr>")+"</table>"+
+      (rows(d.agents,(a)=>{const st={idle:["待機","#a3a3a8"],working:["作業中","#fbbf24"],done:["完了","#86efac"],error:["エラー","#fca5a5"],"budget-stop":["停止","#fca5a5"]}[a.status]||[esc(a.status),"#a3a3a8"];return "<tr><td style='color:hsl("+hue(a.id)+" 45% 72%)'>"+esc(a.displayName)+"</td><td style='color:"+st[1]+"'>"+st[0]+"</td><td class='mono'>"+a.turn+"</td><td class='mono'>"+esc(a.lastTool)+"</td><td class='mono'>"+a.tokens.toLocaleString()+"tok</td><td class='mono'>"+esc(a.thread)+"</td></tr>";})||"<tr><td colspan='6' class='dim'>稼働中のエージェントはいません</td></tr>")+"</table>"+
       "<h2>直近のマージ</h2><div class='board'>"+(rows(d.merges,(m)=>"<div><b class='mono'>"+esc(m.taskId)+"</b> <span class='accent'>"+esc(m.summary)+"</span> <span class='dim'>by "+esc(m.agent)+"</span></div>")||"<div class='dim'>まだありません</div>")+"</div>"+
       "<h2>ボードの新着(全スレッド・直近30件)</h2><div class='board'>"+rows(d.recent.slice().reverse(),(p)=>"<div><b style='color:hsl("+hue(p.from)+" 45% 72%)'>"+esc(p.from)+"</b> <span class='mono dim'>@"+esc(p.thread)+"</span> "+esc(p.text)+"</div>")+"</div>";
   }catch(e){ document.getElementById("body").textContent="取得に失敗: "+e.message; }
