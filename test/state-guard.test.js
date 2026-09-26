@@ -1,7 +1,7 @@
 // state/へのエンジン書き込みを禁じるハードガードの検証
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Board, Bus } from "../src/engine/board.js";
@@ -37,6 +37,7 @@ test("edit_file: state/ 配下のファイルは編集できない", async () =>
   const ws = mktmp();
   const tools = makeTools(ws);
   const dir = join(ws, "state");
+  mkdirSync(dir, { recursive: true });
   const file = join(dir, "threads.json");
   writeFileSync(file, '{"threads":{}}');
   const r = await tools.execute("edit_file", { path: "state/threads.json", old_text: "{}", new_text: "X" });
