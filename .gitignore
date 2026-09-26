@@ -9,3 +9,4 @@ hive.local.json
 *.log
 .env
 smoke-result.txt
+memory/.distilled
