@@ -21,7 +21,7 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
-export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null }) {
   const live = {
     // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
     // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
@@ -65,6 +65,12 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     "compact.failed": (p) => pushAgentLog(live.agents[p.agent], "compact", `圧縮失敗(${p.failures}回目): ${p.error}`),
     "agent.spawned": (p) => {
       live.agents[p.agent.id] = { status: "working", turn: 0, displayName: p.agent.displayName, depth: p.agent.depth, parent: p.agent.parent, thread: live.agents[p.agent.parent]?.thread ?? "__main__" };
+    },
+    "thread.closed": (p) => {
+      live.threads = live.threads.filter((t) => t.name !== p.name);
+      for (const [id, a] of Object.entries(live.agents)) {
+        if (id.startsWith(p.name + "-") || id === p.name) delete live.agents[id];
+      }
     },
     "thread.opened": (p) => {
       live.threads.push({ name: p.name, goal: p.goal });
@@ -140,7 +146,37 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
-      if (url.pathname === "/api/state") return json(res, { live, tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace) });
+      if (url.pathname === "/api/state") return json(res, { live, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace) });
+      if (url.pathname === "/api/thread" && req.method === "POST" && onThread) {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const { project, goal } = JSON.parse(body);
+            const r = onThread({ project: String(project ?? ""), goal: String(goal ?? "") });
+            if (r.error) throw new Error(r.error);
+            json(res, { ok: true, id: r.id });
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/close" && req.method === "POST" && onCloseThread) {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const { project } = JSON.parse(body);
+            const r = onCloseThread({ project: String(project ?? "") });
+            if (r.error) throw new Error(r.error);
+            json(res, { ok: true });
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/tasks" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));

@@ -183,6 +183,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     if (!t) return { error: `スレッド ${name} は開いていません` };
     threads.delete(name);
     writeRegistry();
+    bus.emit("thread.closed", { name });
     t.board.post("system", `[スレッド終了] ${name} を閉じました。成果物とログは保持されています(再open時は履歴ごと戻ります)。`);
     return { ok: true };
   };
