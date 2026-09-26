@@ -144,6 +144,46 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       },
     },
     {
+      name: "web_search",
+      description: "Web検索を行い、タイトルとURLの一覧を返す。本文を読むには web_fetch を併用する。",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "検索語" },
+          max_results: { type: "number", description: "最大件数(既定8)" },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "search_files",
+      description: "ワークスペース内を正規表現で全文検索し、file:行: 一致行を返す。glob(例: *.mjs)で対象ファイルを絞れる。",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: { type: "string", description: "正規表現" },
+          glob: { type: "string", description: "対象ファイルのパターン(例: *.mjs、src/**/*.js)" },
+          max_results: { type: "number", description: "最大一致数(既定50)" },
+        },
+        required: ["pattern"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "glob_files",
+      description: "ワークスペース内のファイルを glob パターン(例: src/**/*.js、*.md)で一覧する。",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: { type: "string", description: "globパターン" },
+          max_results: { type: "number", description: "最大件数(既定100)" },
+        },
+        required: ["pattern"],
+        additionalProperties: false,
+      },
+    },
+    {
       name: "close_thread",
       description: "サブスレッドを閉じる(リーダー専用)。スレッド一覧から外れ、ワーカーは新規の起床を止める。成果物・タスク履歴・会話ログは消えない。",
       parameters: {
@@ -321,6 +361,73 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           return { ok: false, text: `取得エラー: ${err.message}` };
         }
       }
+      case "web_search": {
+        const query = String(args.query ?? "").trim();
+        if (!query) return { ok: false, text: "queryが空です。" };
+        const maxN = clamp(Number(args.max_results ?? 8), 1, 20);
+        // 既定はDuckDuckGo(HTML)。HIVE_SEARCH_URLで {query} 入りのテンプレートに差し替え可
+        const template = process.env.HIVE_SEARCH_URL || "https://html.duckduckgo.com/html/?q={query}";
+        const url = template.replace("{query}", encodeURIComponent(query));
+        try {
+          const res = await fetch(url, { signal: AbortSignal.timeout(20000), headers: { "user-agent": "agent-hive/1.0" }, redirect: "follow" });
+          const html = await res.text();
+          if (!res.ok) return { ok: false, text: `HTTP ${res.status}: ${html.slice(0, 300)}` };
+          const results = [];
+          const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+          let m;
+          while ((m = re.exec(html)) && results.length < maxN) {
+            let href = m[1];
+            const uddg = href.match(/[?&]uddg=([^&]+)/);
+            if (uddg) {
+              try { href = decodeURIComponent(uddg[1]); } catch {}
+            }
+            const title = decodeEntities(m[2].replace(/<[^>]*>/g, "")).trim();
+            if (title && /^https?:\/\//.test(href)) results.push(`[${results.length + 1}] ${title}\n    ${href}`);
+          }
+          if (!results.length) return { ok: true, text: `検索結果が取得できませんでした(${query})。語を変えるか web_fetch を試してください。` };
+          return { ok: true, text: `検索: ${query}(${results.length}件)\n\n${results.join("\n")}` };
+        } catch (err) {
+          return { ok: false, text: `検索エラー: ${err.message}` };
+        }
+      }
+      case "search_files": {
+        const pattern = String(args.pattern ?? "");
+        let re;
+        try {
+          re = new RegExp(pattern, "i");
+        } catch (err) {
+          return { ok: false, text: `patternが不正です: ${err.message}` };
+        }
+        const maxN = clamp(Number(args.max_results ?? 50), 1, 500);
+        const rels = listWorkspaceFiles(workspace);
+        const gRe = args.glob ? globToRegex(String(args.glob)) : null;
+        const out = [];
+        for (const rel of rels) {
+          if (out.length >= maxN) break;
+          if (gRe && !gRe.test(rel)) continue;
+          const file = join(workspace, rel);
+          let src;
+          try {
+            if (statSync(file, { throwIfNoEntry: false })?.size > 512 * 1024) continue;
+            src = readFileSync(file, "utf8");
+          } catch {
+            continue;
+          }
+          const lines = src.split("\n");
+          for (let i = 0; i < lines.length && out.length < maxN; i++) {
+            if (re.test(lines[i])) out.push(`${rel}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+          }
+        }
+        if (!out.length) return { ok: true, text: `一致なし(${pattern})` };
+        return { ok: true, text: `${out.length}件一致:\n${out.join("\n")}` };
+      }
+      case "glob_files": {
+        const gRe = globToRegex(String(args.pattern ?? "*"));
+        const maxN = clamp(Number(args.max_results ?? 100), 1, 500);
+        const files = listWorkspaceFiles(workspace).filter((f) => gRe.test(f)).slice(0, maxN);
+        if (!files.length) return { ok: true, text: `一致するファイルはありません(${args.pattern})` };
+        return { ok: true, text: files.join("\n") };
+      }
       case "list_files": {
         const files = listWorkspaceFiles(safePath(args.path ?? "."));
         return { ok: true, text: files.length ? files.join("\n") : "(空)" };
@@ -397,6 +504,38 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
 
 function clamp(n, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
+}
+
+// glob(例: *.mjs、src/**/*.js)を正規表現へ。** は任意の深さ、* はパス区切りをまたがない
+function globToRegex(glob) {
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        re += "(?:.*)";
+        i++;
+        if (glob[i + 1] === "/") i++;
+      } else {
+        re += "[^/]*";
+      }
+    } else if ("\\^$.|?()+[]{}".includes(c)) {
+      re += "\\" + c;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`(?:^|/)${re}$`, "i");
+}
+
+function decodeEntities(s) {
+  return String(s)
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;|&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
 }
 
 // ワークスペースのファイル一覧(UI共用)。node_modulesと隠しファイルは除外。
