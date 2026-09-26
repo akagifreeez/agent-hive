@@ -135,6 +135,9 @@
   .loadmore { align-self: center; font-size: 12px; color: var(--accent); cursor: pointer; padding: 6px 14px; border-radius: 4px; }
   .loadmore:hover { background: var(--fill); }
   .folder-h { font-size: 10px; color: var(--label-tertiary); padding: 8px 8px 2px; font-weight: 600; }
+  .room-folder-btn { margin-left: auto; background: none; border: none; color: var(--label-tertiary); cursor: pointer; font-size: 10px; padding: 0 3px; opacity: 0; flex-shrink: 0; }
+  .room:hover .room-folder-btn { opacity: 1; }
+  .room-folder-btn:hover { color: var(--accent); }
 
   #composer { border-top: 1px solid var(--separator); padding: 10px 16px 12px; background: var(--bg-elevated); position: relative; box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.14); }
   #suggest { position: absolute; bottom: 100%; left: 16px; right: 16px; background: var(--bg-elevated); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: var(--shadow-overlay); max-height: 240px; overflow-y: auto; z-index: 5; }
@@ -338,6 +341,22 @@ function renderNav(threads) {
       expandedMerges.clear();
       renderAll();
     };
+    if (t.id !== "__main__" && t.name) {
+      const fb = document.createElement("button");
+      fb.className = "room-folder-btn";
+      fb.title = "フォルダを編集";
+      fb.textContent = "編";
+      fb.onclick = async (e) => {
+        e.stopPropagation();
+        const cur = (lastState?.live.threads ?? []).find((x) => x.name === t.id)?.folder ?? "";
+        const v = await askText({ title: "フォルダを編集", label: `#${t.id} のフォルダ(空欄で未分類)`, value: cur, ok: "保存" });
+        if (v === null) return;
+        const r = await (await fetch("/api/folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: t.id, folder: v }) })).json();
+        if (r.error) toast(r.error);
+        else refreshState();
+      };
+      d.appendChild(fb);
+    }
     parent.appendChild(d);
   };
   const mainBox = $("nav-main");
