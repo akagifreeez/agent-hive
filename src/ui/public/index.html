@@ -411,7 +411,7 @@ function renderNav(threads) {
   // メインはスレッド一覧から分離してナビ最上部の独立セクションに置く
   const all = (threads ?? []).filter((t) => t.name !== "__main__");
   const q = navQuery.trim().toLowerCase();
-  const ths = q ? all.filter((t) => t.name.toLowerCase().includes(q) || (t.goal ?? "").toLowerCase().includes(q)) : all;
+  const ths = q ? all.filter((t) => t.name.toLowerCase().includes(q) || (t.goal ?? "").toLowerCase().includes(q) || (t.folder ?? "").toLowerCase().includes(q)) : all;
   $("nav-thread-label").textContent = `スレッド${all.length ? ` (${ths.length}/${all.length})` : ""}`;
   const makeRoom = (parent, t) => {
     const d = document.createElement("div");
