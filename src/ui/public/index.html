@@ -5,48 +5,60 @@
 <title>agent-hive</title>
 <script src="/markdown.js"></script>
 <style>
-  /* apple-hig-ui トークン(light既定+dark)。コンポーネントは変数のみ参照しhexを直書きしない */
+  /* ZCode TUIテーマ(dark既定)。apps/zcode-cli/packages/tui/src/theme/defaults.ts のパレットを採用 */
   :root {
-    color-scheme: light dark;
-    --bg: #f5f5f7;
-    --bg-elevated: #ffffff;
-    --label: rgba(0, 0, 0, 0.85);
-    --label-secondary: rgba(60, 60, 67, 0.60);
-    --label-tertiary: rgba(60, 60, 67, 0.30);
-    --separator: rgba(60, 60, 67, 0.18);
-    --fill: rgba(120, 120, 128, 0.12);
-    --fill-strong: rgba(120, 120, 128, 0.20);
-    --accent: #0071e3;
-    --accent-fill: rgba(0, 113, 227, 0.10);
-    --ok: #34c759; --warn: #ff9f0a; --err: #ff3b30;
-    --radius-control: 8px;
-    --radius-container: 12px;
+    color-scheme: dark;
+    --bg: #0f1419;
+    --panel: #161b22;
+    --panel2: #1f2937;
+    --line: #26313d;
+    --line-strong: #3b4450;
+    --label: #e5e7eb;
+    --label-secondary: #94a3b8;
+    --label-tertiary: #6b7684;
+    --separator: #26313d;
+    --fill: rgba(125, 211, 252, 0.08);
+    --fill-strong: rgba(125, 211, 252, 0.16);
+    --accent: #7dd3fc;
+    --accent-fill: rgba(125, 211, 252, 0.10);
+    --accent-strong: #7dd3fc;
+    --ok: #86efac; --warn: #fbbf24; --err: #fca5a5; --info: #93c5fd; --violet: #c4b5fd;
+    --usermsg-bg: #30363d;
+    --radius-control: 4px;
+    --radius-container: 6px;
+    --bg-elevated: #161b22;
+    --sub: #94a3b8;
+    --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.50);
     --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
-    --duration: 200ms;
+    --duration: 150ms;
   }
-  @media (prefers-color-scheme: dark) {
+  @media (prefers-color-scheme: light) {
     :root {
-      --bg: #1e1e20;
-      --bg-elevated: #2a2a2d;
-      --label: rgba(255, 255, 255, 0.85);
-      --label-secondary: rgba(235, 235, 245, 0.60);
-      --label-tertiary: rgba(235, 235, 245, 0.30);
-      --separator: rgba(255, 255, 255, 0.12);
-      --fill: rgba(120, 120, 128, 0.24);
-      --fill-strong: rgba(120, 120, 128, 0.32);
-      --accent: #0a84ff;
-      --accent-fill: rgba(10, 132, 255, 0.16);
-      --ok: #30d158; --warn: #ffd60a; --err: #ff453a;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --panel2: #e2e8f0;
+      --line: #d0d7de;
+      --line-strong: #afb8c1;
+      --label: #1f2328;
+      --label-secondary: #656d76;
+      --label-tertiary: #8b949e;
+      --separator: #d0d7de;
+      --fill: rgba(9, 105, 218, 0.08);
+      --fill-strong: rgba(9, 105, 218, 0.14);
+      --accent: #0969da;
+      --accent-fill: rgba(9, 105, 218, 0.08);
+      --ok: #1a7f37; --warn: #9a6700; --err: #cf222e; --info: #0969da; --violet: #8250df;
+      --usermsg-bg: #e0f2fe;
     }
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; height: 100vh; overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", "Noto Sans Mono CJK JP", "Meiryo", monospace;
     background: var(--bg); color: var(--label);
     display: grid; grid-template-columns: 230px 1fr 360px;
-    grid-template-rows: minmax(0, 1fr); /* 行をコンテンツサイズに任せると縦が無限に伸びてスクロール不能になる */
-    font-size: 15px;
+    grid-template-rows: minmax(0, 1fr);
+    font-size: 13px; line-height: 1.5;
   }
 
   /* ============ 左: ナビ ============ */
@@ -218,6 +230,7 @@ const COMMANDS = {
 };
 let customCommands = {};
 let uiEffort = null;
+let uiModelName = null;
 let selectedAgent = null;
 let ctxTab = "tasks";
 let projectFilter = "";
@@ -702,7 +715,7 @@ async function handleCommand(text) {
       post(`モデル: ${m?.name ?? "(不明)"}\n思考レベル: ${e ?? lastState?.live.modelEffort ?? "config値"}\nフォールバック: ${m?.fallbacks?.join(" → ") || "なし"}\n\n変更: /model <名前> / /effort <low|medium|high>`);
     } else {
       const r = await (await fetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: args[0] }) })).json();
-      if (!r.error) uiEffort = null;
+      if (!r.error) { uiEffort = null; uiModelName = r.model; }
       post(r.error ? `エラー: ${r.error}` : `モデルを ${r.model} に変更しました(次のラウンドから)`);
     }
   } else if (cmd === "effort") {
@@ -735,7 +748,11 @@ function renderAll() {
   renderStream(lastState);
   renderPerms(lastState.live.requests);
   renderCtx(lastState);
-  $("nav-foot").textContent = lastState.live.scenario ? `${lastState.live.scenario.name} [${lastState.live.scenario.phase}]` : "";
+  const permTxt = lastState.live.permMode === "auto" ? "perm:auto" : "perm:normal";
+  const effTxt = uiEffort ? `effort:${uiEffort}` : null;
+  const mdl = uiModelName ?? lastState.model?.name ?? "";
+  const bits = [mdl, effTxt, permTxt, lastState.live.scenario ? `[${lastState.live.scenario.phase}]` : null].filter(Boolean);
+  $("nav-foot").textContent = bits.join(" · ");
 }
 
 async function refresh() {
