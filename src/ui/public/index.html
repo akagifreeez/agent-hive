@@ -5,28 +5,29 @@
 <title>agent-hive</title>
 <script src="/markdown.js"></script>
 <style>
-  /* 構造はDiscord、素材はZCode TUI(ダークパレットは維持)。
+  /* 構造はDiscord、色は黒灰基調+細部のオレンジアクセントのみ。
      設計上の要点: UIはサンセリフ/等幅はログ・ID・コードのみ、絵文字は使わない、
      案内文は書かずhoverと色で示す、サイズは11/12/13/15の4段階 */
   :root {
     color-scheme: dark;
-    --bg: #0f1419;
-    --panel: #161b22;
-    --panel2: #1f2937;
-    --line: #26313d;
-    --line-strong: #3b4450;
-    --label: #e5e7eb;
-    --label-secondary: #94a3b8;
-    --label-tertiary: #6b7684;
-    --separator: #26313d;
-    --fill: rgba(125, 211, 252, 0.08);
-    --fill-strong: rgba(125, 211, 252, 0.16);
-    --accent: #7dd3fc;
-    --accent-fill: rgba(125, 211, 252, 0.10);
-    --ok: #86efac; --warn: #fbbf24; --err: #fca5a5; --info: #93c5fd; --violet: #c4b5fd;
-    --bg-elevated: #161b22;
-    --sub: #94a3b8;
-    --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.50);
+    --bg: #161617;
+    --panel: #1d1d1f;
+    --panel2: #262629;
+    --line: #2b2b2f;
+    --line-strong: #3b3b41;
+    --label: #e9e9ea;
+    --label-secondary: #9d9da2;
+    --label-tertiary: #6e6e73;
+    --separator: #2b2b2f;
+    --fill: rgba(255, 255, 255, 0.05);
+    --fill-strong: rgba(255, 255, 255, 0.09);
+    --accent: #e8924a;
+    --accent-fill: rgba(232, 146, 74, 0.12);
+    --accent-contrast: #1c1208;
+    --ok: #86efac; --warn: #fbbf24; --err: #fca5a5;
+    --bg-elevated: #1d1d1f;
+    --sub: #9d9da2;
+    --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.55);
     --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
     --duration: 150ms;
     --font-ui: system-ui, "Segoe UI", "Meiryo", "Noto Sans JP", sans-serif;
@@ -34,21 +35,23 @@
   }
   @media (prefers-color-scheme: light) {
     :root {
-      --bg: #f8fafc;
+      --bg: #f6f6f7;
       --panel: #ffffff;
-      --panel2: #e2e8f0;
-      --line: #d0d7de;
-      --line-strong: #afb8c1;
-      --label: #1f2328;
-      --label-secondary: #656d76;
-      --label-tertiary: #8b949e;
-      --separator: #d0d7de;
-      --fill: rgba(9, 105, 218, 0.08);
-      --fill-strong: rgba(9, 105, 218, 0.14);
-      --accent: #0969da;
-      --accent-fill: rgba(9, 105, 218, 0.08);
-      --ok: #1a7f37; --warn: #9a6700; --err: #cf222e; --info: #0969da; --violet: #8250df;
+      --panel2: #ececee;
+      --line: #e3e3e5;
+      --line-strong: #c4c4c8;
+      --label: #212124;
+      --label-secondary: #6d6d72;
+      --label-tertiary: #939398;
+      --separator: #e2e2e4;
+      --fill: rgba(0, 0, 0, 0.05);
+      --fill-strong: rgba(0, 0, 0, 0.09);
+      --accent: #b45309;
+      --accent-fill: rgba(180, 83, 9, 0.10);
+      --accent-contrast: #ffffff;
+      --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
       --bg-elevated: #ffffff;
+      --sub: #6d6d72;
     }
   }
   * { box-sizing: border-box; }
@@ -64,7 +67,7 @@
 
   .btn { background: var(--fill); border: none; color: var(--label); border-radius: 4px; padding: 4px 12px; font-size: 12px; font-family: var(--font-ui); cursor: pointer; transition: background var(--duration) var(--ease); }
   .btn:hover { background: var(--fill-strong); }
-  .btn.primary { background: var(--accent); color: #0f1419; font-weight: 600; }
+  .btn.primary { background: var(--accent); color: var(--accent-contrast); font-weight: 600; }
   .btn.primary:hover { filter: brightness(1.08); }
 
   /* ============ 左: ナビ ============ */
@@ -77,7 +80,7 @@
   .room.active { background: var(--fill-strong); box-shadow: inset 2px 0 0 var(--accent); }
   .room .sub { display: block; font-size: 11px; color: var(--label-tertiary); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .room.active .sub { color: var(--label-secondary); }
-  .badge { position: absolute; right: 8px; top: 6px; background: var(--err); color: #0f1419; border-radius: 8px; font-size: 10px; font-weight: 700; padding: 0 5px; }
+  .badge { position: absolute; right: 8px; top: 6px; background: var(--err); color: var(--accent-contrast); border-radius: 8px; font-size: 10px; font-weight: 700; padding: 0 5px; }
   #nav .foot { margin-top: auto; font-size: 11px; color: var(--label-tertiary); padding: 8px; }
 
   /* ============ 中央: 会話 ============ */
@@ -170,9 +173,8 @@
   .alog .entry { padding: 3px 0; border-bottom: 1px solid var(--separator); white-space: pre-wrap; word-break: break-word; }
   .alog .entry:last-child { border-bottom: none; }
   .alog .entry .k { display: inline-block; min-width: 38px; margin-right: 6px; color: var(--label-tertiary); font-size: 10px; }
-  .alog .entry.think .k { color: var(--violet); }
+  .alog .entry.think .k { color: var(--label-tertiary); }
   .alog .entry.say .k { color: var(--accent); }
-  .alog .entry.tool .k { color: var(--info); }
   .alog .entry.think .txt { color: var(--label-secondary); }
   .alog .entry.say .txt { color: var(--label); }
   .alog .entry.tool .txt, .alog .entry.result .txt { color: var(--label-secondary); }
