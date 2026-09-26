@@ -308,7 +308,9 @@ function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 function renderRooms() {
   const el = $("rooms");
   el.innerHTML = "";
-  for (const r of S.rooms) {
+  const q = searchQuery.trim().toLowerCase();
+  const match = (r) => !q || r.name.toLowerCase().includes(q) || (r.goal || "").toLowerCase().includes(q);
+  const makeRoom = (r) => {
     const t = S.tasks[r.id];
     const prog = t ? `${t.filter((x) => x.st === "done").length}/${t.length} 完了` : "";
     const unread = r.unread ?? 0;
@@ -318,6 +320,20 @@ function renderRooms() {
     if (unread) { const b = document.createElement("span"); b.className = "badge"; b.textContent = unread; d.appendChild(b); }
     d.onclick = () => { sel = r.id; r.unread = 0; render(); };
     el.appendChild(d);
+  };
+  // メインはスレッド一覧から分離して最上部の独立セクションに置く
+  const main = S.rooms.find((r) => r.id === "__main__");
+  if (main && match(main)) makeRoom(main);
+  const ths = S.rooms.filter((r) => r.id !== "__main__" && match(r));
+  if (q) { for (const r of ths) makeRoom(r); return; }
+  const groups = {};
+  for (const r of ths) (groups[r.folder || "未分類"] ??= []).push(r);
+  for (const [f, rs] of Object.entries(groups).sort(([a], [b]) => a.localeCompare(b, "ja"))) {
+    const h = document.createElement("div");
+    h.className = "folder-h";
+    h.textContent = f;
+    el.appendChild(h);
+    for (const r of rs) makeRoom(r);
   }
 }
 
