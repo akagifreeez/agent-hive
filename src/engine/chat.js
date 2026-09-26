@@ -48,6 +48,18 @@ export class ChatHost {
     for (const m of mains) this.seen.set(m.id, board.lastId());
     // ボード上の@表示名でメインを起こす(横つながりの入口)
     bus.on("board", (p) => this.handleBoardPost(p));
+    // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
+    // これがないと全員退出後の発見器起票タスクが誰にも消化されない。
+    bus.on("task.created", (p) => this.handleTaskCreated(p));
+  }
+
+  // 新タスク投入時の起床: 自分のprojectのタスク、または全スレッド共通の自動仕事(fix/review/distill)のみ
+  handleTaskCreated({ taskId, project }) {
+    if (this.project && (project === this.project || /^(fix-|review-|distill-)/.test(taskId))) {
+      for (const m of this.mains) {
+        this.wake(m, `[システム] 新しいタスク ${taskId} が投入されました。claim_next_task で確認してください。`, 300);
+      }
+    }
   }
 
   memory(main) {

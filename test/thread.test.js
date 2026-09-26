@@ -183,3 +183,43 @@ test("ChatHost自動継続: 上限回数に達したら告知して停止する"
   rmTree(ws);
   rmTree(ws2);
 });
+
+test("claim フォールバック: 文脈外でも発見器起票の共通仕事だけは請求する", () => {
+  const ws = mktmp();
+  const tasks = new TaskBlackboard(ws);
+  tasks.create({ id: "review-changes", role: "review", body: "査読" });
+  tasks.create({ id: "other-project-task", project: "other", body: "よそ者" });
+  const got = tasks.claim({ id: "beta", role: "review" }, { project: "x" });
+  assert.equal(got.id, "review-changes");
+  assert.equal(tasks.snapshot().open.some((f) => f.includes("other-project-task")), true);
+  assert.equal(tasks.claim({ id: "gamma", role: "impl" }, { project: "x" }), null);
+  rmTree(ws);
+});
+
+test("task.createdで該当スレッドのメンバーが起こされる", async () => {
+  const ws = mktmp();
+  const bus = new Bus();
+  const board = new Board(bus, "p");
+  const tasks = new TaskBlackboard(ws, bus);
+  const tools = createTools({ agent: { id: "p-alpha", displayName: "アルファ", role: "impl", personaText: "# A" }, workspace: ws, board, tasks, bus });
+  let calls = 0;
+  const model = {
+    maxTokens: 4000,
+    async chat({ messages }) {
+      calls++;
+      return { content: null, toolCalls: [{ id: "c" + calls, name: "claim_next_task", arguments: { project: "p" } }], raw: { content: null }, usage: { promptTokens: 10, completionTokens: 1 } };
+    },
+  };
+  const host = new ChatHost({
+    mains: [{ id: "p-alpha", displayName: "アルファ", role: "impl", personaText: "# A" }],
+    project: "p", autoContinueRounds: 0, maxTurnsPerRound: 4, staggerMs: 0,
+    modelFactory: () => model, toolsFactory: () => tools,
+    board, tasks, bus,
+  });
+  host.say("待機開始");
+  await waitUntil(() => calls >= 1, 5000);
+  tasks.create({ id: "p-new", project: "p", body: "新仕事" });
+  const ok = await waitUntil(() => tasks.snapshot().claimed.some((f) => f.includes("p-new")), 8000);
+  assert.ok(ok, "project一致のタスクで起床し請求する");
+  rmTree(ws);
+});
