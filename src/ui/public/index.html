@@ -175,7 +175,9 @@
     <div id="composer">
       <div class="row">
         <input id="saytext" placeholder="メッセージ">
+        <button id="attachbtn" title="画像を添付">📎</button>
         <button id="saybtn">送信</button>
+        <input type="file" id="attachfile" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none">
       </div>
       <div class="hint" id="composer-hint"></div>
     </div>
@@ -560,9 +562,18 @@ async function decide(id, approve) {
 async function sendSay() {
   const el = $("saytext");
   const text = el.value.trim();
-  if (!text) return;
+  if (!text && !pendingImage) return;
   el.value = "";
   if (text.startsWith("/")) { handleCommand(text); return; }
+  const img = pendingImage;
+  pendingImage = null;
+  if (img) {
+    // 画像添付: 保存→メンバーへマルチモーダルで届く。テキストがあれば本文としても送る
+    await fetch("/api/attach", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ thread: selectedThread === "__main__" ? null : selectedThread, dataUrl: img.dataUrl, note: text }) });
+    if (text) await fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, thread: selectedThread === "__main__" ? null : selectedThread }) });
+    refresh();
+    return;
+  }
   await fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, thread: selectedThread === "__main__" ? null : selectedThread }) });
 }
 
@@ -659,6 +670,27 @@ es.onmessage = (e) => {
 };
 $("saybtn").onclick = sendSay;
 $("saytext").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) sendSay(); });
+// 画像添付: 📎ボタン or 入力欄へのペースト。dataURL化してからサーバーへ保存させる
+let pendingImage = null;
+const attachFile = document.getElementById("attachfile");
+$("attachbtn").onclick = () => attachFile.click();
+attachFile.onchange = () => {
+  const f = attachFile.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => { pendingImage = { dataUrl: reader.result, name: f.name }; $("composer-hint").textContent = `添付: ${f.name} — 送信で画像ごと届きます`; };
+  reader.readAsDataURL(f);
+};
+$("saytext").addEventListener("paste", (e) => {
+  const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith("image/"));
+  if (!item) return;
+  const f = item.getAsFile();
+  if (!f) return;
+  e.preventDefault();
+  const reader = new FileReader();
+  reader.onload = () => { pendingImage = { dataUrl: reader.result, name: "paste.png" }; $("composer-hint").textContent = `添付: 画像(ペースト) — 送信で画像ごと届きます`; };
+  reader.readAsDataURL(f);
+});
 for (const b of document.querySelectorAll("#ctx-tabs .ct")) {
   b.onclick = () => { ctxTab = b.dataset.tab; renderCtx(lastState); };
 }

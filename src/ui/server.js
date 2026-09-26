@@ -21,7 +21,7 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
-export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null }) {
   const live = {
     // v6: エージェントは thread.opened/agent.spawned 登録時に出現する(事前登録しない。
     // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
@@ -183,6 +183,44 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           }
         });
         return;
+      }
+      if (url.pathname === "/api/attach" && req.method === "POST" && onAttach) {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const { thread, dataUrl, note } = JSON.parse(body);
+            const m = String(dataUrl ?? "").match(/^data:image\/(png|jpeg|gif|webp);base64,(.+)$/);
+            if (!m) throw new Error("画像(dataUrl)が不正です");
+            const ext = m[1] === "jpeg" ? "jpg" : m[1];
+            const buf = Buffer.from(m[2], "base64");
+            if (buf.length > 8 * 1024 * 1024) throw new Error("画像が大きすぎます(8MB上限)");
+            const dir = join(config.workspace, "uploads");
+            mkdirSync(dir, { recursive: true });
+            const file = `img-${Date.now().toString(36)}.${ext}`;
+            writeFileSync(join(dir, file), buf);
+            onAttach(`uploads/${file}`, String(dataUrl), String(note ?? ""), String(thread ?? "") || null);
+            json(res, { ok: true, path: `uploads/${file}` });
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname?.startsWith("/uploads/")) {
+        const name = url.pathname.slice("/uploads/".length);
+        if (!/^[A-Za-z0-9._-]+$/.test(name)) { res.writeHead(400).end(); return; }
+        const p = join(config.workspace, "uploads", name);
+        try {
+          statSync(p);
+          const ext = (name.split(".").pop() ?? "").toLowerCase();
+          const mime = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" }[ext] ?? "application/octet-stream";
+          res.writeHead(200, { "content-type": mime });
+          return res.end(readFileSync(p));
+        } catch {
+          res.writeHead(404).end();
+          return;
+        }
       }
       if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
       if (url.pathname === "/api/session" && req.method === "POST") {

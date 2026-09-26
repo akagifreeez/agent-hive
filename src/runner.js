@@ -247,6 +247,12 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       if (t) return t.host.say(text);
       return leadHost.say(text);
     },
+    attachImage: (note, dataUrl, thread = null, path = null) => {
+      const t = thread ? threads.get(thread) : null;
+      const host = t ? t.host : leadHost;
+      host.attachImage(note, dataUrl, path);
+      return { ok: true };
+    },
     openThread,
     closeThread,
     listThreads: () => [...threads.keys()],

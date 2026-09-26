@@ -127,6 +127,24 @@ export class ChatHost {
     }
   }
 
+  // 画像を添付する(全メインへ)。実行中はターン境界で、非実行なら次ラウンドの最初に渡る
+  attachImage(note, dataUrl, uploadPath = null) {
+    // ボードにも記録として残す(markdownの画像描画でストリームに表示される)
+    if (uploadPath) this.board.post("you", `![画像添付](/${uploadPath})${note ? "\n\n" + note : ""}`);
+    for (const m of this.mains) {
+      const st = this.roundState.get(m.id) ?? { running: false, pending: [] };
+      this.roundState.set(m.id, st);
+      st.pending.push({
+        role: "user",
+        content: [
+          { type: "text", text: `[画像添付] ${note ?? ""}` },
+          { type: "image_url", image_url: { url: dataUrl } },
+        ],
+      });
+      this.wake(m, "[画像添付] 画像を確認して応答してください。");
+    }
+  }
+
   wake(main, kickoffText, delayMs = 0) {
     const st = this.roundState.get(main.id) ?? { running: false, pending: [] };
     this.roundState.set(main.id, st);
