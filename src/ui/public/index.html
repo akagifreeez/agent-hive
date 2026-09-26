@@ -581,7 +581,19 @@ function handleCommand(text) {
     $("stream").scrollTop = $("stream").scrollHeight;
   };
   if (cmd === "help") {
-    post("/tasks 現在のタスク一覧\n/usage エージェント別の消費\n/threads スレッド一覧\n/help この一覧");
+    post("/tasks 現在のタスク一覧\n/usage エージェント別の消費\n/threads スレッド一覧\n/session save <名前> 状態を保存\n/session load <名前> 状態を復元(再起動で反映)\n/sessions 保存済み一覧\n/help この一覧");
+  } else if (cmd === "session" || cmd === "sessions") {
+    const arg = text.slice(("/" + cmd).length).trim();
+    const [op, ...rest] = arg.split(/\s+/);
+    const name = rest.join("-");
+    if (!op || op === "list") {
+      const r = await (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "list" }) })).json();
+      post(r.list?.length ? "保存済みセッション:\n" + r.list.join("\n") : "保存済みセッションはありません(/session save <名前> で保存)");
+    } else if (op === "save" || op === "load") {
+      if (!name) { post("セッション名を指定してください"); return; }
+      const r = await (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: op, name }) })).json();
+      post(r.error ? `エラー: ${r.error}` : `セッション ${name} を${op === "save" ? "保存" : "復元"}しました${op === "load" ? "(反映には再起動が必要です)" : ""}`);
+    }
   } else if (cmd === "tasks") {
     if (!lastState) return post("まだ状態を取得していません");
     const l = lastState.taskList;

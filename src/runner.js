@@ -15,6 +15,7 @@ import { OpenAIModel, FallbackModel } from "./model/openai.js";
 import { SpawnManager } from "./engine/spawn.js";
 import { ChatHost } from "./engine/chat.js";
 import { buildMemoryContext } from "./engine/memory.js";
+import { buildSkillsIndex } from "./engine/skills.js";
 import { McpHost } from "./engine/mcp.js";
 import { Hooks } from "./engine/hooks.js";
 import { ROOT } from "./config.js";
@@ -53,8 +54,11 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   await ensureGitRepo(config.workspace);
 
   const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
-  // 永続記憶(memory/)は毎回読み直す(distill-learningsの反映を次ラウンドから効かせる)
-  const memoryFn = () => buildMemoryContext(config.workspace);
+  // 永続記憶(memory/)+スキル索引を毎回読み直す(distill反映・スキル追加を次ラウンドから効かせる)
+  const memoryFn = () => {
+    const parts = [buildMemoryContext(config.workspace), buildSkillsIndex(config.workspace)].filter(Boolean);
+    return parts.length ? parts.join("\n\n") : null;
+  };
 
   const discovery = startDiscovery({
     workspace: config.workspace, tasks, bus,
@@ -319,7 +323,7 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       maxTurns: config.loop.maxTurns, shellKind,
       contextWindow: config.model.contextWindow ?? 200000,
       thresholdPercent: config.compact?.thresholdPercent,
-      memory: buildMemoryContext(config.workspace) || null,
+      memory: [buildMemoryContext(config.workspace), buildSkillsIndex(config.workspace)].filter(Boolean).join("\n\n") || null,
     });
   })());
 
