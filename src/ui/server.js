@@ -142,9 +142,10 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/api/state") return json(res, { live, tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace) });
       if (url.pathname === "/api/tasks" && req.method === "POST") {
-        let body = "";
-        req.on("data", (d) => (body += d));
+        const chunks = [];
+        req.on("data", (d) => chunks.push(d));
         req.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
           try {
             const r = handleTaskAction(JSON.parse(body));
             if (!r.ok) throw new Error(r.error);
@@ -156,9 +157,10 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/say" && req.method === "POST" && onSay) {
-        let body = "";
-        req.on("data", (d) => (body += d));
+        const chunks = [];
+        req.on("data", (d) => chunks.push(d));
         req.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
           try {
             const { text, thread } = JSON.parse(body);
             if (!text || !String(text).trim()) throw new Error("空の入力です");
@@ -171,9 +173,10 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/permission" && req.method === "POST") {
-        let body = "";
-        req.on("data", (d) => (body += d));
+        const chunks = [];
+        req.on("data", (d) => chunks.push(d));
         req.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
           try {
             const { id, approve } = JSON.parse(body);
             bus.emit("permission.resolved", { id, verdict: approve ? "approve" : "deny" });
@@ -186,9 +189,10 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/attach" && req.method === "POST" && onAttach) {
-        let body = "";
-        req.on("data", (d) => (body += d));
+        const chunks = [];
+        req.on("data", (d) => chunks.push(d));
         req.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
           try {
             const { thread, dataUrl, note } = JSON.parse(body);
             const m = String(dataUrl ?? "").match(/^data:image\/(png|jpeg|gif|webp);base64,(.+)$/);
@@ -225,9 +229,10 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
       if (url.pathname === "/api/session" && req.method === "POST") {
-        let body = "";
-        req.on("data", (d) => (body += d));
+        const chunks = [];
+        req.on("data", (d) => chunks.push(d));
         req.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
           try {
             const { action, name } = JSON.parse(body);
             let r;
