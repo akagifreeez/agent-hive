@@ -1208,8 +1208,8 @@ function renderAll() {
   renderPerms(lastState.live.requests);
   renderCtx(lastState);
   const permTxt = lastState.live.permMode === "auto" ? "perm:auto" : "perm:normal";
-  const effTxt = uiEffort ? `effort:${uiEffort}` : null;
-  const mdl = uiModelName ?? lastState.model?.name ?? "";
+  const effTxt = uiEffort ?? lastState?.live?.modelEffort ? `effort:${uiEffort ?? lastState.live.modelEffort}` : null;
+  const mdl = uiModelName ?? lastState.live.modelName ?? lastState.model?.name ?? "";
   const bits = [mdl, effTxt, permTxt, lastState.live.scenario ? `[${lastState.live.scenario.phase}]` : null].filter(Boolean);
   $("nav-foot").textContent = bits.join(" · ");
 }
@@ -1248,11 +1248,18 @@ function refreshSoon() {
 
 /* ================= イベント配線 ================= */
 $("nav-search").addEventListener("input", (e) => { navQuery = e.target.value; renderAll(); });
+$("nav-search").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.target.value = ""; navQuery = ""; renderAll(); }
+});
 
 /* ================= 設定ウィンドウ(エージェントを起こさない操作) ================= */
 function openSettings() {
-  $("set-effort").value = uiEffort ?? "low";
-  $("set-model").value = uiModelName ?? lastState?.model?.name ?? "";
+  // 現在値: UIから変更済みならその値、未変更ならサーバーが配る実値(live)/config値
+  const liveModel = lastState?.live?.modelName ?? null;
+  const liveEffort = lastState?.live?.modelEffort ?? null;
+  $("set-effort").value = uiEffort ?? liveEffort ?? "low";
+  $("set-model").value = uiModelName ?? "";
+  $("set-model").placeholder = liveModel ?? lastState?.model?.name ?? "";
   $("set-fallback").value = (lastState?.model?.fallbacks ?? []).join(",");
   $("set-perm").value = lastState?.live?.permMode ?? "normal";
   const servers = Object.entries(lastState?.mcp ?? {});
@@ -1324,7 +1331,7 @@ $("settings-save").onclick = async () => {
   const re = await (await fetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ effort }) })).json();
   if (re.error) { toast(re.error); return; }
   uiEffort = re.effort;
-  const cur = uiModelName ?? lastState?.model?.name ?? "";
+  const cur = uiModelName ?? lastState?.live?.modelName ?? "";
   if (model && model !== cur) {
     const rm = await (await fetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model }) })).json();
     if (rm.error) { toast(rm.error); return; }
