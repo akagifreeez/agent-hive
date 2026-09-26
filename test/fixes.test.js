@@ -280,7 +280,7 @@ test("monitorスナップショット: スレッド進捗・タスク・エー�
   tasks.create({ id: "mt2", project: "proj", body: "もう一件" });
   assert.ok(tasks.claim(agent, { project: "proj" }));
   const live = {
-    board: [{ id: 1, from: "you", text: "進めて", thread: "__main__" }],
+    board: [{ id: 1, from: "you", text: "進めて", thread: "__main__", at: Date.now() }],
     threads: [{ name: "proj", folder: "engine", goal: "監視対象の取り組み" }],
     agents: { "m-alpha": { displayName: "アルファ", status: "working", turn: 3, lastTool: "bash", tokens: 1234, costUsd: 0.001, thread: "proj" } },
     merges: [{ taskId: "mt1", agent: "m-alpha", summary: "1ファイル +10", stat: "", patch: "" }],
@@ -293,6 +293,10 @@ test("monitorスナップショット: スレッド進捗・タスク・エー�
   assert.equal(th.folder, "engine");
   assert.equal(th.total, 2);
   assert.equal(th.done, 0);
+  assert.equal(snap.phase, "working"); // claimed 1件あり
+  assert.equal(th.state, "working");
+  assert.equal(th.percent, 0);
+  assert.equal(snap.lastActivitySec, 0);
   assert.equal(snap.tasks.claimed.length, 1);
   assert.equal(snap.tasks.claimed[0].agent, "m-alpha");
   assert.equal(snap.agents[0].tokens, 1234);
