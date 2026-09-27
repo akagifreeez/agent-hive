@@ -1,6 +1,7 @@
 // ローカルWebUI。依存ゼロ(node:http + SSE)。後からElectron殻で包む前提なので
 // 描画はブラウザ側に寄せ、サーバーは状態API+SSEストリームだけを持つ。
 import { createServer } from "node:http";
+import { spawn as nodeSpawn } from "node:child_process";
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,6 +47,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     modelEffort: null,
   };
   const tasks = new TaskBlackboard(config.workspace, bus);
+  const devServer = { proc: null };
   const clients = new Set();
 
   const record = {
@@ -426,6 +428,58 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
             const r = onPermMode(String(mode ?? ""));
             if (!r.ok) throw new Error(r.error ?? "失敗しました");
             json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/devserver" && req.method === "GET") {
+        // package.json の scripts 一覧
+        try {
+          const pkg = JSON.parse(readFileSync(join(config.workspace, "package.json"), "utf8"));
+          return json(res, { scripts: Object.keys(pkg.scripts ?? {}) });
+        } catch {
+          return json(res, { scripts: [] });
+        }
+      }
+      if (url.pathname === "/api/devserver" && req.method === "POST") {
+        const chunks = [];
+        req.on("data", (d) => chunks.push(d));
+        req.on("end", () => {
+          try {
+            const { action, script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            if (action === "start") {
+              if (devServer.proc && devServer.proc.exitCode === null) throw new Error("既に起動しています");
+              const pkg = JSON.parse(readFileSync(join(config.workspace, "package.json"), "utf8"));
+              const cmd = (pkg.scripts ?? {})[String(script ?? "")];
+              if (!cmd) throw new Error(`スクリプト ${script} がありません`);
+              const proc = nodeSpawn(cmd, { cwd: config.workspace, shell: true, stdio: ["ignore", "pipe", "pipe"] });
+              let url = null;
+              const detect = (buf) => {
+                const m = String(buf).match(/PORT=(\d+)/);
+                if (m && !url) url = `http://127.0.0.1:${m[1]}`;
+              };
+              proc.stdout.on("data", detect);
+              proc.stderr.on("data", detect);
+              // PORT出力を最大5秒待ってから応答する
+              const t0 = Date.now();
+              const poll = () => new Promise((done) => {
+                const iv = setInterval(() => {
+                  if (url || Date.now() - t0 > 5000 || proc.exitCode !== null) { clearInterval(iv); done(); }
+                }, 50);
+              });
+              poll().then(() => {
+                json(res, url ? { ok: true, pid: proc.pid, url } : { ok: true, pid: proc.pid, url: null });
+              });
+            } else if (action === "stop") {
+              if (!devServer.proc) throw new Error("起動していません");
+              devServer.proc.kill();
+              devServer.proc = null;
+              json(res, { ok: true });
+            } else {
+              throw new Error(`不明なaction: ${action}`);
+            }
           } catch (err) {
             json(res, { error: err.message }, 400);
           }
