@@ -1,7 +1,7 @@
 // ローカルWebUI。依存ゼロ(node:http + SSE)。後からElectron殻で包む前提なので
 // 描画はブラウザ側に寄せ、サーバーは状態API+SSEストリームだけを持つ。
 import { createServer } from "node:http";
-import { spawn as nodeSpawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,12 @@ import { TaskBlackboard } from "../engine/tasks.js";
 import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
+<<<<<<< HEAD
+import { spawn } from "node:child_process";
+=======
+import { PermissionGate } from "../engine/permissions.js";
 import { listMemoryFiles, isMemoryExpired } from "../engine/memory.js";
+>>>>>>> main
 import { listWorkspaceFiles } from "../engine/tools.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -26,8 +31,28 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
+// CSRF/DNS rebinding対策: POSTのOrigin/Hostがlocalhost系か判定する。
+// ヘッダ無し(同一オリジン由来のcurl等)は許可し、外部オリジンのみ拒否。
+export function isLocalOrigin(req) {
+  const origin = String(req.headers.origin ?? "");
+  if (origin) {
+    try {
+      const o = new URL(origin);
+      if (o.hostname !== "localhost" && o.hostname !== "127.0.0.1" && o.hostname !== "::1") return false;
+    } catch { return false; }
+  }
+  const host = String(req.headers.host ?? "");
+  if (host) {
+    const h = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+    if (h !== "localhost" && h !== "127.0.0.1" && h !== "::1") return false;
+  }
+  return true;
+}
+
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
+  // /api/exec(開発用シェル)もエージェントと同じPermissionGateを通す(UIからの任意コマンド実行を承認制に)
+  const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
   const boardStore = new BoardStore(config.workspace);
   const live = {
@@ -47,7 +72,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     modelEffort: null,
   };
   const tasks = new TaskBlackboard(config.workspace, bus);
-  const devServer = { proc: null };
   const clients = new Set();
 
   const record = {
@@ -172,6 +196,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
+    if (req.method === "POST" && !isLocalOrigin(req)) return json(res, { error: "localhost以外からのPOSTは拒否します" }, 403);
     try {
       if (url.pathname === "/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -200,7 +225,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       // 総件数: チャットモードではディスクが真実。RAMのみのボード(未永続化)はRAM件数で代用
-      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       if (url.pathname === "/api/board") {
@@ -397,6 +422,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           try {
             const { command } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
             if (!command || typeof command !== "string") throw new Error("commandが空です");
+            const verdict = await execGate.check(command);
+            if (!verdict.allowed) { json(res, { ok: false, text: `PermissionGateが拒否: ${verdict.reason ?? "許可されませんでした"}` }, 403); return; }
             const r = await runCommand({ command, cwd: config.workspace, timeoutMs: 120000, outputLimit: 16 * 1024 });
             json(res, r);
           } catch (err) {
@@ -434,65 +461,25 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
-      if (url.pathname === "/api/devserver" && req.method === "GET") {
-        // package.json の scripts 一覧
-        try {
-          const pkg = JSON.parse(readFileSync(join(config.workspace, "package.json"), "utf8"));
-          return json(res, { scripts: Object.keys(pkg.scripts ?? {}) });
-        } catch {
-          return json(res, { scripts: [] });
-        }
-      }
-      if (url.pathname === "/api/devserver" && req.method === "POST") {
-        const chunks = [];
-        req.on("data", (d) => chunks.push(d));
+      if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
+<<<<<<< HEAD
+      if (url.pathname === "/api/devserver") {
+        if (req.method === "GET") return json(res, handleDevserver({ method: "GET", workspace: config.workspace, uiPort: config.ui.port }));
+        let body = "";
+        req.on("data", (d) => (body += d));
         req.on("end", () => {
           try {
-            const { action, script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-            if (action === "start") {
-              if (devServer.proc && devServer.proc.exitCode === null) throw new Error("既に起動しています");
-              const pkg = JSON.parse(readFileSync(join(config.workspace, "package.json"), "utf8"));
-              const cmd = (pkg.scripts ?? {})[String(script ?? "")];
-              if (!cmd) throw new Error(`スクリプト ${script} がありません`);
-              const proc = nodeSpawn(cmd, { cwd: config.workspace, shell: true, stdio: ["ignore", "pipe", "pipe"] });
-              let url = null;
-              const detect = (buf) => {
-                const m = String(buf).match(/PORT=(\d+)/);
-                if (m && !url) url = `http://127.0.0.1:${m[1]}`;
-              };
-              proc.stdout.on("data", detect);
-              proc.stderr.on("data", detect);
-              // PORT出力を最大5秒待ってから応答する
-              const t0 = Date.now();
-              const poll = () => new Promise((done) => {
-                const iv = setInterval(() => {
-                  if (url || Date.now() - t0 > 5000 || proc.exitCode !== null) { clearInterval(iv); done(); }
-                }, 50);
-              });
-              devServer.proc = proc;
-              poll().then(() => {
-                json(res, url ? { ok: true, pid: proc.pid, url } : { ok: true, pid: proc.pid, url: null });
-              });
-            } else if (action === "stop") {
-              if (!devServer.proc || devServer.proc.exitCode !== null) { devServer.proc = null; throw new Error("起動していません"); }
-              devServer.proc.kill("SIGTERM");
-              // shell越しに孫プロセスが残らないよう、一定時間後に強制終了
-              const victim = devServer.proc;
-              const killer = setTimeout(() => { try { if (victim.exitCode === null) victim.kill("SIGKILL"); } catch { /* 既に終了 */ } }, 2000);
-              if (killer.unref) killer.unref();
-              devServer.proc = null;
-              json(res, { ok: true });
-            } else {
-              throw new Error(`不明なaction: ${action}`);
-            }
+            const r = handleDevserver({ method: "POST", body: JSON.parse(body || "{}"), workspace: config.workspace, uiPort: config.ui.port });
+            json(res, r.body ?? r, r.status ?? 200);
           } catch (err) {
-            json(res, { error: err.message }, 400);
+            json(res, { ok: false, error: err.message }, 400);
           }
         });
         return;
       }
-      if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
+=======
       if (url.pathname === "/api/memory") return json(res, { files: listMemoryWithExpiry(config.workspace) });
+>>>>>>> main
       if (url.pathname === "/api/audit") return json(res, { audit: readAuditTail(config.workspace, Number(url.searchParams.get("limit")) || 200) });
       if (url.pathname === "/api/wtdiff") {
         const r = await handleWtdiff({ mainWorkspace: config.workspace, worktreeRoot: config.worktrees.dir, agentId: url.searchParams.get("agent"), limit: Number(url.searchParams.get("limit")) || undefined });
@@ -519,6 +506,24 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
+      if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
+      if (url.pathname === "/api/devserver" && req.method === "GET") {
+        return json(res, { scripts: detectNpmScripts(config.workspace).map((s) => s.name) });
+      }
+      if (url.pathname === "/api/devserver" && req.method === "POST") {
+        const chunks = [];
+        req.on("data", (d) => chunks.push(d));
+        req.on("end", () => {
+          try {
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            const r = handleDevserverAction(body, config.workspace, config.ui.port);
+            json(res, r, r.status ?? (r.ok ? 200 : 400));
+          } catch (err) {
+            json(res, { ok: false, error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/markdown.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
         return res.end(readFileSync(join(PUBLIC, "markdown.js")));
@@ -551,16 +556,81 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   if (config.ui.monitorPort) {
     await startMonitor({ config, live, tasks, startedAt });
   }
-  return { close: () => server.close() };
+  return { close: () => { stopAllDevServers(); server.close(); } };
   if (autoStart) {
     // 待ち受けを邪魔しない走行
     runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
   }
 }
 
+/* ============ /api/devserver: 開発用ダミーサーバーの起動/停止 ============ */
+// ワークスペース内スクリプトを子プロセスで起動し、疎通確認してpidを返す。
+// 重複起動防止(同じscriptは1プロセスのみ)、DELETEで終了。UIサーバー終了時にも全停止。
+let devPort = null; // UIサーバーの実ポート(start応答のurl用)
+const devServers = new Map(); // script => { child, startedAt }
+
+function handleDevserverAction(body, workspace, uiPort = null) {
+  if (uiPort) devPort = uiPort;
+  const action = String(body.action ?? "");
+  if (action === "start") return startDevServer(String(body.script ?? ""), workspace);
+  if (action === "stop") return stopDevServer(String(body.script ?? ""));
+  return { ok: false, error: `不明なaction: ${action}` };
+}
+
+function startDevServer(script, workspace) {
+  if (!script) throw new Error("scriptが空です");
+  // package.jsonのscriptsから実行コマンドを引く(直接ファイル指定はさせない)
+  let scripts = {};
+  try { scripts = JSON.parse(readFileSafe(workspace, "package.json") || "{}").scripts ?? {}; } catch { /* 不正package.json */ }
+  const command = scripts[script];
+  if (!command) throw new Error(`scriptが見つかりません: ${script}`);
+  if (devServers.has(script)) {
+    return { status: 400, ok: false, error: `すでに起動中です: ${script} (pid ${devServers.get(script).child.pid})` };
+  }
+  const child = spawn(command, { cwd: workspace, shell: true, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+  const url = `http://localhost:${devPort ?? 7789}/`;
+  const entry = { child, port: null, startedAt: Date.now() };
+  devServers.set(script, entry);
+  entry.child.stdout.on("data", (d) => {
+    const m = String(d).match(/PORT=(\d+)/);
+    if (m) entry.port = Number(m[1]);
+  });
+  child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
+  return { ok: true, script, pid: child.pid, port: entry.port, url };
+}
+
+function stopDevServer(script) {
+  let entry = null;
+  for (const [k, v] of devServers) { if (!script || k === script) { entry = v; devServers.delete(k); break; } }
+  if (!entry) throw new Error("起動中のdevserverはありません");
+  try {
+    if (process.platform === "win32") spawn(`taskkill /PID ${entry.child.pid} /T /F`, { shell: true, stdio: "ignore" });
+    else if (entry.child.pid) process.kill(-entry.child.pid, "SIGTERM");
+    else entry.child.kill();
+  } catch { /* 既に終了している場合は無視 */ }
+  return { ok: true, script: script ?? "", pid: entry.child.pid };
+}
+
+function stopAllDevServers() {
+  for (const [, entry] of devServers) { try { entry.child.kill(); } catch { /* 無視 */ } }
+  devServers.clear();
+}
+
 function json(res, obj, status = 200) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(obj));
+}
+
+/* ============ /api/scripts: package.jsonのscripts検出 ============ */
+// ワークスペースのpackage.jsonからnpm scriptsを読み、UIの右パネルに一覧できる形で返す。
+// scriptsが無い/読めない場合は空配列(UIは「スクリプトなし」表示になる)。
+export function detectNpmScripts(workspace) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd }));
+  } catch {
+    return [];
+  }
 }
 
 // /api/memory用: メモリ一覧に期限切れフラグを付ける(isMemoryExpiredに委譲)
@@ -569,17 +639,51 @@ export function listMemoryWithExpiry(workspace, now = Date.now()) {
 }
 
 // モニタ用: state/audit.jsonl の行数(無ければ0)
-const NEWLINE = String.fromCharCode(10);
-
 export function countAuditLines(workspace) {
   try {
     const raw = readFileSync(join(workspace, "state", "audit.jsonl"), "utf8");
-    return raw.split(NEWLINE).filter((l) => l.trim()).length;
+    return raw.split("\n").filter((l) => l.trim()).length;
   } catch {
     return 0;
   }
 }
 
+/* ============ /api/devserver: package.json scriptsの起動/停止 ============ */
+// 同時1プロセス。child_process.spawnで長時間起動し、pid保持+stopでkillする。
+// runCommand(タイムアウトで殺す)ではなくspawnを使うのがポイント。
+let devserverProc = null; // { pid, script, url }
+const DEVSERVER_START_TIMEOUT_MS = 10000;
+
+export function handleDevserver({ method, body = {}, workspace, uiPort }) {
+  if (method === "GET") {
+    const pkg = readFileSyncSafe(join(workspace, "package.json"));
+    let scripts = [];
+    try { scripts = Object.keys(JSON.parse(pkg ?? "{}").scripts ?? {}); } catch { /* 不正package.jsonは空 */ }
+    return { scripts, running: devserverProc ? { pid: devserverProc.pid, script: devserverProc.script, url: devserverProc.url } : null };
+  }
+  const action = String(body.action ?? "");
+  if (action === "start") {
+    if (devserverProc) return { status: 400, body: { ok: false, error: `すでに起動中です: ${devserverProc.script} (pid ${devserverProc.pid})` } };
+    const script = String(body.script ?? "").trim();
+    let scripts = {};
+    try { scripts = JSON.parse(readFileSyncSafe(join(workspace, "package.json")) ?? "{}").scripts ?? {}; } catch { /* 同上 */ }
+    if (!script || !scripts[script]) return { status: 400, body: { ok: false, error: `scriptが見つかりません: ${script}` } };
+    const child = spawn("npm", ["run", script], { cwd: workspace, shell: true, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    const url = body.url ? String(body.url) : `http://localhost:${uiPort && uiPort !== 0 ? uiPort : 7789}/`;
+    devserverProc = { pid: child.pid, script, url, child };
+    return { status: 200, body: { ok: true, pid: child.pid, script, url } };
+  }
+  if (action === "stop") {
+    if (!devserverProc) return { status: 400, body: { ok: false, error: "起動中のdevserverはありません" } };
+    try {
+      if (process.platform === "win32") runCommand({ command: `taskkill /PID ${devserverProc.pid} /T /F`, timeoutMs: 5000, outputLimit: 1000 });
+      else process.kill(-devserverProc.pid, "SIGTERM");
+    } catch { /* 既に終了している場合は無視 */ }
+    devserverProc = null;
+    return { status: 200, body: { ok: true } };
+  }
+  return { status: 400, body: { ok: false, error: `不明なaction: ${action}` } };
+}
 
 /* ============ /api/wtdiff: worktreeとmainの差分 ============ */
 // agent/<id>ブランチのworktreeに対する main...agent/<id> の差分を返す。
@@ -697,7 +801,7 @@ async function tick(){
     const pe=document.getElementById("phase");
     pe.textContent=ph[0]+(d.phase==="working"?"(残り"+remain+"件)":"");
     pe.style.color=ph[1];
-    document.getElementById("meta").textContent="model: "+d.model+" / perm:"+esc(d.permMode)+" / 稼働 "+Math.floor(d.uptimeSec/60)+"分"+(d.uptimeSec%60)+"秒 / 投稿 "+d.posts+"件"+(d.lastActivitySec!=null?" / 最終活動 "+(d.lastActivitySec<60?d.lastActivitySec+"秒前":Math.floor(d.lastActivitySec/60)+"分前"):"");
+    document.getElementById("meta").textContent="model: "+d.model+" / perm:"+esc(d.permMode)+" / 稼働 "+Math.floor(d.uptimeSec/60)+"分"+(d.uptimeSec%60)+"秒 / 投稿 "+d.posts+"件 / 監査 "+(d.auditCount??0)+"件"+(d.lastActivitySec!=null?" / 最終活動 "+(d.lastActivitySec<60?d.lastActivitySec+"秒前":Math.floor(d.lastActivitySec/60)+"分前"):"");
     document.getElementById("body").innerHTML=
       "<h2>スレッド</h2><table><tr><th>状態</th><th>名前</th><th>フォルダ</th><th>進捗</th><th>メンバー</th><th>目標</th></tr>"+
       (rows(d.threads,(t)=>{const st={done:["完了","#86efac"],working:["作業中","#fbbf24"],waiting:["未着手","#a3a3a8"],idle:["—","#6e6e73"]}[t.state]||["—","#6e6e73"];const ps=t.paused?"<span class='warn'>[停止中]</span> ":"";return "<tr><td>"+ps+"<span style='color:"+st[1]+"'>"+st[0]+"</span></td><td class='mono'># "+esc(t.name)+"</td><td>"+esc(t.folder??"")+"</td><td><div class='bar'><i style='width:"+t.percent+"%'></i></div><span class='dim mono'>"+t.done+"/"+t.total+"</span></td><td>"+rows(t.members??[],(m)=>{const sc={idle:"#a3a3a8",working:"#fbbf24",done:"#86efac",error:"#fca5a5","budget-stop":"#fca5a5"}[m.status]||"#a3a3a8";return "<span class='mem1' title='"+esc(m.status)+"'><i class='mdot' style='background:"+sc+"'></i><span style='color:hsl("+hue(m.id)+" 45% 72%)'>"+esc(m.displayName)+"</span></span>";})+"</td><td class='dim'>"+esc(t.goal)+"</td></tr>";})||"<tr><td colspan='6' class='dim'>開いているスレッドはありません</td></tr>")+"</table>"+
@@ -771,6 +875,10 @@ export function loadPersistedBoardPosts(workspace) {
 }
 
 // state/usage.jsonへの蓄積(運用データ。直近200件)
+function readFileSyncSafe(p) {
+  try { return readFileSync(p, "utf8"); } catch { return null; }
+}
+
 function persistUsage(workspace, entry) {
   try {
     const dir = join(workspace, "state");
