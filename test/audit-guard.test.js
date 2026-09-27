@@ -68,21 +68,39 @@ test("監査保護: 拒否されても監査台帳自体は記録され続ける
   rmTree(ws);
 });
 
-test("監査保護(実行後検知): 変数展開/base64で迂回したstate/への書き込みも検知され警告が返る", async () => {
+test("監査保護: 変数展開経由の state/ 書き込みは事後検知で警告される", async () => {
   const ws = mktmp();
-  const tools = mkTools(ws);
-  // 静的解析を迂回: base64デコード+変数展開経由でstate/へ書き込む(コマンド文字列に state を含まない)
-  const r = await tools.execute("bash", { command: "d=$(echo c3RhdGU=|base64 -d); mkdir -p $d; echo tampered > $d/audit.jsonl" });
-  assert.equal(r.ok, false, "state/変化は検知され拒否扱いになるべき");
-  assert.match(r.text, /state. の内容が変更/);
+  const bus = new Bus();
+  const tasks = new TaskBlackboard(ws, bus);
+  const agent = { id: "guard-2", displayName: "ガ2", role: "impl", personaText: "# G" };
+  const tools = createTools({ agent, workspace: ws, mainWorkspace: ws, board: null, tasks, bus });
+  const denials = [];
+  bus.on("permission.denied", (e) => denials.push(e));
+  const r = await tools.execute("bash", { command: 'd=state; mkdir -p $d; echo tampered > $d/evil.jsonl' });
+  assert.equal(r.ok, false, "state/ 変更は検知されて拒否扱いになる");
+  assert.match(r.text, /state\/ 配下を変更/);
+  assert.match(r.text, /state\/evil\.jsonl/);
+  assert.equal(denials.length, 1);
+  assert.ok(denials[0].stateChanged.some((p) => p.includes("evil.jsonl")));
   rmTree(ws);
 });
 
-test("監査保護(実行後検知): state/を触らないコマンドは警告なしで成功する", async () => {
+test("監査保護: base64デコード経由の state/ 書き込みも事後検知される", async () => {
   const ws = mktmp();
   const tools = mkTools(ws);
-  const r2 = await tools.execute("bash", { command: "echo hi > out3.txt" });
-  assert.equal(r2.ok, true);
-  assert.ok(!r2.text.includes("警告"));
+  const payload = Buffer.from("tampered").toString("base64");
+  const r = await tools.execute("bash", { command: `mkdir -p state && echo ${payload} | base64 -d | tee state/audit.jsonl` });
+  // tee は事前チェックで拒否される(state/ 参照+書き込みコマンドの組合せ)
+  assert.equal(r.ok, false);
+  assert.match(r.text, /拒否されました/);
+  rmTree(ws);
+});
+
+test("監査保護: state/ に触れない通常コマンドは事後検知で警告されない", async () => {
+  const ws = mktmp();
+  const tools = mkTools(ws);
+  const r = await tools.execute("bash", { command: "echo fine > out2.txt && mkdir -p sub && echo x > sub/a.txt" });
+  assert.equal(r.ok, true);
+  assert.doesNotMatch(r.text, /監査領域/);
   rmTree(ws);
 });
