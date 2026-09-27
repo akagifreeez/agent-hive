@@ -159,7 +159,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
         mainWorkspace: config.workspace,
         board: threadBoard, tasks, bus, gate,
         spawner: manager,
-        resolveBoard,
+
+        crossPoster,
+
       })),
       board: threadBoard, tasks, bus, ledger,
       budget: config.budget,
@@ -270,6 +272,14 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     return { ok: true };
   };
 
+  // crosstalk: 指定スレッドのボードへ直接投稿する(to_thread引数用)。不在スレッドはエラー
+  const crossPoster = (threadName, from, text) => {
+    const t = threads.get(String(threadName ?? "").trim());
+    if (!t) return { ok: false, error: `スレッド ${threadName} は開いていません` };
+    const post = t.board.post(from, text);
+    return { ok: true, id: post.id };
+  };
+
   // スレッドのフォルダ(ナビ表示用分類)を付け替え。openThreadと同じ正規化を適用
   const setThreadFolder = ({ project, folder }) => {
     const name = String(project).trim();
@@ -282,12 +292,6 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     return { ok: true, name, folder: folderName };
   };
 
-  // to_thread宛先の解決: スレッド名→そのBoard。__main__はメインボード。未知はnull
-  const resolveBoard = (name) => {
-    const n = String(name ?? "").trim();
-    if (!n || n === "__main__") return mainBoard;
-    return threads.get(n)?.board ?? null;
-  };
 
   // スレッドの一時停止/再開(Claude Squad手本)。__main__はリーダー自身を休ませる。
   // 停止中はワーカーの起床と自動増員を止めるのでトークンを消さない
@@ -324,9 +328,9 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       mainWorkspace: config.workspace,
       board: mainBoard, tasks, bus, gate,
       spawner: manager,
+      crossPoster,
       threadOpener: openThread,
       threadCloser: closeThread,
-      resolveBoard,
     })),
     board: mainBoard, tasks, bus, ledger,
     budget: config.budget,
@@ -500,8 +504,6 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       tasks,
       bus,
       gate,
-      // シナリオ実行は単一ボードなので自分のboardのみ解決
-      resolveBoard: (name) => (!name || name === board.name) ? board : null,
     });
     const shellKind = await tools.detectShell();
     const agentWithCtx = { ...agent, scenarioName: config.scenario.name };
