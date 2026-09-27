@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Board, Bus } from "/d/working/_projects/agent-hive/worktrees/engine-gamma/src/engine/board.js";
-import { TaskBlackboard } from "/d/working/_projects/agent-hive/worktrees/engine-gamma/src/engine/tasks.js";
-import { SpawnManager } from "/d/working/_projects/agent-hive/worktrees/engine-gamma/src/engine/spawn.js";
-import { ensureGitRepo } from "/d/working/_projects/agent-hive/worktrees/engine-gamma/src/engine/discover.js";
+import { Board, Bus } from "./src/engine/board.js";
+import { TaskBlackboard } from "./src/engine/tasks.js";
+import { SpawnManager } from "./src/engine/spawn.js";
+import { ensureGitRepo } from "./src/engine/discover.js";
 
 const ROOT = join("/d/working/_projects/agent-hive/worktrees/engine-gamma");
 const ws = mkdtempSync(join(tmpdir(), "hive-dbg-"));
