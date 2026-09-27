@@ -5,11 +5,16 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runCommand } from "./exec.js";
 
+// マージ直列化: withMergeLock経由でのみ実行する。promiseチェーンのミューテックス。
+// mergeAgentWorkは内部でこれを使い、tools.js/chat.js等の呼び出し元もこのロックを共有する。
 let mergeChain = Promise.resolve();
-function queueMerge(fn) {
+export function withMergeLock(fn) {
   const p = mergeChain.then(fn, fn);
   mergeChain = p.then(() => {}, () => {});
   return p;
+}
+function queueMerge(fn) {
+  return withMergeLock(fn);
 }
 
 // 毎ランfreshに張り直す(前回のブランチ残骸を掃除)。ただしworktree内に未コミット変更が
@@ -74,9 +79,34 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
       outputLimit: 3000,
     });
     if (!m.ok) {
-      // 競合等。mainをマージ前の状態へ戻し、解決はエージェント側のworktreeでやってもらう
+      // 競合等。mainをマージ前の状態へ戻す
       await exec({ command: "git merge --abort", cwd: mainWorkspace, outputLimit: 1000 });
-      return { ok: false, conflict: true, text: m.text };
+      // 競合自動取込: ワーカーのworktree内で git merge main を1回だけ試す。
+      // クリーンに通ればそのまま再マージ。競合マーカーが残る形なら現行どおりconflictで返す。
+      const auto = await exec({
+        command: `git add -A && git -c user.name=${agent.id} -c user.email=${agent.id}@hive.local commit -m 'wip: ${taskId}' || true`,
+        cwd: worktreePath,
+        outputLimit: 2000,
+      });
+      const mm = await exec({ command: "git merge main -m 'merge main (auto-import before re-merge)'", cwd: worktreePath, outputLimit: 3000 });
+      if (mm.ok) {
+        const retry = await exec({
+          command: `git merge --no-ff ${branch} -m 'merge: ${taskId} by ${agent.id}'`,
+          cwd: mainWorkspace,
+          outputLimit: 3000,
+        });
+        if (retry.ok) {
+          const s = await exec({ command: `git diff --stat ${preSha} main`, cwd: mainWorkspace, outputLimit: 4000 });
+          const p = await exec({ command: `git diff ${preSha} main`, cwd: mainWorkspace, outputLimit: 60000 });
+          const stat = s.ok ? s.text.split("\n").slice(1).join("\n").trim() : "";
+          const patch = p.ok ? p.text.split("\n").slice(1).join("\n") : "";
+          return { ok: true, merged: true, text: retry.text, stat, patch, summary: statSummary(stat), autoMerged: true };
+        }
+        await exec({ command: "git merge --abort", cwd: mainWorkspace, outputLimit: 1000 });
+      }
+      // 自動取込失敗: worktree側のマージ状態を戻してからconflictで返す(競合マーカーは残す)
+      await exec({ command: "git merge --abort", cwd: worktreePath, outputLimit: 1000 });
+      return { ok: false, conflict: true, text: `${m.text}\n\nmainは取り込み済み。あなたのworktree内で \`git merge main\` を実行し、競合ファイルを解消してから再度 finish_task してください。` };
     }
     if (/already up to date/i.test(m.text)) return { ok: true, merged: false, text: m.text };
     // 4) 差分(--stat要約+patch。patchは出力上限で丸められる)
