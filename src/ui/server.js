@@ -27,8 +27,28 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
+// CSRF/DNS rebinding対策: POSTのOrigin/Hostがlocalhost系か判定する。
+// ヘッダ無し(同一オリジン由来のcurl等)は許可し、外部オリジンのみ拒否。
+export function isLocalOrigin(req) {
+  const origin = String(req.headers.origin ?? "");
+  if (origin) {
+    try {
+      const o = new URL(origin);
+      if (o.hostname !== "localhost" && o.hostname !== "127.0.0.1" && o.hostname !== "::1") return false;
+    } catch { return false; }
+  }
+  const host = String(req.headers.host ?? "");
+  if (host) {
+    const h = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+    if (h !== "localhost" && h !== "127.0.0.1" && h !== "::1") return false;
+  }
+  return true;
+}
+
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
+  // /api/exec(開発用シェル)もエージェントと同じPermissionGateを通す(UIからの任意コマンド実行を承認制に)
+  const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
   const boardStore = new BoardStore(config.workspace);
   const live = {
@@ -168,24 +188,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       return { ok: true };
     }
     return { ok: false, error: `不明なaction: ${action}` };
-  }
-
-  // CSRF/DNS rebinding対策: POSTのOrigin/Hostがlocalhost系か判定する。
-  // ヘッダ無し(同一オリジン由来のcurl等)は許可し、外部オリジンのみ拒否。
-  function isLocalOrigin(req) {
-    const origin = String(req.headers.origin ?? "");
-    if (origin) {
-      try {
-        const o = new URL(origin);
-        if (o.hostname !== "localhost" && o.hostname !== "127.0.0.1" && o.hostname !== "::1") return false;
-      } catch { return false; }
-    }
-    const host = String(req.headers.host ?? "");
-    if (host) {
-      const h = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
-      if (h !== "localhost" && h !== "127.0.0.1" && h !== "::1") return false;
-    }
-    return true;
   }
 
   const server = createServer(async (req, res) => {
@@ -416,6 +418,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           try {
             const { command } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
             if (!command || typeof command !== "string") throw new Error("commandが空です");
+            const verdict = await execGate.check(command);
+            if (!verdict.allowed) { json(res, { ok: false, text: `PermissionGateが拒否: ${verdict.reason ?? "許可されませんでした"}` }, 403); return; }
             const r = await runCommand({ command, cwd: config.workspace, timeoutMs: 120000, outputLimit: 16 * 1024 });
             json(res, r);
           } catch (err) {
@@ -596,7 +600,7 @@ export function listMemoryWithExpiry(workspace, now = Date.now()) {
 export function countAuditLines(workspace) {
   try {
     const raw = readFileSync(join(workspace, "state", "audit.jsonl"), "utf8");
-    return raw.split(String.fromCharCode(10)).filter((l) => l.trim()).length;
+    return raw.split("\n").filter((l) => l.trim()).length;
   } catch {
     return 0;
   }
