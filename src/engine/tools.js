@@ -12,7 +12,7 @@ const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null }) {
 
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
@@ -560,10 +560,19 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const dest = String(args.to_thread ?? "").trim();
         if (dest) {
           // crosstalk: 指定スレッドのボードへ直接投稿(自分のボードには載せない)。不在ならエラー
-          if (!crossPoster) return { ok: false, text: "このスレッドからは他スレッドへ投稿できません" };
-          const r = crossPoster(dest, agent.id, String(args.text ?? ""));
-          if (!r.ok) return { ok: false, text: r.error ?? "投稿できませんでした" };
-          return { ok: true, text: `スレッド ${dest} のボード#${r.id}へ投稿しました。` };
+          if (crossPoster) {
+            const r = crossPoster(dest, agent.id, String(args.text ?? ""));
+            if (!r.ok) return { ok: false, text: r.error ?? "投稿できませんでした" };
+            return { ok: true, text: `スレッド ${dest} のボード#${r.id}へ投稿しました。` };
+          }
+          // resolveBoard方式(design-to-thread.md): 宛先Boardを解決して直接投稿
+          if (resolveBoard) {
+            const destBoard = resolveBoard(dest);
+            if (!destBoard) return { ok: false, text: `宛先スレッドが存在しません: ${dest}` };
+            const post = destBoard.post(agent.id, String(args.text ?? ""));
+            return { ok: true, text: `ボード#${post.id}(${dest})へ投稿しました。` };
+          }
+          return { ok: false, text: "このスレッドからは他スレッドへ投稿できません" };
         }
         const post = board.post(agent.id, String(args.text ?? ""));
         return { ok: true, text: `ボード#${post.id}へ投稿しました。` };

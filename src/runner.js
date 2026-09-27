@@ -161,6 +161,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
         spawner: manager,
 
         crossPoster,
+        resolveBoard,
 
       })),
       board: threadBoard, tasks, bus, ledger,
@@ -280,6 +281,13 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     return { ok: true, id: post.id };
   };
 
+  // to_thread宛先解決(design-to-thread.md): 自分のボード/threads/__main__を解決。他はnull
+  const resolveBoard = (threadName) => {
+    const name = String(threadName ?? "").trim();
+    if (name === mainBoard.name) return mainBoard;
+    return threads.get(name)?.board ?? null;
+  };
+
   // スレッドのフォルダ(ナビ表示用分類)を付け替え。openThreadと同じ正規化を適用
   const setThreadFolder = ({ project, folder }) => {
     const name = String(project).trim();
@@ -329,6 +337,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       board: mainBoard, tasks, bus, gate,
       spawner: manager,
       crossPoster,
+      resolveBoard,
       threadOpener: openThread,
       threadCloser: closeThread,
     })),
