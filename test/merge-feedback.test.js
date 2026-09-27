@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bus } from "../src/engine/board.js";
 import { runChat } from "../src/runner.js";
+import { startUi } from "../src/ui/server.js";
 
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ } }
 function mktmp() {
@@ -96,6 +97,44 @@ test("feedback: 不明なスレッドはメイン宛てにフォールバック�
   assert.deepEqual(ctl.feedback({ taskId: "t1", comment: "   " }), { error: "taskIdとコメントが必要です" });
   assert.deepEqual(ctl.feedback({ taskId: "", comment: "x" }), { error: "taskIdとコメントが必要です" });
 
+  rmTree(ws);
+  rmTree(`${ws}-wt`);
+});
+
+test("API: /api/merge-feedbackはマージ記録のthreadを引き継いでonFeedbackへ渡す", async () => {
+  const ws = mktmp();
+  const bus = new Bus();
+  const config = { workspace: ws, ui: { port: 0 }, model: { model: "m" }, agents: [] };
+  const got = [];
+  const ui = await startUi({
+    config, modelFactory: () => ({}), bus, autoStart: false,
+    onFeedback: (req) => { got.push(req); return { ok: true, id: `fb-${req.taskId}-x`, thread: req.thread }; },
+  });
+  const base = `http://127.0.0.1:${config.ui.port}`;
+  const post = async (body) => {
+    const r = await fetch(`${base}/api/merge-feedback`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    return { status: r.status, body: await r.json() };
+  };
+
+  // スレッド所属のエージェントがマージしたケース: 記録からthreadが復元される
+  bus.emit("agent.spawned", { agent: { id: "demo-alpha", displayName: "A", thread: "demo" } });
+  bus.emit("merge.completed", { agent: "demo-alpha", taskId: "t1", stat: " 1 file changed", patch: "", summary: "" });
+
+  const ok = await post({ taskId: "t1", comment: "テストを足して" });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.thread, "demo");
+  assert.deepEqual(got.at(-1), { taskId: "t1", comment: "テストを足して", thread: "demo" });
+
+  // マージ記録に無いtaskIdはメイン宛てへフォールバック
+  const fb2 = await post({ taskId: "unknown-9", comment: "対応表にない" });
+  assert.equal(fb2.status, 200);
+  assert.equal(fb2.body.thread, "__main__");
+
+  // バリデーション: 空コメント・空taskIdは400
+  assert.equal((await post({ taskId: "t1", comment: " " })).status, 400);
+  assert.equal((await post({ taskId: "", comment: "x" })).status, 400);
+
+  ui.close();
   rmTree(ws);
   rmTree(`${ws}-wt`);
 });

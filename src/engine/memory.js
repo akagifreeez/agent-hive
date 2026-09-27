@@ -4,11 +4,13 @@
 // - 読むのは全エージェント(システムプロンプトへ常時注入)
 // - autocompactはこの内容を要約に複製しない(権威分離。要約は記憶に無い会話固有の進捗に集中)
 // - 削除ではなく上書き訂正で保守する(hermesの「削除せずアーカイブ」規律に相当)
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export const MEMORY_DIR_NAME = "memory";
 const MAX_MEMORY_BLOCK_CHARS = 6000;
+// ttl表記の単位(分/時/日)。claude-flowのメモリTTL(種別ごとに寿命を切る)の翻訳
+const TTL_UNITS = { m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000 };
 
 // PC操作の制限(ZCode相当の権威ルール)。全エージェントのシステムプロンプトに常時注入する。
 // 新規ワークスペースで自動シードし、既存のファイルがあれば上書きしない(手動調整を尊重)。
@@ -48,14 +50,52 @@ export function listMemoryFiles(workspace) {
   return readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
 }
 
+// 先頭のメタ行の ttl: <数><m|h|d> から寿命を解析する。宣言が無ければnull(永久)
+function memoryTtlMs(body) {
+  for (const l of body.split("\n")) {
+    if (!l.trim()) break;
+    const m = l.match(/^ttl:\s*(\d+)\s*([mhd])\s*$/i);
+    if (m) return Number(m[1]) * TTL_UNITS[m[2].toLowerCase()];
+  }
+  return null;
+}
+
+// 記憶ファイルが寿命切れか(mtime + ttl が過去)。ファイルは消さず注入から外すだけ
+// (削除ではなく上書き訂正で保守する、というmemory運用の規律を踏襲)。
+export function isMemoryExpired(workspace, file, now = Date.now()) {
+  try {
+    const raw = readFileSync(join(memoryDir(workspace), file), "utf8");
+    const ttl = memoryTtlMs(raw);
+    if (ttl == null) return false;
+    const st = statSync(join(memoryDir(workspace), file));
+    return st.mtimeMs + ttl < now;
+  } catch {
+    return false;
+  }
+}
+
+// ttlメタ行を本文から除く(注入物に運用メタを混ぜない)
+function stripTtlLine(body) {
+  const lines = body.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].trim()) break;
+    if (/^ttl:\s*(\d+)\s*([mhd])\s*$/i.test(lines[i])) {
+      lines.splice(i, 1);
+      break;
+    }
+  }
+  return lines.join("\n");
+}
+
 // システムプロンプトへ注入する文脈ブロック。ファイルが無ければ空文字(注入なし)。
+// ttl宣言のあるファイルで寿命切れのものは注入から外す(ファイル自体は残す)。
 export function buildMemoryContext(workspace) {
-  const files = listMemoryFiles(workspace);
+  const files = listMemoryFiles(workspace).filter((f) => !isMemoryExpired(workspace, f));
   if (files.length === 0) return "";
   const parts = files.map((f) => {
     let body = "";
     try {
-      body = readFileSync(join(memoryDir(workspace), f), "utf8").trim();
+      body = stripTtlLine(readFileSync(join(memoryDir(workspace), f), "utf8").trim());
     } catch {
       // 読めないファイルは飛ばす(並行書き換え等)
     }
