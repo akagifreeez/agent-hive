@@ -467,7 +467,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
-        req.on("end", () => {
+        req.on("end", async () => {
           try {
             const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
             const action = body.action ?? "start";
@@ -477,6 +477,9 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
             }
             const r = startDevServer(body.script, config.workspace);
             if (r.alreadyRunning) return json(res, { ok: false, error: "既に起動しています" }, 400);
+            // ダミーサーバーが "PORT=<n>" を出力するのを短時間待ってurlを確定させる
+            for (let i = 0; i < 40 && !r.port; i++) await new Promise((res2) => setTimeout(res2, 50));
+            r.url = r.port ? `http://127.0.0.1:${r.port}` : null;
             return json(res, r);
           } catch (err) {
             json(res, { ok: false, error: err.message }, 400);
@@ -539,11 +542,18 @@ function startDevServer(script, workspace) {
     const prev = devServers.get(script);
     return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port };
   }
-  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: "ignore", detached: false });
+  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "ignore"], detached: false });
   const entry = { child, port: null, startedAt: Date.now() };
   devServers.set(script, entry);
+  // 起動直後にサーバーが標準出力へ "PORT=<n>" を出す運用を想定。検出できたらurlを添える
+  let out = "";
+  child.stdout.on("data", (d) => {
+    out += d.toString();
+    const m = out.match(/PORT=(\d+)/);
+    if (m) entry.port = Number(m[1]);
+  });
   child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
-  return { ok: true, script, pid: child.pid };
+  return { ok: true, script, pid: child.pid, port: entry.port, url: entry.port ? `http://127.0.0.1:${entry.port}` : null };
 }
 
 function stopDevServer(script) {
