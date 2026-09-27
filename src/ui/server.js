@@ -501,23 +501,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
-      if (url.pathname === "/api/devserver" && req.method === "GET") {
-        return json(res, { scripts: detectNpmScripts(config.workspace).map((s) => s.name) });
-      }
-      if (url.pathname === "/api/devserver" && req.method === "POST") {
-        const chunks = [];
-        req.on("data", (d) => chunks.push(d));
-        req.on("end", () => {
-          try {
-            const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-            const r = handleDevserver({ method: "POST", body, workspace: config.workspace, uiPort: config.ui.port });
-            json(res, r.body ?? r, r.status ?? 200);
-          } catch (err) {
-            json(res, { ok: false, error: err.message }, 400);
-          }
-        });
-        return;
-      }
       if (url.pathname === "/markdown.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
         return res.end(readFileSync(join(PUBLIC, "markdown.js")));
