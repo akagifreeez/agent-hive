@@ -64,3 +64,12 @@ hiveコードベースへの敵対レビュー(redteam-r5)の結果記録。対�
 - 指摘11(b)(c): ローテート失敗の検知、bash 内操作の可視化(低〜中)
 - 指摘12: 監査書き込み失敗の検知機構(低)
 - 指摘5: Windows shell:true のメタ文字扱い(低)
+
+## 実行ベース検証の追記(beta, redteam-r5)
+
+上記レポートに加え、実際にツール/UIを動かして再現した結果:
+
+- **(H) bash の state 改ざん検知の迂回を実証** — `d=state; echo x > $d/evil2.jsonl`(変数展開)および `echo c3RhdGU= | base64 -d | xargs -I{} sh -c "echo x > {}/evil3.jsonl"` は auditTampering を素通りし、state/ 配下にファイルが実際に作成された(指摘11(a)の補強)。→ fix-audit-postcheck(事後スナップショット検知)を起票済み。
+- **(H) isLocalOrigin のヘッダ無しPOST許可を実証** — `isLocalOrigin({headers:{}}) === true`。Origin/Host を送らない文脈(file:// ページ等)からのPOSTが通る(指摘9の補強)。→ fix-csrf-token(X-Hive-Token 方式)を起票済み。
+- **(L) symlink ガードのテストが Windows で常に skip を実証** — test/safepath-symlink.test.js は symlink 作成権限が無い環境で3件全て skip。junction ベースのテストへ書き換え推奨。
+- 防御が効いていたもの(実証): read_file の `../../`・バックスラッシュ・`C:\` 絶対・UNC は全て拒否、write_file の state 書き込み・bash の直接 `> state/` も拒否。

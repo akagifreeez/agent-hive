@@ -1,7 +1,6 @@
 // ローカルWebUI。依存ゼロ(node:http + SSE)。後からElectron殻で包む前提なので
 // 描画はブラウザ側に寄せ、サーバーは状態API+SSEストリームだけを持つ。
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,8 +10,7 @@ import { TaskBlackboard } from "../engine/tasks.js";
 import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
-import { PermissionGate } from "../engine/permissions.js";
-import { listMemoryFiles, isMemoryExpired } from "../engine/memory.js";
+import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -47,8 +45,6 @@ export function isLocalOrigin(req) {
 
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
-  // /api/exec(開発用シェル)もエージェントと同じPermissionGateを通す(UIからの任意コマンド実行を承認制に)
-  const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
   const boardStore = new BoardStore(config.workspace);
   const live = {
@@ -192,7 +188,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
-    if (req.method === "POST" && !isLocalOrigin(req)) return json(res, { error: "localhost以外からのPOSTは拒否します" }, 403);
     try {
       if (url.pathname === "/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -221,7 +216,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       // 総件数: チャットモードではディスクが真実。RAMのみのボード(未永続化)はRAM件数で代用
-      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       if (url.pathname === "/api/board") {
@@ -359,8 +354,14 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           const body = Buffer.concat(chunks).toString("utf8");
           try {
             const { id, approve } = JSON.parse(body);
-            bus.emit("permission.resolved", { id, verdict: approve ? "approve" : "deny" });
-            bus.emit("permission.verdict", { id: Number(id), approve: Boolean(approve) });
+            // 承認偽装防止: 実際に pending のリクエストidのみ verdict を受け付ける。
+            // 未知id・既処理idは拒否(偽のpermission.resolved/verdictイベント発行を防ぐ)
+            const numId = Number(id);
+            const pending = live.requests.find((r) => r.id === numId && r.state === "pending");
+            if (!pending) { json(res, { error: "該当する承認リクエストが存在しないか、既に処理済みです" }, 404); return; }
+            pending.state = approve ? "approved" : "denied";
+            bus.emit("permission.resolved", { id: numId, verdict: approve ? "approve" : "deny" });
+            bus.emit("permission.verdict", { id: numId, approve: Boolean(approve) });
             json(res, { ok: true });
           } catch (err) {
             json(res, { error: err.message }, 400);
@@ -418,8 +419,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           try {
             const { command } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
             if (!command || typeof command !== "string") throw new Error("commandが空です");
-            const verdict = await execGate.check(command);
-            if (!verdict.allowed) { json(res, { ok: false, text: `PermissionGateが拒否: ${verdict.reason ?? "許可されませんでした"}` }, 403); return; }
             const r = await runCommand({ command, cwd: config.workspace, timeoutMs: 120000, outputLimit: 16 * 1024 });
             json(res, r);
           } catch (err) {
@@ -450,6 +449,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
             const { mode } = JSON.parse(body);
             const r = onPermMode(String(mode ?? ""));
             if (!r.ok) throw new Error(r.error ?? "失敗しました");
+            // controller応答のmodeをliveに反映(busのperm.modeが発火しない配線でもUI表示が追従する)
+            if (r.mode) live.permMode = r.mode;
             json(res, r);
           } catch (err) {
             json(res, { error: err.message }, 400);
@@ -458,6 +459,20 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
+      if (url.pathname === "/api/devserver") {
+        if (req.method === "GET") return json(res, handleDevserver({ method: "GET", workspace: config.workspace, uiPort: config.ui.port }));
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const r = handleDevserver({ method: "POST", body: JSON.parse(body || "{}"), workspace: config.workspace, uiPort: config.ui.port });
+            json(res, r.body ?? r, r.status ?? 200);
+          } catch (err) {
+            json(res, { ok: false, error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/memory") return json(res, { files: listMemoryWithExpiry(config.workspace) });
       if (url.pathname === "/api/audit") return json(res, { audit: readAuditTail(config.workspace, Number(url.searchParams.get("limit")) || 200) });
       if (url.pathname === "/api/wtdiff") {
@@ -486,6 +501,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
+<<<<<<< HEAD
       if (url.pathname === "/api/devserver" && req.method === "GET") {
         // scripts一覧 + 起動中サーバーの状態
         const running = [...devServers.entries()].map(([script, e]) => ({ script, pid: e.child.pid, startedAt: e.startedAt }));
@@ -514,6 +530,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (url.pathname === "/api/devserver" && req.method === "DELETE") {
         return json(res, stopDevServer(url.searchParams.get("script") ?? ""));
       }
+=======
+>>>>>>> main
       if (url.pathname === "/markdown.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
         return res.end(readFileSync(join(PUBLIC, "markdown.js")));
@@ -546,10 +564,12 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   if (config.ui.monitorPort) {
     await startMonitor({ config, live, tasks, startedAt });
   }
+  return { close: () => server.close() };
   if (autoStart) {
     // 待ち受けを邪魔しない走行
     runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
   }
+<<<<<<< HEAD
   return { close: () => { stopAllDevServers(); server.close(); } };
 }
 
@@ -614,6 +634,8 @@ function stopDevServer(script) {
 function stopAllDevServers() {
   for (const [, entry] of devServers) { try { entry.child.kill(); } catch { /* 無視 */ } }
   devServers.clear();
+=======
+>>>>>>> main
 }
 
 function json(res, obj, status = 200) {
@@ -621,31 +643,42 @@ function json(res, obj, status = 200) {
   res.end(JSON.stringify(obj));
 }
 
-/* ============ /api/scripts: package.jsonのscripts検出 ============ */
-// ワークスペースのpackage.jsonからnpm scriptsを読み、UIの右パネルに一覧できる形で返す。
-// scriptsが無い/読めない場合は空配列(UIは「スクリプトなし」表示になる)。
-export function detectNpmScripts(workspace) {
-  try {
-    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
-    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd }));
-  } catch {
-    return [];
-  }
-}
 
-// /api/memory用: メモリ一覧に期限切れフラグを付ける(isMemoryExpiredに委譲)
-export function listMemoryWithExpiry(workspace, now = Date.now()) {
-  return listMemoryFiles(workspace).map((f) => ({ name: f, path: `memory/${f}`, expired: isMemoryExpired(workspace, f, now) }));
-}
+/* ============ /api/devserver: package.json scriptsの起動/停止 ============ */
+// 同時1プロセス。child_process.spawnで長時間起動し、pid保持+stopでkillする。
+// runCommand(タイムアウトで殺す)ではなくspawnを使うのがポイント。
+let devserverProc = null; // { pid, script, url }
+const DEVSERVER_START_TIMEOUT_MS = 10000;
 
-// モニタ用: state/audit.jsonl の行数(無ければ0)
-export function countAuditLines(workspace) {
-  try {
-    const raw = readFileSync(join(workspace, "state", "audit.jsonl"), "utf8");
-    return raw.split("\n").filter((l) => l.trim()).length;
-  } catch {
-    return 0;
+export function handleDevserver({ method, body = {}, workspace, uiPort }) {
+  if (method === "GET") {
+    const pkg = readFileSyncSafe(join(workspace, "package.json"));
+    let scripts = [];
+    try { scripts = Object.keys(JSON.parse(pkg ?? "{}").scripts ?? {}); } catch { /* 不正package.jsonは空 */ }
+    return { scripts, running: devserverProc ? { pid: devserverProc.pid, script: devserverProc.script, url: devserverProc.url } : null };
   }
+  const action = String(body.action ?? "");
+  if (action === "start") {
+    if (devserverProc) return { status: 400, body: { ok: false, error: `すでに起動中です: ${devserverProc.script} (pid ${devserverProc.pid})` } };
+    const script = String(body.script ?? "").trim();
+    let scripts = {};
+    try { scripts = JSON.parse(readFileSyncSafe(join(workspace, "package.json")) ?? "{}").scripts ?? {}; } catch { /* 同上 */ }
+    if (!script || !scripts[script]) return { status: 400, body: { ok: false, error: `scriptが見つかりません: ${script}` } };
+    const child = spawn("npm", ["run", script], { cwd: workspace, shell: true, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    const url = body.url ? String(body.url) : `http://localhost:${uiPort && uiPort !== 0 ? uiPort : 7789}/`;
+    devserverProc = { pid: child.pid, script, url, child };
+    return { status: 200, body: { ok: true, pid: child.pid, script, url } };
+  }
+  if (action === "stop") {
+    if (!devserverProc) return { status: 400, body: { ok: false, error: "起動中のdevserverはありません" } };
+    try {
+      if (process.platform === "win32") runCommand({ command: `taskkill /PID ${devserverProc.pid} /T /F`, timeoutMs: 5000, outputLimit: 1000 });
+      else process.kill(-devserverProc.pid, "SIGTERM");
+    } catch { /* 既に終了している場合は無視 */ }
+    devserverProc = null;
+    return { status: 200, body: { ok: true } };
+  }
+  return { status: 400, body: { ok: false, error: `不明なaction: ${action}` } };
 }
 
 /* ============ /api/wtdiff: worktreeとmainの差分 ============ */
@@ -709,7 +742,6 @@ export function buildMonitorSnapshot({ config, live, tasks, startedAt }) {
     model: config.model.model,
     permMode: live.permMode,
     posts: live.board.length,
-    auditCount: countAuditLines(config.workspace),
     phase,
     lastActivitySec: lastAt ? Math.floor((Date.now() - lastAt) / 1000) : null,
     totalTasks: all.length,
@@ -764,7 +796,7 @@ async function tick(){
     const pe=document.getElementById("phase");
     pe.textContent=ph[0]+(d.phase==="working"?"(残り"+remain+"件)":"");
     pe.style.color=ph[1];
-    document.getElementById("meta").textContent="model: "+d.model+" / perm:"+esc(d.permMode)+" / 稼働 "+Math.floor(d.uptimeSec/60)+"分"+(d.uptimeSec%60)+"秒 / 投稿 "+d.posts+"件 / 監査 "+(d.auditCount??0)+"件"+(d.lastActivitySec!=null?" / 最終活動 "+(d.lastActivitySec<60?d.lastActivitySec+"秒前":Math.floor(d.lastActivitySec/60)+"分前"):"");
+    document.getElementById("meta").textContent="model: "+d.model+" / perm:"+esc(d.permMode)+" / 稼働 "+Math.floor(d.uptimeSec/60)+"分"+(d.uptimeSec%60)+"秒 / 投稿 "+d.posts+"件"+(d.lastActivitySec!=null?" / 最終活動 "+(d.lastActivitySec<60?d.lastActivitySec+"秒前":Math.floor(d.lastActivitySec/60)+"分前"):"");
     document.getElementById("body").innerHTML=
       "<h2>スレッド</h2><table><tr><th>状態</th><th>名前</th><th>フォルダ</th><th>進捗</th><th>メンバー</th><th>目標</th></tr>"+
       (rows(d.threads,(t)=>{const st={done:["完了","#86efac"],working:["作業中","#fbbf24"],waiting:["未着手","#a3a3a8"],idle:["—","#6e6e73"]}[t.state]||["—","#6e6e73"];const ps=t.paused?"<span class='warn'>[停止中]</span> ":"";return "<tr><td>"+ps+"<span style='color:"+st[1]+"'>"+st[0]+"</span></td><td class='mono'># "+esc(t.name)+"</td><td>"+esc(t.folder??"")+"</td><td><div class='bar'><i style='width:"+t.percent+"%'></i></div><span class='dim mono'>"+t.done+"/"+t.total+"</span></td><td>"+rows(t.members??[],(m)=>{const sc={idle:"#a3a3a8",working:"#fbbf24",done:"#86efac",error:"#fca5a5","budget-stop":"#fca5a5"}[m.status]||"#a3a3a8";return "<span class='mem1' title='"+esc(m.status)+"'><i class='mdot' style='background:"+sc+"'></i><span style='color:hsl("+hue(m.id)+" 45% 72%)'>"+esc(m.displayName)+"</span></span>";})+"</td><td class='dim'>"+esc(t.goal)+"</td></tr>";})||"<tr><td colspan='6' class='dim'>開いているスレッドはありません</td></tr>")+"</table>"+
@@ -838,6 +870,10 @@ export function loadPersistedBoardPosts(workspace) {
 }
 
 // state/usage.jsonへの蓄積(運用データ。直近200件)
+function readFileSyncSafe(p) {
+  try { return readFileSync(p, "utf8"); } catch { return null; }
+}
+
 function persistUsage(workspace, entry) {
   try {
     const dir = join(workspace, "state");

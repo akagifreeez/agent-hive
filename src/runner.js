@@ -447,6 +447,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     closeThread,
     setThreadFolder,
     setThreadPaused,
+    setPermMode,
     listThreads: () => [...threads.keys()],
     manager,
     mcpHosts,
@@ -513,6 +514,8 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       tasks,
       bus,
       gate,
+      // scenario実行ではスレッド機構が無いので自分のボードのみ解決(他スレッド宛はok:false)
+      resolveBoard: (name) => (String(name ?? "").trim() === board.name ? board : null),
     });
     const shellKind = await tools.detectShell();
     const agentWithCtx = { ...agent, scenarioName: config.scenario.name };

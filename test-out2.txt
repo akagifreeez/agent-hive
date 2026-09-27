@@ -1,0 +1,26 @@
+
+> agent-hive@0.1.0 test
+> node --test "test/*.test.js"
+
+✔ TaskBlackboard: acceptanceをメタ行で保存し、claimの本文に載り、listに現れる (15.892ms)
+✔ create_taskツール: acceptance引数が保存され、claim_next_taskの返値で目立って提示される (19.9453ms)
+UI: http://localhost:57150
+✔ GET /api/audit: ツール実行後に記録が読める(新しい順・limit) (384.0886ms)
+✔ 監査保護: state/audit.jsonl へのリダイレクト書き込みは拒否される (10.3951ms)
+✔ 監査保護: tee/cp/mv/rm による state/ への操作も拒否される (10.2735ms)
+✔ 監査保護: state/ を読むだけ・無関係なコマンドは許可される (590.2017ms)
+✔ 監査保護: 拒否されても監査台帳自体は記録され続ける (7.0809ms)
+✔ 監査台帳: 成功・失敗がagent/tool/ok付きで記録され、bashはコマンドも残す (233.3636ms)
+✔ 監査台帳: hooksでブロックされた実行はblocked:trueで残る (7.3358ms)
+✔ 監査台帳: 5MB超で1世代ローテートする (46.1852ms)
+UI: http://localhost:57142
+✔ board API: /api/stateのboardは末尾200件に絞られ、/api/board?before=でそれ以前を返す (119.1167ms)
+UI: http://localhost:57188
+✔ BoardStore: 全文を読まずに総数と頁送りが合う (440.5097ms)
+✔ BoardStore: 追記は差分スキャンで反映され、壊れた行・未完成行は無視する (56.8109ms)
+✔ Board.replay: 末尾だけ復元しても続き番号は正しく、RAMは上限で刈られる (561.0053ms)
+✔ API: /api/boardのthread指定はディスクから頁送り、stateのboardTotalは真の総数 (434.2496ms)
+✔ edit_file replace_all: 全一致を一括置換する。無指定なら複数一致はエラーのまま (19.9809ms)
+✔ web_fetch: 本文を取得する。http(s)以外は拒否 (6.55ms)
+✔ gather_context threads: スレッド進捗サマリを読める (15.6318ms)
+✔ close_thread: スレッドを閉じるとregistryから外れ、再起動でも復元されない (4202.2209ms)
