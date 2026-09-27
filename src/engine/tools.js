@@ -11,7 +11,8 @@ import { readSkill } from "./skills.js";
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0 }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, resolveBoard = null }) {
+  // to_thread宛先の解決(スレッド名→Board)。未指定/未対応環境では自分のboardのみ
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
   const specs = [
@@ -114,8 +115,8 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "post_to_board",
-      description: "共有ボードへ報告・指摘・質問を投稿する。他の全エージェントの目に留まる。",
-      parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"], additionalProperties: false },
+      description: "共有ボードへ報告・指摘・質問を投稿する。他の全エージェントの目に留まる。to_threadで別スレッドのボードへも投稿できる。",
+      parameters: { type: "object", properties: { text: { type: "string" }, to_thread: { type: "string", description: "宛先スレッド名(project名・__main__可)。省略時は自分の所属ボード" } }, required: ["text"], additionalProperties: false },
     },
     {
       name: "wait_for_board",
@@ -552,8 +553,11 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       case "bash":
         return await gatedBash(String(args.command ?? ""), clamp(Number(args.timeout_ms) || maxBashMs, 1000, 120000));
       case "post_to_board": {
-        const post = board.post(agent.id, String(args.text ?? ""));
-        return { ok: true, text: `ボード#${post.id}へ投稿しました。` };
+        // to_thread指定時は宛先スレッドのBoardへ投稿する(スレッド間連携)。解決できない宛先は投稿しない
+        const target = args.to_thread ? resolveBoard(String(args.to_thread)) : board;
+        if (!target) return { ok: false, text: `宛先スレッドが存在しません: ${args.to_thread}` };
+        const post = target.post(agent.id, String(args.text ?? ""));
+        return { ok: true, text: target === board ? `ボード#${post.id}へ投稿しました。` : `ボード#${post.id}(${target.name})へ投稿しました。` };
       }
       case "wait_for_board": {
         const sec = clamp(Number(args.timeout_sec) || 60, 5, 180);
