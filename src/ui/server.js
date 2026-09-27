@@ -25,6 +25,24 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
+// CSRF/DNS rebinding対策: POSTのOrigin/Hostがlocalhost系か判定する。
+// ヘッダ無し(同一オリジン由来のcurl等)は許可し、外部オリジンのみ拒否。
+export function isLocalOrigin(req) {
+  const origin = String(req.headers.origin ?? "");
+  if (origin) {
+    try {
+      const o = new URL(origin);
+      if (o.hostname !== "localhost" && o.hostname !== "127.0.0.1" && o.hostname !== "::1") return false;
+    } catch { return false; }
+  }
+  const host = String(req.headers.host ?? "");
+  if (host) {
+    const h = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+    if (h !== "localhost" && h !== "127.0.0.1" && h !== "::1") return false;
+  }
+  return true;
+}
+
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
@@ -336,8 +354,14 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           const body = Buffer.concat(chunks).toString("utf8");
           try {
             const { id, approve } = JSON.parse(body);
-            bus.emit("permission.resolved", { id, verdict: approve ? "approve" : "deny" });
-            bus.emit("permission.verdict", { id: Number(id), approve: Boolean(approve) });
+            // 承認偽装防止: 実際に pending のリクエストidのみ verdict を受け付ける。
+            // 未知id・既処理idは拒否(偽のpermission.resolved/verdictイベント発行を防ぐ)
+            const numId = Number(id);
+            const pending = live.requests.find((r) => r.id === numId && r.state === "pending");
+            if (!pending) { json(res, { error: "該当する承認リクエストが存在しないか、既に処理済みです" }, 404); return; }
+            pending.state = approve ? "approved" : "denied";
+            bus.emit("permission.resolved", { id: numId, verdict: approve ? "approve" : "deny" });
+            bus.emit("permission.verdict", { id: numId, approve: Boolean(approve) });
             json(res, { ok: true });
           } catch (err) {
             json(res, { error: err.message }, 400);
