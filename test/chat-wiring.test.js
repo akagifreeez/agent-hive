@@ -35,7 +35,7 @@ test("chatUiHandlers: 設定・スレッド・フォルダ・pause・feedbackの
   const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false, ...chatUiHandlers(controller) });
   const base = `http://127.0.0.1:${config.ui.port}`;
   const post = async (path, body) => {
-    const r = await fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const r = await fetch(base + path, { method: "POST", headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" }, body: JSON.stringify(body) });
     return { status: r.status, body: await r.json().catch(() => null) };
   };
 

@@ -803,17 +803,6 @@ tick();setInterval(tick,3000);
   return server;
 }
 
-// package.jsonのnpm scripts検出({name, cmd}配列。読めない/無ければ空配列)。
-// /api/scripts と UIのscripts一覧で使う。マージ過程で定義が落ちたため復元(2026-09-27)
-export function detectNpmScripts(workspace) {
-  try {
-    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
-    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd: String(cmd) }));
-  } catch {
-    return [];
-  }
-}
-
 function readFileSafe(workspace, p) {
   const root = resolve(workspace);
   const full = resolve(root, p);

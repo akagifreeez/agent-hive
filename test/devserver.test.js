@@ -43,6 +43,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
     budget: { maxTokensPerRun: 1 },
   };
   const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
+  const token = ui.token ?? "";
   const base = `http://127.0.0.1:${config.ui.port}`;
 
   // scripts検出(GET /api/scripts。/api/devserverはGETで起動中サーバー一覧を返す)
@@ -53,7 +54,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   // 起動
   const started = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" },
     body: JSON.stringify({ action: "start", script: "serve" }),
   });
   assert.equal(started.status, 200, JSON.stringify(started.body));
@@ -64,7 +65,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   // 二重起動は同じプロセスを返す(alreadyRunning)
   const dup = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" },
     body: JSON.stringify({ action: "start", script: "serve" }),
   });
   assert.equal(dup.status, 200);
@@ -74,7 +75,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   // 停止
   const stopped = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" },
     body: JSON.stringify({ action: "stop", script: "serve" }),
   });
   assert.equal(stopped.status, 200);
@@ -83,7 +84,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   // 停止後の二重停止はエラー
   const dupStop = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" },
     body: JSON.stringify({ action: "stop", script: "serve" }),
   });
   assert.equal(dupStop.body.ok, false);
