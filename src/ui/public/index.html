@@ -1276,7 +1276,8 @@ function renderAll() {
 // 頁送りAPIで以前の投稿を取得し、表示に前置きする(アンカーへスクロール復帰)
 async function loadOlderPosts(beforeId) {
   if (beforeId == null) return;
-  const r = await fetch(`/api/board?before=${beforeId}`);
+  // threadを付けてサーバー側でそのスレッドのJSONLから直接読ませる(RAMに無い過去分も出る)
+  const r = await fetch(`/api/board?before=${beforeId}&thread=${encodeURIComponent(selectedThread)}`);
   if (!r.ok) return;
   const data = await r.json();
   const older = (data.posts ?? []).filter((p) => (p.thread ?? "__main__") === selectedThread);

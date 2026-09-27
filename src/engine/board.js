@@ -2,8 +2,13 @@
 // 他エージェントのループに「ボード新着」として注入される。
 // v6: Boardごとにスレッド名を持ち、投稿にthreadタグを付ける(メインチャット="__main__")。
 // v6.1: persistPathを指定すると投稿をJSONL追記し、起動時にリプレイする(チャットの復帰)。
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { readBoardTail } from "./boardstore.js";
+
+// メモリに保持する投稿の上限(長時間ランでの肥大止め)。全文はJSONLに残り、
+// UIの頁送り(BoardStore)がディスクから拾う。gather_contextの上限100に十分な量
+const POSTS_KEEP = 1000;
 
 export class Board {
   constructor(bus = null, name = "__main__", persistPath = null) {
@@ -16,16 +21,10 @@ export class Board {
     if (persistPath) this.replay();
   }
 
-  // 保存済み投稿の復元(壊れた行は飛ばす)
+  // 保存済み投稿の復元。起動を速く保つため末尾だけ読む(全文はディスクに残り、UIの頁送りが拾う)
   replay() {
     try {
-      for (const line of readFileSync(this.persistPath, "utf8").split("\n")) {
-        if (!line.trim()) continue;
-        try {
-          const p = JSON.parse(line);
-          if (p && typeof p.id === "number") this.posts.push(p);
-        } catch {}
-      }
+      this.posts = readBoardTail(this.persistPath);
       this.seq = this.posts.length ? this.posts[this.posts.length - 1].id : 0;
     } catch {
       // ファイルが無ければ初回
@@ -35,6 +34,7 @@ export class Board {
   post(from, text) {
     const post = { id: ++this.seq, from, text: String(text), at: Date.now(), thread: this.name };
     this.posts.push(post);
+    if (this.posts.length > POSTS_KEEP) this.posts.splice(0, this.posts.length - POSTS_KEEP);
     if (this.persistPath) {
       try {
         mkdirSync(dirname(this.persistPath), { recursive: true });

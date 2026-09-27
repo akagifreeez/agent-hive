@@ -5,7 +5,7 @@
 // ラウンド中にスポーンされたサブの進捗もボードに流れ、次のラウンドで読まれる。
 // v6.1: 各メインのmessagesはラウンド終了ごとに workspace/state/ へ保存し、
 // 再起動時に復元する(チャットの記憶がプロセスをまたいで続く)。
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { runAgentLoop, buildSystemPrompt } from "./loop.js";
 import { createTools } from "./tools.js";
@@ -100,7 +100,10 @@ export class ChatHost {
     if (!p || !this.memories.has(main.id)) return;
     try {
       mkdirSync(join(this.mainWorkspace, "state"), { recursive: true });
-      writeFileSync(p, JSON.stringify({ messages: this.memories.get(main.id) }));
+      // 一時ファイル経由の原子書込(クラッシュ時の半端JSONで復元が壊れるのを防ぐ)
+      const tmp = `${p}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ messages: this.memories.get(main.id) }));
+      renameSync(tmp, p);
     } catch {
       // 保存失敗でラウンドを壊さない
     }
