@@ -5,7 +5,7 @@ import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync, appendFi
 import { resolve, join, dirname, sep } from "node:path";
 import { runCommand, detectShell } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
-import { readMeta } from "./tasks.js";
+import { readMeta, detectTaskOverlap } from "./tasks.js";
 import { readSkill } from "./skills.js";
 
 const READ_LIMIT = 120 * 1024;
@@ -337,7 +337,19 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         }
         const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "", createdBy: agent.id });
         if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
-        return { ok: true, text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""})。` };
+        // 重複検知: 未着手/作業中の既存タスクと共有ファイルがあれば警告を添える(ブロックはしない)
+        const l = tasks.list();
+        const overlaps = detectTaskOverlap(String(args.body ?? ""), [...l.open, ...l.claimed]);
+        const warn = (overlaps ?? [])
+          .map((o) => `警告: 既存タスク ${o.taskId} が同じファイル(${o.files.join(", ")})を扱っています。重複の可能性。中止ならtasks cancel ${o.taskId}`)
+          .join("
+");
+        return {
+          ok: true,
+          text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""})。${warn ? "
+
+" + warn : ""}`,
+        };
       }
       case "spawn_agent": {
         if (!spawner) return { ok: false, text: "このエージェントにはスポーン権限がありません。" };
