@@ -561,7 +561,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   if (config.ui.monitorPort) {
     await startMonitor({ config, live, tasks, startedAt });
   }
-  return { close: () => server.close() };
   if (autoStart) {
     // 待ち受けを邪魔しない走行
     runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
