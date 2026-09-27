@@ -24,6 +24,7 @@ const HELP = `agent-hive CLI — 稼働中のhiveを端末から操作する
   chat [--thread 名前]      対話モード。入力した行がそのまま発言になる
   feedback <taskId> <コメント>  マージ済み差分への修正依頼を送る
   pause <スレッド> / resume <スレッド>  スレッドの一時停止/再開
+  audit                     監査台帳(state/audit.jsonl)の直近記録を見る(-n 件数、既定30)
   usage                     トークン消費の直近サマリ
 
   --port N                  UIサーバーのポート(既定: HIVE_UI_PORT または 7789)
@@ -287,7 +288,12 @@ async function main() {
     const s = await api(opts.port, "/api/state");
     return fmtThreads(s.live?.threads ?? []);
   }
-  if (cmd === "tasks") return cmdTasks(opts, args[0]);
+  if (cmd === "tasks") {
+    const sub = args[0];
+    if (sub === "cancel" || sub === "release" || sub === "reopen") return cmdTaskAction(opts, args.slice(1), sub);
+    return cmdTasks(opts, sub);
+  }
+  if (cmd === "audit") return cmdAudit(opts);
   if (cmd === "board") return cmdBoard(opts);
   if (cmd === "say") return cmdSay(opts, args);
   if (cmd === "feedback") return cmdFeedback(opts, args);
