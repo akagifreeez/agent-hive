@@ -260,6 +260,10 @@ async function cmdTaskAction(o, args, action) {
     exit(1);
   }
   const r = await api(o.port, "/api/tasks", { action, id });
+  if (r && r.error) {
+    console.error(r.error);
+    exit(1);
+  }
   console.log(`${id} を${{ cancel: "中止", release: "解放", reopen: "再open" }[action]}しました。`);
   return r;
 }
@@ -287,6 +291,9 @@ async function main() {
     const s = await api(opts.port, "/api/state");
     return fmtThreads(s.live?.threads ?? []);
   }
+  if (cmd === "tasks" && args[0] === "cancel") return cmdTaskAction(opts, args.slice(1), "cancel");
+  if (cmd === "tasks" && args[0] === "release") return cmdTaskAction(opts, args.slice(1), "release");
+  if (cmd === "tasks" && args[0] === "reopen") return cmdTaskAction(opts, args.slice(1), "reopen");
   if (cmd === "tasks") return cmdTasks(opts, args[0]);
   if (cmd === "board") return cmdBoard(opts);
   if (cmd === "say") return cmdSay(opts, args);
@@ -296,6 +303,7 @@ async function main() {
   if (cmd === "watch") return watch(opts, false);
   if (cmd === "chat") return watch(opts, true);
   if (cmd === "usage") return cmdUsage(opts);
+  if (cmd === "audit") return cmdAudit(opts);
   console.error(`不明なコマンド: ${cmd}\n${HELP}`);
   exit(1);
 }
