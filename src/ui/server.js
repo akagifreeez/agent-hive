@@ -714,6 +714,45 @@ function readFileSyncSafe(p) {
 // /api/audit: state/audit.jsonl(+1世代前 audit-1.jsonl)の末尾limit件を新着順で返す。
 // 台帳はtools.jsが書く真実で、ここは読み取り専用。壊れた行は無視する(簿記の失敗で止めない)
 function readAuditTail(workspace, limit) {
+  const n = Math.max(1, Math.min(Number(limit) || 200, 1000));
+  const dir = join(workspace, "state");
+  const lines = [];
+  for (const name of ["audit-1.jsonl", "audit.jsonl"]) {
+    try {
+      const text = readFileSync(join(dir, name), "utf8");
+      for (const l of text.split("\n")) {
+        const s = l.trim();
+        if (!s) continue;
+        try { lines.push(JSON.parse(s)); } catch { /* 壊れた行は無視 */ }
+      }
+    } catch { /* ファイルが無い世代は無視 */ }
+  }
+  return lines.slice(-n).reverse();
+}
+// state/usage.jsonへの蓄積(運用データ。直近200件)
+function persistUsage(workspace, entry) {
+  try {
+    const dir = join(workspace, "state");
+    mkdirSync(dir, { recursive: true });
+      const file = join(dir, "usage.json");
+      const history = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
+      history.push(entry);
+      writeFileSync(file, JSON.stringify(history.slice(-200), null, 1));
+  } catch {}
+}
+
+function readFileSyncSafe(p) {
+  try {
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+<<<<<<< HEAD
+// /api/audit: state/audit.jsonl(+1世代前 audit-1.jsonl)の末尾limit件を新着順で返す。
+// 台帳はtools.jsが書く真実で、ここは読み取り専用。壊れた行は無視する(簿記の失敗で止めない)
+function readAuditTail(workspace, limit) {
   const dir = join(workspace, "state");
   const lines = [];
   for (const name of ["audit-1.jsonl", "audit.jsonl"]) {
@@ -727,4 +766,26 @@ function readAuditTail(workspace, limit) {
     } catch { /* ファイルが無い世代は無視 */ }
   }
   return lines.slice(-Math.max(1, Math.min(limit, 1000))).reverse();
+=======
+// state/audit.jsonl の末尾limit件を新しい順で読む(監査ビュー用)。壊れた行は無視
+const BS_NL = "\n";
+function readAuditTail(workspace, limit) {
+  const n = Math.max(1, Math.min(Number(limit) || 200, 1000));
+  const file = join(workspace, "state", "audit.jsonl");
+  let text = "";
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  const lines = text.split(BS_NL).filter((l) => l.trim());
+  const out = [];
+  for (let i = lines.length - 1; i >= 0 && out.length < n; i--) {
+    try {
+      const e = JSON.parse(lines[i]);
+      if (e && typeof e === "object") out.push(e);
+    } catch {}
+  }
+  return out;
+>>>>>>> main
 }

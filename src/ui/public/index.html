@@ -173,6 +173,14 @@
   table.usage-tbl th { text-align: left; color: var(--label-tertiary); font-weight: 600; padding: 2px 6px; border-bottom: 1px solid var(--separator); }
   table.usage-tbl td { padding: 2px 6px; border-bottom: 1px solid var(--separator); }
   table.usage-tbl tr.total td { color: var(--label); border-top: 1px solid var(--line-strong); font-weight: 600; }
+  table.audit-tbl { width: 100%; border-collapse: collapse; font-size: 11px; font-family: var(--font-mono); }
+  table.audit-tbl th { text-align: left; color: var(--label-tertiary); font-weight: 600; padding: 2px 6px; border-bottom: 1px solid var(--separator); position: sticky; top: 0; background: var(--bg); }
+  table.audit-tbl td { padding: 2px 6px; border-bottom: 1px solid var(--separator); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  table.audit-tbl td.okmark { width: 14px; text-align: center; }
+  table.audit-tbl .ok-y { color: var(--ok); }
+  table.audit-tbl .ok-n { color: var(--err); }
+  table.audit-tbl tr.blk td { color: var(--label-tertiary); }
+  .audit-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
   .session-row { display: flex; gap: 6px; margin-bottom: 6px; }
   .session-row input { flex: 1; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 4px 8px; font-size: 12px; box-shadow: var(--inset-field); }
   .session-row input:focus { outline: none; border-color: var(--accent); }
@@ -325,6 +333,7 @@
       <div class="ct" data-tab="term">ターミナル</div>
       <div class="ct" data-tab="browser">ブラウザ</div>
       <div class="ct" data-tab="memory">メモリ</div>
+      <div class="ct" data-tab="audit">監査</div>
     </div>
     <div id="ctx-body"></div>
     <div id="browserpane">
@@ -691,6 +700,7 @@ function renderCtx(state) {
   if (ctxTab === "files") renderFilesTab(body);
   if (ctxTab === "status") renderStatusTab(body);
   if (ctxTab === "memory") renderMemoryTab(body);
+  if (ctxTab === "audit") renderAuditTab(body);
   if (ctxTab === "term") renderTerminalTab();
 }
 
@@ -932,6 +942,57 @@ function renderMemoryTab(body) {
     h.textContent = "memory/ にファイルがありません(タスク消化後にlearningsが溜まります)。";
     body.appendChild(h);
   }
+}
+
+function renderAuditTab(body) {
+  const head = document.createElement("div");
+  head.className = "audit-head";
+  const sec = document.createElement("div");
+  sec.className = "sec";
+  sec.textContent = "監査台帳(全ツール実行・新しい順)";
+  const reload = document.createElement("button");
+  reload.className = "btn";
+  reload.id = "audit-reload";
+  reload.textContent = "再読込";
+  head.append(sec, reload);
+  body.appendChild(head);
+  const box = document.createElement("div");
+  body.appendChild(box);
+  const load = async () => {
+    box.innerHTML = "";
+    let rows = [];
+    try {
+      const r = await (await fetch("/api/audit?limit=200")).json();
+      rows = r.audit ?? [];
+    } catch {}
+    if (!rows.length) {
+      const h = document.createElement("div");
+      h.className = "hint";
+      h.textContent = "記録はまだありません。";
+      box.appendChild(h);
+      return;
+    }
+    const tbl = document.createElement("table");
+    tbl.className = "audit-tbl";
+    tbl.innerHTML = "<thead><tr><th></th><th>時刻</th><th>エージェント</th><th>ツール</th><th>cmd</th></tr></thead>";
+    const tb = document.createElement("tbody");
+    for (const e of rows) {
+      const tr = document.createElement("tr");
+      if (e.blocked) tr.className = "blk";
+      const ok = e.ok === true;
+      const t = e.ts ? e.ts.replace("T", " ").slice(0, 19) : "";
+      tr.innerHTML = `<td class="okmark ${ok ? "ok-y" : "ok-n"}">${ok ? "●" : "▲"}</td>` +
+        `<td>${escapeHtml(t)}</td>` +
+        `<td>${escapeHtml(e.agent ?? "")}</td>` +
+        `<td>${escapeHtml(e.tool ?? "")}</td>` +
+        `<td title="${escapeHtml(e.cmd ?? e.path ?? e.brief ?? "")}">${escapeHtml(e.cmd ?? e.path ?? e.brief ?? "")}</td>`;
+      tb.appendChild(tr);
+    }
+    tbl.appendChild(tb);
+    box.appendChild(tbl);
+  };
+  reload.onclick = load;
+  load();
 }
 
 function renderStatusTab(body) {
