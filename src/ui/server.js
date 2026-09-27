@@ -510,11 +510,12 @@ export function listMemoryWithExpiry(workspace, now = Date.now()) {
 }
 
 // モニタ用: state/audit.jsonl の行数(無ければ0)
+const NEWLINE = String.fromCharCode(10);
+
 export function countAuditLines(workspace) {
   try {
     const raw = readFileSync(join(workspace, "state", "audit.jsonl"), "utf8");
-    return raw.split("
-").filter((l) => l.trim()).length;
+    return raw.split(NEWLINE).filter((l) => l.trim()).length;
   } catch {
     return 0;
   }
