@@ -359,8 +359,14 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           const body = Buffer.concat(chunks).toString("utf8");
           try {
             const { id, approve } = JSON.parse(body);
-            bus.emit("permission.resolved", { id, verdict: approve ? "approve" : "deny" });
-            bus.emit("permission.verdict", { id: Number(id), approve: Boolean(approve) });
+            // 承認偽装防止: 実際に pending のリクエストidのみ verdict を受け付ける。
+            // 未知id・既処理idは拒否(偽のpermission.resolved/verdictイベント発行を防ぐ)
+            const numId = Number(id);
+            const pending = live.requests.find((r) => r.id === numId && r.state === "pending");
+            if (!pending) { json(res, { error: "該当する承認リクエストが存在しないか、既に処理済みです" }, 404); return; }
+            pending.state = approve ? "approved" : "denied";
+            bus.emit("permission.resolved", { id: numId, verdict: approve ? "approve" : "deny" });
+            bus.emit("permission.verdict", { id: numId, approve: Boolean(approve) });
             json(res, { ok: true });
           } catch (err) {
             json(res, { error: err.message }, 400);
