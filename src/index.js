@@ -27,6 +27,9 @@ async function main() {
 
   if (args.includes("--chat")) {
     const controller = await runChat({ config, bus });
+    // UIサーバー起動ごとのCSRFトークンをCLI用に共有(bin/hive.js は HIVE_UI_TOKEN を付与)
+    config.ui.token ??= newUiToken();
+    process.env.HIVE_UI_TOKEN = config.ui.token;
     await startUi({ config, bus, autoStart: false, ...chatUiHandlers(controller) });
     return;
   }
