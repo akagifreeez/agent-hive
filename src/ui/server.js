@@ -555,7 +555,17 @@ const devServers = new Map(); // script => { child, port, startedAt }
 
 function startDevServer(script, workspace) {
   if (!script || typeof script !== "string") throw new Error("scriptが空です");
-  const abs = resolve(workspace, script);
+  // script は npm scripts 名か実ファイルパスのどちらも可。npm scripts名なら
+  // package.json のコマンドから実ファイル(最初の .mjs/.js 引数)を解決する
+  let target = script;
+  const npmScripts = detectNpmScripts(workspace);
+  const found = npmScripts.find((s) => s.name === script);
+  if (found) {
+    const m = found.cmd.match(/([^\s]+\.(?:mjs|cjs|js))/);
+    if (!m) throw new Error(`npm script「${script}」から起動対象ファイルを解決できません`);
+    target = m[1];
+  }
+  const abs = resolve(workspace, target);
   if (!abs.startsWith(resolve(workspace) + sep)) throw new Error("ワークスペース外のスクリプトは起動できません");
   if (devServers.has(script)) {
     const prev = devServers.get(script);

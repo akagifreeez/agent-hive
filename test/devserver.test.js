@@ -73,7 +73,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   const stopped = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "stop" }),
+    body: JSON.stringify({ action: "stop", script: "serve" }),
   });
   assert.equal(stopped.status, 200);
   assert.ok(stopped.body.ok);
