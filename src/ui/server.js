@@ -13,6 +13,7 @@ import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
 import { listMemoryFiles, isMemoryExpired } from "../engine/memory.js";
 import { listWorkspaceFiles } from "../engine/tools.js";
+import { openInBrowser } from "../engine/browser.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
 
@@ -475,11 +476,22 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
             if (body.action === "stop") {
               // script指定が無いstopは「現在起動中の最初のサーバー」を止める(単一運用前提)
               const target = body.script ?? (devServers.size ? devServers.keys().next().value : "");
-              return json(res, stopDevServer(String(target)));
+              const stopped = stopDevServer(String(target));
+              if (!stopped.ok) {
+                const err = new Error(stopped.error ?? "停止できません");
+                err.status = 400;
+                throw err;
+              }
+              return json(res, stopped);
             }
-            json(res, await startDevServer(body.script, config.workspace));
+            const started = await startDevServer(body.script, config.workspace);
+            // 起動成功時は既定でブラウザで開く(body.open === false で抑止)
+            if (started.ok && started.url && body.open !== false) {
+              started.opened = await openInBrowser(started.url);
+            }
+            json(res, started);
           } catch (err) {
-            json(res, { ok: false, error: err.message }, 400);
+            json(res, { ok: false, error: err.message }, err.status ?? 400);
           }
         });
         return;
@@ -558,7 +570,12 @@ async function startDevServer(script, workspace) {
   if (!abs.startsWith(resolve(workspace) + sep)) throw new Error("ワークスペース外のスクリプトは起動できません");
   if (devServers.has(script)) {
     const prev = devServers.get(script);
-    return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port, url: prev.url ?? null };
+    if (prev.child.exitCode === null) {
+      const err = new Error("このスクリプトは既に起動しています");
+      err.status = 400;
+      throw err;
+    }
+    devServers.delete(script);
   }
   // script引数はnpm scriptsの「名前」。package.jsonからコマンド文字列を解決して起動する
   let cmd;
