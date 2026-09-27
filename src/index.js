@@ -3,6 +3,7 @@ import { OpenAIModel } from "./model/openai.js";
 import { runScenario, runChat } from "./runner.js";
 import { Bus } from "./engine/board.js";
 import { startUi } from "./ui/server.js";
+import { chatUiHandlers } from "./ui/chat-wiring.js";
 import { wireConsoleLog } from "./log.js";
 
 function usage() {
@@ -26,7 +27,7 @@ async function main() {
 
   if (args.includes("--chat")) {
     const controller = await runChat({ config, bus });
-    await startUi({ config, bus, autoStart: false, onSay: (text, thread) => controller.say(text, thread), onFeedback: (req) => controller.feedback(req), onThreadPause: (req) => controller.setThreadPaused(req) });
+    await startUi({ config, bus, autoStart: false, ...chatUiHandlers(controller) });
     return;
   }
 
