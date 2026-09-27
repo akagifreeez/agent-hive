@@ -5,12 +5,16 @@
   "type": "module",
   "description": "複数エージェントが同一ワークスペースで同時に作業し、共有ボードで横につながるハーネス(デスクトップソフトへの成長を前提)。Gitリポジトリ=blackboard、タスクファイルのclaimで仕事を自律発見。",
   "main": "src/desktop/main.js",
+  "bin": {
+    "hive": "bin/hive.js"
+  },
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "start": "node src/index.js --serve",
     "run": "node src/index.js --run",
+    "cli": "node bin/hive.js",
     "desktop": "electron .",
     "desktop:smoke": "electron . --smoke",
     "desktop:pack": "electron-builder --dir",
@@ -28,6 +32,7 @@
       "src/**/*",
       "agents/**/*",
       "scripts/**/*",
+      "bin/**/*",
       "package.json"
     ],
     "win": {
