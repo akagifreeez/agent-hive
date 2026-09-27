@@ -469,7 +469,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
-        req.on("end", () => {
+        req.on("end", async () => {
           try {
             const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
             if (body.action === "stop") return json(res, stopDevServer(body.script ?? ""));
