@@ -461,21 +461,24 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
-      if (url.pathname === "/api/devserver" && req.method === "POST") {
-        const chunks = [];
-        req.on("data", (d) => chunks.push(d));
-        req.on("end", () => {
-          try {
-            const { script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-            json(res, startDevServer(script, config.workspace));
-          } catch (err) {
-            json(res, { ok: false, error: err.message }, 400);
-          }
-        });
-        return;
-      }
-      if (url.pathname === "/api/devserver" && req.method === "DELETE") {
-        return json(res, stopDevServer(url.searchParams.get("script") ?? ""));
+      if (url.pathname === "/api/devserver") {
+        if (req.method === "GET") return json(res, { scripts: (() => { try { return Object.keys(JSON.parse(readFileSafe(config.workspace, "package.json") || "{}").scripts ?? {}); } catch { return []; } })(), running: null });
+        if (req.method === "POST") {
+          const chunks = [];
+          req.on("data", (d) => chunks.push(d));
+          req.on("end", () => {
+            try {
+              const { script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+              json(res, startDevServer(script, config.workspace));
+            } catch (err) {
+              json(res, { ok: false, error: err.message }, 400);
+            }
+          });
+          return;
+        }
+        if (req.method === "DELETE") {
+          return json(res, stopDevServer(url.searchParams.get("script") ?? ""));
+        }
       }
       if (url.pathname === "/markdown.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
