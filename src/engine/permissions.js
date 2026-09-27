@@ -6,19 +6,24 @@ const DEFAULT_ASK = ["rm -rf", "git reset --hard", "git clean", "git push", "npm
 
 // コマンド正規化: (1)空白の連続を1つへ圧縮 (2)連続する単一文字オプションを結合(-r -f → -rf)。
 // トークン単位で処理し、非オプション引数や長いオプション(--hard)はそのまま保持する。
-export function normalizeCommand(cmd) {
+export function normalizeCommand(cmd, { sort = false } = {}) {
   const tokens = String(cmd ?? "").trim().split(/\s+/).filter(Boolean);
   const out = [];
   let pending = "";
   const flush = () => {
     if (pending) {
-      out.push("-" + [...new Set(pending.split(""))].join(""));
+      let chars = [...new Set(pending.split(""))];
+      if (sort) chars.sort(); // オプション順序入替(-f -r / -fr)を正規形へ寄せる
+      out.push("-" + chars.join(""));
       pending = "";
     }
   };
   for (const t of tokens) {
     if (/^-[a-zA-Z]$/.test(t)) {
       pending += t.slice(1); // 単一文字オプションは結合候補へ
+    } else if (sort && /^-[a-z]{2,}$/.test(t)) {
+      flush(); // ソート時は連結済みオプション(-rf等)も文字順を正規化する
+      out.push("-" + [...t.slice(1)].sort().join(""));
     } else {
       flush();
       out.push(t);
@@ -48,11 +53,21 @@ export class PermissionGate {
   async check(command) {
     // 自明な回避形の吸収: 空白圧縮 + 連続する単一文字オプションの結合(-r -f → -rf)。
     // 完全な回避防止ではなく、パターン照合が素通りする自明な揺らぎを塞ぐ範囲。
-    const normalized = normalizeCommand(command);
-    const hitDeny = this.deny.find((p) => normalized.includes(p) || command.includes(p));
+    // 照合はソート正規形で行い、オプション順序入替(rm -f -r / → rm -fr /)の素通りを防ぐ。
+    // パターン側の単一文字オプションも同様にソートして比較する(rf ↔ fr を同一視)。
+    // 元コマンドでの照合は従来どおり併用(長いオプション等の揺らぎは元文字列側で捕捉)。
+    const normalized = normalizeCommand(command, { sort: true });
+    const normPattern = (p) => {
+      // パターン内の連結オプション(-rf 等)もトークン分解して正規化し、rf ↔ fr を同一視する
+      const spaced = String(p).replace(/(^|\s)-([a-z]{2,})(?=\s|$)/gi, (_m, pre, opts) =>
+        pre + opts.split("").map((c) => "-" + c).join(" ")
+      );
+      return normalizeCommand(spaced, { sort: true });
+    };
+    const hitDeny = this.deny.find((p) => normalized.includes(normPattern(p)) || command.includes(p));
     if (hitDeny) return { allowed: false, reason: `禁止パターン「${hitDeny}」` };
 
-    const hitAsk = this.ask.find((p) => normalized.includes(p) || command.includes(p));
+    const hitAsk = this.ask.find((p) => normalized.includes(normPattern(p)) || command.includes(p));
     if (!hitAsk) return { allowed: true };
     if (this.mode === "auto") {
       this.bus?.emit("permission.resolved", { id: -1, command, verdict: "auto" });
