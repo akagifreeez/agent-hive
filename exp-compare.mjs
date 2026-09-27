@@ -57,6 +57,7 @@ try {
   testOk = /pass \d+/.test(testOut) && !/fail [1-9]/.test(testOut);
 } catch (e) { testOut = String(e.stdout ?? e.message); testOk = /pass \d+/.test(testOut) && !/fail [1-9]/.test(testOut); }
 
+writeFileSync("exp-board.json", JSON.stringify({ board: snap.board.map((b) => ({ from: b.from, text: String(b.text).slice(0, 300) })), results: snap.results, tasks: snap.tasks }, null, 1));
 console.log("results:", JSON.stringify(snap.results).slice(0, 600));
 const totals = snap.usage?.totals ?? { promptTokens: 0, completionTokens: 0, costUsd: 0 };
 console.log(`[${new Date().toISOString()}] 結果 mode=${mode}`);
