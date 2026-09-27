@@ -271,6 +271,23 @@ export class TaskBlackboard {
 
 // メタ行(role:/project:/acceptance:)は先頭の空行までに置く。旧形式(role行のみ)も読める。
 // tools.jsのgather_context絞込でも使うのでexportする。
+// create_task時の重複検知。新タスク本文と既存タスク本文から path 風トークンを抽出し
+// 比較する。共有ファイルがあれば [{ taskId, files }] を、無ければ null を返す。
+// 誤検知防止: バージョン表記(v6.6等)や拡張子なしの短い語は対象外。メタ行は除去してから抽出。
+export function detectTaskOverlap(newBody, tasksList) {
+  const stripMeta = (s) => String(s ?? "").replace(/^acceptance:\s*.*$/gm, "");
+  const tokenRe = /(?:[\w.-]+\/)+[\w.-]+\.[A-Za-z0-9]+|[\w.-]+\.(?:js|mjs|cjs|ts|tsx|jsx|json|md|html|css|yml|yaml|sh|py|sql|txt)/g;
+  const tokensOf = (body) => new Set(String(body ?? "").match(tokenRe) ?? []);
+  const isNew = tokensOf(stripMeta(newBody));
+  if (!isNew.size) return null;
+  const hits = [];
+  for (const t of tasksList ?? []) {
+    const shared = [...tokensOf(stripMeta(t.body))].filter((f) => isNew.has(f));
+    if (shared.length) hits.push({ taskId: t.id, files: shared });
+  }
+  return hits.length ? hits : null;
+}
+
 export function readMeta(file) {
   try {
     const meta = { role: null, project: "", acceptance: "" };
