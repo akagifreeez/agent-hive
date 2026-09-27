@@ -460,6 +460,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
+      if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
@@ -554,6 +555,18 @@ function json(res, obj, status = 200) {
   res.end(JSON.stringify(obj));
 }
 
+/* ============ /api/scripts: package.jsonのscripts検出 ============ */
+// ワークスペースのpackage.jsonからnpm scriptsを読み、UIの右パネルに一覧できる形で返す。
+// scriptsが無い/読めない場合は空配列(UIは「スクリプトなし」表示になる)。
+export function detectNpmScripts(workspace) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd }));
+  } catch {
+    return [];
+  }
+}
+
 // /api/memory用: メモリ一覧に期限切れフラグを付ける(isMemoryExpiredに委譲)
 export function listMemoryWithExpiry(workspace, now = Date.now()) {
   return listMemoryFiles(workspace).map((f) => ({ name: f, path: `memory/${f}`, expired: isMemoryExpired(workspace, f, now) }));
@@ -566,9 +579,9 @@ export function countAuditLines(workspace) {
     return raw.split(String.fromCharCode(10)).filter((l) => l.trim()).length;
   } catch {
     return 0;
+>>>>>>> main
   }
 }
-
 
 /* ============ /api/wtdiff: worktreeとmainの差分 ============ */
 // agent/<id>ブランチのworktreeに対する main...agent/<id> の差分を返す。
