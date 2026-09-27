@@ -1,9 +1,9 @@
 {
   "model": {
-    "baseUrl": "https://openrouter.ai/api/v1",
-    "apiKeyEnv": "OPENROUTER_API_KEY",
-    "apiKeyFile": "../../openrouter.key",
-    "model": "z-ai/glm-5.3-flash",
+    "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+    "apiKeyEnv": "ZAI_API_KEY",
+    "apiKeyFile": "../../zai.key",
+    "model": "glm-5.3-flash",
     "temperature": 0.7,
     "maxTokens": 4000,
     "timeoutMs": 180000,
