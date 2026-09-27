@@ -1092,6 +1092,38 @@ function renderStatusTab(body) {
 }
 
 async function renderFilesTab(body) {
+  // npm scripts(package.json検出)。実行はdevserver系API(/api/devserver)で行う
+  const sec = document.createElement("div");
+  sec.className = "sec";
+  sec.textContent = "npm scripts";
+  body.appendChild(sec);
+  const sbox = document.createElement("div");
+  sbox.className = "hint";
+  sbox.textContent = "読み込み中…";
+  body.appendChild(sbox);
+  try {
+    const r = await (await fetch("/api/scripts")).json();
+    sbox.remove();
+    const scripts = r.scripts ?? [];
+    if (!scripts.length) {
+      const h = document.createElement("div");
+      h.className = "hint";
+      h.textContent = "package.json に scripts がありません。";
+      body.appendChild(h);
+    } else {
+      const ul = document.createElement("ul");
+      ul.className = "files";
+      for (const s of scripts) {
+        const li = document.createElement("li");
+        li.title = s.cmd;
+        li.textContent = `npm run ${s.name}`;
+        ul.appendChild(li);
+      }
+      body.appendChild(ul);
+    }
+  } catch {
+    sbox.textContent = "scriptsの取得に失敗しました。";
+  }
   const files = lastState?.files ?? [];
   const ul = document.createElement("ul");
   ul.className = "files";
