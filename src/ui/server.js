@@ -10,6 +10,7 @@ import { TaskBlackboard } from "../engine/tasks.js";
 import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
+import { listMemoryFiles, isMemoryExpired } from "../engine/memory.js";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -432,6 +433,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
+      if (url.pathname === "/api/memory") return json(res, { files: listMemoryWithExpiry(config.workspace) });
       if (url.pathname === "/api/audit") return json(res, { audit: readAuditTail(config.workspace, Number(url.searchParams.get("limit")) || 200) });
       if (url.pathname === "/api/wtdiff") {
         const r = await handleWtdiff({ mainWorkspace: config.workspace, worktreeRoot: config.worktrees.dir, agentId: url.searchParams.get("agent"), limit: Number(url.searchParams.get("limit")) || undefined });
@@ -500,6 +502,22 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 function json(res, obj, status = 200) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(obj));
+}
+
+// /api/memory用: メモリ一覧に期限切れフラグを付ける(isMemoryExpiredに委譲)
+export function listMemoryWithExpiry(workspace, now = Date.now()) {
+  return listMemoryFiles(workspace).map((f) => ({ name: f, path: `memory/${f}`, expired: isMemoryExpired(workspace, f, now) }));
+}
+
+// モニタ用: state/audit.jsonl の行数(無ければ0)
+export function countAuditLines(workspace) {
+  try {
+    const raw = readFileSync(join(workspace, "state", "audit.jsonl"), "utf8");
+    return raw.split("
+").filter((l) => l.trim()).length;
+  } catch {
+    return 0;
+  }
 }
 
 
