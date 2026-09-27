@@ -33,6 +33,7 @@
       "agents/**/*",
       "scripts/**/*",
       "bin/**/*",
+      "hive.config.json",
       "package.json"
     ],
     "win": {

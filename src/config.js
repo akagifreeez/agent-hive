@@ -4,20 +4,27 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// 書き込み可能データの基準。梱包実行時(desktop/main.jsがHIVE_DATAを設定)はuserData配下、
+// 開発時はリポジトリ直下。設定JSONと personas(agents/*.md)は読み取り専用なのでROOTのまま。
+// import順に関わらず呼び出し時に解決したいので定数でなく関数で持つ
+export function dataDir() {
+  return process.env.HIVE_DATA ? resolve(process.env.HIVE_DATA) : ROOT;
+}
 
 export function loadConfig(configPath) {
+  const DATA = dataDir();
   const p = configPath ? resolve(ROOT, configPath) : resolve(ROOT, "hive.config.json");
   const raw = JSON.parse(readFileSync(p, "utf8"));
   // ローカル上書き(hive.local.json: フォルダ選択で生成)。無ければ何もしない
   let local = {};
-  const localPath = resolve(ROOT, "hive.local.json");
+  const localPath = resolve(DATA, "hive.local.json");
   if (existsSync(localPath)) {
     try { local = JSON.parse(readFileSync(localPath, "utf8")); } catch {}
   }
   const cfg = {
     model: { temperature: 0.7, maxTokens: 2000, timeoutMs: 120000, contextWindow: 200000, reasoningEffort: null, ...(raw.model ?? {}) },
-    workspace: resolve(ROOT, local.workspace ?? raw.workspace ?? "workspace"),
-    worktrees: { dir: resolve(ROOT, local.worktreesDir ?? raw.worktrees?.dir ?? "worktrees") },
+    workspace: resolve(DATA, local.workspace ?? raw.workspace ?? "workspace"),
+    worktrees: { dir: resolve(DATA, local.worktreesDir ?? raw.worktrees?.dir ?? "worktrees") },
     agents: (raw.agents ?? []).map((a) => ({ ...a, personaPath: resolve(ROOT, a.persona ?? `agents/${a.id}.md`) })),
     loop: { maxTurns: 30, ...(raw.loop ?? {}) },
     runner: { timeoutSec: 480, ...(raw.runner ?? {}) },
@@ -43,8 +50,11 @@ export function loadConfig(configPath) {
 function resolveApiKey(modelCfg) {
   if (process.env[modelCfg.apiKeyEnv ?? "OPENAI_API_KEY"]) return process.env[modelCfg.apiKeyEnv];
   if (modelCfg.apiKeyFile) {
-    const f = resolve(ROOT, modelCfg.apiKeyFile);
-    if (existsSync(f)) return readFileSync(f, "utf8").trim();
+    // 開発時はリポジトリ基準。梱包時はuserDataに鍵ファイルを置けるように両方を見る
+    for (const base of [ROOT, dataDir()]) {
+      const f = resolve(base, modelCfg.apiKeyFile);
+      if (existsSync(f)) return readFileSync(f, "utf8").trim();
+    }
   }
   return null;
 }
