@@ -27,9 +27,10 @@ async function main() {
 
   if (args.includes("--chat")) {
     // デスクトップ殻と同じ順(UIの待ち受けを先に立ててからrunChat)。
-    // 逆だとリーダーの登録イベント(thread.opened)がUI立ち上がり前に消える
+    // 逆だとリーダーの登録イベント(thread.opened)がUI立ち上がり前に消える。
+    // controllerは後から入るのでgetterで渡す
     let controller = null;
-    await startUi({ config, bus, autoStart: false, ...chatUiHandlers(controller) });
+    await startUi({ config, bus, autoStart: false, ...chatUiHandlers(() => controller) });
     controller = await runChat({ config, bus });
     return;
   }
