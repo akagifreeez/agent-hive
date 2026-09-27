@@ -433,6 +433,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
             const { mode } = JSON.parse(body);
             const r = onPermMode(String(mode ?? ""));
             if (!r.ok) throw new Error(r.error ?? "失敗しました");
+            // controller応答のmodeをliveに反映(busのperm.modeが発火しない配線でもUI表示が追従する)
+            if (r.mode) live.permMode = r.mode;
             json(res, r);
           } catch (err) {
             json(res, { error: err.message }, 400);
