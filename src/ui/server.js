@@ -23,7 +23,7 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
-export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null }) {
   const startedAt = Date.now();
   const live = {
     // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
@@ -98,7 +98,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
     },
     "merge.completed": (p) => {
-      live.merges.unshift({ taskId: p.taskId, agent: p.agent, stat: p.stat ?? "", patch: p.patch ?? "", summary: p.summary ?? "", at: Date.now() });
+      // threadをここで確定させておく(差分レビューからの修正依頼の宛先に使う)
+      live.merges.unshift({ taskId: p.taskId, agent: p.agent, thread: live.agents[p.agent]?.thread ?? "__main__", stat: p.stat ?? "", patch: p.patch ?? "", summary: p.summary ?? "", at: Date.now() });
       if (live.merges.length > 20) live.merges.pop();
     },
     "agent.exited": (p) => {
@@ -246,6 +247,27 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           try {
             const r = handleTaskAction(JSON.parse(body));
             if (!r.ok) throw new Error(r.error);
+            json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/merge-feedback" && req.method === "POST") {
+        const chunks = [];
+        req.on("data", (d) => chunks.push(d));
+        req.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
+          try {
+            if (!onFeedback) throw new Error("このモードでは使えません(チャットモード限定)");
+            const { taskId, comment } = JSON.parse(body);
+            if (!taskId || !String(taskId).trim()) throw new Error("taskIdが空です");
+            if (!comment || !String(comment).trim()) throw new Error("コメントが空です");
+            // マージ記録からスレッドを復元(不明ならメイン宛て)
+            const rec = (live.merges ?? []).find((m) => m.taskId === String(taskId));
+            const r = onFeedback({ taskId: String(taskId), comment: String(comment).trim(), thread: rec?.thread ?? "__main__" });
+            if (r.error) throw new Error(r.error);
             json(res, r);
           } catch (err) {
             json(res, { error: err.message }, 400);

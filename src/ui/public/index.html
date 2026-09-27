@@ -139,6 +139,10 @@
   .sysline.merge { cursor: pointer; border-radius: 4px; }
   .sysline.merge:hover { background: var(--fill); color: var(--label-secondary); }
   .mergediff { background: var(--recess); border: 1px solid var(--separator); border-radius: 4px; padding: 8px; margin: 2px 10px; font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow-y: auto; color: var(--label-secondary); }
+  .mfb { display: flex; gap: 6px; margin: 4px 10px 6px; align-items: stretch; }
+  .mfb textarea { flex: 1; background: var(--recess); border: 1px solid var(--separator); border-radius: 4px; color: var(--label); font: inherit; font-size: 12px; padding: 6px 8px; resize: vertical; }
+  .mfb textarea:focus { outline: none; border-color: var(--accent); }
+  .mfb .btn { white-space: nowrap; }
   .loadmore { align-self: center; font-size: 12px; color: var(--accent); cursor: pointer; padding: 6px 14px; border-radius: 4px; }
   .loadmore:hover { background: var(--fill); }
   .folder-h { font-size: 10px; color: var(--label-tertiary); padding: 8px 8px 2px; font-weight: 600; }
@@ -562,6 +566,32 @@ function renderStream(state) {
           pre.className = "mergediff";
           pre.textContent = (rec.stat ? rec.stat + "\n" : "") + (rec.patch ?? "");
           stream.appendChild(pre);
+          // 差分への修正依頼: 送信でタスク起票+該当スレッドへ通知(レビュー→再実行のループ)
+          const fb = document.createElement("div");
+          fb.className = "mfb";
+          const ta = document.createElement("textarea");
+          ta.rows = 2;
+          ta.placeholder = "この差分への修正依頼(例: 境界ケースのテストが足りない)";
+          const btn = document.createElement("button");
+          btn.className = "btn primary";
+          btn.textContent = "修正依頼を送る";
+          btn.onclick = async () => {
+            const comment = ta.value.trim();
+            if (!comment) { ta.focus(); return; }
+            btn.disabled = true;
+            btn.textContent = "送信中...";
+            try {
+              const r = await (await fetch("/api/merge-feedback", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: tm[1], comment }) })).json();
+              if (r.error) throw new Error(r.error);
+              ta.value = "";
+              btn.textContent = "起票: " + (r.id ?? "ok");
+            } catch (e) {
+              btn.disabled = false;
+              btn.textContent = "失敗—再送";
+            }
+          };
+          fb.append(ta, btn);
+          stream.appendChild(fb);
         }
         continue;
       }

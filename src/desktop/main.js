@@ -72,6 +72,7 @@ async function bootstrap() {
     await startUi({
       config, bus, autoStart: false,
       onSay: (text, thread) => controller?.say(text, thread),
+      onFeedback: (req) => controller?.feedback(req),
       onAttach: (path, dataUrl, note, thread) => controller?.attachImage(note, dataUrl, thread, path),
       onThread: (req) => controller?.openThread(req),
       onCloseThread: (req) => controller?.closeThread(req),
