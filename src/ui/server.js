@@ -13,6 +13,7 @@ import { listMemoryWithExpiry } from "../engine/memory.js";
 import { runCommand } from "../engine/exec.js";
 import { openInBrowser } from "../engine/browser.js";
 import { PermissionGate } from "../engine/permissions.js";
+import { ROOT, dataDir } from "../config.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
@@ -241,7 +242,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       // 総件数: チャットモードではディスクが真実。RAMのみのボード(未永続化)はRAM件数で代用
-      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       if (url.pathname === "/api/board") {
@@ -473,6 +474,19 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
+      if (url.pathname === "/api/key" && req.method === "POST") {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const r = saveApiKey(JSON.parse(body || "{}"), config);
+            json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/perm" && req.method === "POST" && onPermMode) {
         let body = "";
         req.on("data", (d) => (body += d));
@@ -591,6 +605,28 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     },
     token: uiToken,
   };
+}
+
+// APIキーを鍵ファイルへ保存し、実行中のconfigにも即時反映する(設定ウィンドウ用)。
+// 鍵は応答に返さない(ヒント=末尾4文字のみ)。書き込み先は既存の鍵ファイルがあればそこ、
+// 無ければDATA側(userData)に新規作成。環境変数が設定されている場合はそちらが優先される旨を返す
+function saveApiKey(body, config) {
+  const key = String(body.key ?? "").trim();
+  if (!key) throw new Error("APIキーが空です");
+  if (/\s/.test(key)) throw new Error("APIキーに空白は使えません");
+  if (key.length < 8) throw new Error("APIキーが短すぎます");
+  const rel = config.model?.apiKeyFile;
+  if (!rel) {
+    // 鍵ファイル運用でない場合は環境変数案内のみ(書き込み先が無い)
+    return { ok: false, error: "hive.config.json に model.apiKeyFile がありません。環境変数で設定してください" };
+  }
+  const candidates = [resolve(ROOT, rel), resolve(dataDir(), rel)];
+  const existing = candidates.find((f) => existsSync(f));
+  const target = existing ?? candidates[candidates.length - 1];
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, key + "\n");
+  config.model.apiKey = key; // 次に生成されるモデルから即時有効
+  return { ok: true, hint: "…" + key.slice(-4), viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) };
 }
 
 function json(res, obj, status = 200) {
