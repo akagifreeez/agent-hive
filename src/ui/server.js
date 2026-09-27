@@ -11,12 +11,9 @@ import { TaskBlackboard } from "../engine/tasks.js";
 import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
-<<<<<<< HEAD
 import { spawn } from "node:child_process";
-=======
 import { PermissionGate } from "../engine/permissions.js";
 import { listMemoryFiles, isMemoryExpired } from "../engine/memory.js";
->>>>>>> main
 import { listWorkspaceFiles } from "../engine/tools.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -462,7 +459,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
-<<<<<<< HEAD
       if (url.pathname === "/api/devserver") {
         if (req.method === "GET") return json(res, handleDevserver({ method: "GET", workspace: config.workspace, uiPort: config.ui.port }));
         let body = "";
@@ -477,9 +473,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
-=======
       if (url.pathname === "/api/memory") return json(res, { files: listMemoryWithExpiry(config.workspace) });
->>>>>>> main
       if (url.pathname === "/api/audit") return json(res, { audit: readAuditTail(config.workspace, Number(url.searchParams.get("limit")) || 200) });
       if (url.pathname === "/api/wtdiff") {
         const r = await handleWtdiff({ mainWorkspace: config.workspace, worktreeRoot: config.worktrees.dir, agentId: url.searchParams.get("agent"), limit: Number(url.searchParams.get("limit")) || undefined });
