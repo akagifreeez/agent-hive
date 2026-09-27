@@ -582,6 +582,7 @@ export function buildMonitorSnapshot({ config, live, tasks, startedAt }) {
     model: config.model.model,
     permMode: live.permMode,
     posts: live.board.length,
+    auditCount: countAuditLines(config.workspace),
     phase,
     lastActivitySec: lastAt ? Math.floor((Date.now() - lastAt) / 1000) : null,
     totalTasks: all.length,
