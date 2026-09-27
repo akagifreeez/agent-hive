@@ -83,6 +83,7 @@ test("暴走検知: 引数が変わればストリークはリセットされる
 test("rapid-refillブレーカー: 圧縮が追いつかない連鎖で打ち切る", async () => {
   const ws = mktmp();
   const { board, tasks, bus } = makeEnv(ws);
+  writeFileSync(join(ws, "x.txt"), "X"); // read_fileが成功するように(失敗ループ打ち切りを避ける)
   const tools = createTools({ agent: AGENT, workspace: ws, board, tasks, bus });
   let n = 0;
   const model = {
@@ -95,6 +96,8 @@ test("rapid-refillブレーカー: 圧縮が追いつかない連鎖で打ち切
       n++;
       if (n % 2 === 1) {
         // ツール実行ターン(usageは常に閾値超え=毎回圧縮が要る状態)
+        // 失敗ループ打ち切り(TOOL_FAIL_STREAK_LIMIT)を起こさないよう、成功するread_fileにする
+        // (ファイルは無くてもok:trueで「ファイルが無いかディレクトリです」…ではなく、存在するファイルを作っておく)
         return { content: null, toolCalls: [{ id: `c${n}`, name: "read_file", arguments: { path: "x.txt" } }], raw: { content: null }, usage: { promptTokens: 500000, completionTokens: 1 } };
       }
       // 空テキストのターン → autocompact判定が走る
