@@ -43,6 +43,7 @@ export class ChatHost {
     this.autoContinueRounds = autoContinueRounds;
     this.hooks = hooks;
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
+    this.paused = false; // 一時停止中は新しい起床を潰す(実行中ラウンドはターン境界で自然終了)
     this.memories = new Map(); // id => messages配列(ラウンド間で保持)
     this.seen = new Map(); // id => ボード既読位置(ラウンド間で保持。配信はボード注入の1経路のみ)
     this.roundState = new Map(); // id => {running, pending[]}
@@ -145,7 +146,25 @@ export class ChatHost {
     }
   }
 
+  // 一時停止/再開(Claude Squad手本の「コミットして止める/再開」の翻訳)。
+  // 停止中はwake(指示・タスク投入・@呼び出し)を握り潰すのでトークンを消さない。
+  // 記憶・タスク・ボードはそのままなので、再開すれば続きから働き直せる。
+  setPaused(paused) {
+    const was = this.paused;
+    this.paused = Boolean(paused);
+    this.board.post("system", this.paused
+      ? "[一時停止] このスレッドの稼働を停止しました。再開までワーカーは新しい指示・タスクで動きません。"
+      : "[再開] このスレッドの稼働を再開しました。");
+    this.bus.emit("thread.paused", { name: this.board.name, paused: this.paused });
+    // 停止中に握り潰した起床(指示・タスク投入・@呼び出し)をここで一括で拾い直す
+    if (was && !this.paused) {
+      for (const m of this.mains) this.wake(m, "[再開] 停止中のボード新着と未着手タスクを確認して作業を続けてください。");
+    }
+    return { ok: true, name: this.board.name, paused: this.paused };
+  }
+
   wake(main, kickoffText, delayMs = 0) {
+    if (this.paused) return; // 停止中の起床は握り潰す(再開後に改めて起こされる)
     const st = this.roundState.get(main.id) ?? { running: false, pending: [] };
     this.roundState.set(main.id, st);
     if (st.running) {

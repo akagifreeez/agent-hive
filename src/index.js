@@ -24,7 +24,7 @@ async function main() {
 
   if (args.includes("--chat")) {
     const controller = await runChat({ config, bus });
-    await startUi({ config, bus, autoStart: false, onSay: (text, thread) => controller.say(text, thread), onFeedback: (req) => controller.feedback(req) });
+    await startUi({ config, bus, autoStart: false, onSay: (text, thread) => controller.say(text, thread), onFeedback: (req) => controller.feedback(req), onThreadPause: (req) => controller.setThreadPaused(req) });
     return;
   }
 

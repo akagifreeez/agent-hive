@@ -221,7 +221,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     const open = list.open;
     for (const [name, alive] of aliveWorkers) {
       const th = threads.get(name);
-      if (!th) continue;
+      if (!th || th.host.paused) continue; // 停止中スレッドは増員しない
       const nOpen = open.filter((t) => (t.project || "") === name).length;
       const desired = nOpen === 0 ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil(nOpen / 2));
       if (alive.size >= desired || manager.live.size >= globalCap) continue;
@@ -279,6 +279,15 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     writeRegistry();
     bus.emit("thread.folder", { name, folder: folderName });
     return { ok: true, name, folder: folderName };
+  };
+
+  // スレッドの一時停止/再開(Claude Squad手本)。__main__はリーダー自身を休ませる。
+  // 停止中はワーカーの起床と自動増員を止めるのでトークンを消さない
+  const setThreadPaused = ({ project, paused }) => {
+    const name = String(project ?? "").trim();
+    const host = name && name !== "__main__" ? threads.get(name)?.host : leadHost;
+    if (!host) return { error: `スレッド ${name} は開いていません` };
+    return host.setPaused(Boolean(paused));
   };
 
   // リーダー(メインチャットに1体)。壁打ち→計画→open_thread
@@ -415,6 +424,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     openThread,
     closeThread,
     setThreadFolder,
+    setThreadPaused,
     listThreads: () => [...threads.keys()],
     manager,
     mcpHosts,

@@ -23,7 +23,7 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
-export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
   const live = {
     // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
@@ -84,6 +84,10 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     "thread.folder": (p) => {
       const t = live.threads.find((x) => x.name === p.name);
       if (t) t.folder = p.folder ?? null;
+    },
+    "thread.paused": (p) => {
+      const t = live.threads.find((x) => x.name === p.name);
+      if (t) t.paused = Boolean(p.paused);
     },
     "perm.mode": (p) => { live.permMode = p.mode; },
     "model.changed": (p) => {
@@ -247,6 +251,23 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           try {
             const r = handleTaskAction(JSON.parse(body));
             if (!r.ok) throw new Error(r.error);
+            json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/pause" && req.method === "POST") {
+        const chunks = [];
+        req.on("data", (d) => chunks.push(d));
+        req.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
+          try {
+            if (!onThreadPause) throw new Error("このモードでは使えません(チャットモード限定)");
+            const { project, paused } = JSON.parse(body);
+            const r = onThreadPause({ project: String(project ?? ""), paused: Boolean(paused) });
+            if (r.error) throw new Error(r.error);
             json(res, r);
           } catch (err) {
             json(res, { error: err.message }, 400);
@@ -536,7 +557,7 @@ export function buildMonitorSnapshot({ config, live, tasks, startedAt }) {
       const members = Object.entries(live.agents)
         .filter(([, a]) => (a.thread ?? "__main__") === t.name)
         .map(([id, a]) => ({ id, displayName: a.displayName ?? id, status: a.status ?? "idle" }));
-      return { name: t.name, folder: t.folder ?? null, goal: t.goal ?? "", claimed, state, percent: pr.total ? Math.round((pr.done / pr.total) * 100) : 0, members, ...pr };
+      return { name: t.name, folder: t.folder ?? null, goal: t.goal ?? "", paused: Boolean(t.paused), claimed, state, percent: pr.total ? Math.round((pr.done / pr.total) * 100) : 0, members, ...pr };
     }),
     tasks: {
       open: list.open.map((t) => ({ id: t.id, project: t.project ?? "", summary: t.summary })),
@@ -583,7 +604,7 @@ async function tick(){
     document.getElementById("meta").textContent="model: "+d.model+" / perm:"+esc(d.permMode)+" / 稼働 "+Math.floor(d.uptimeSec/60)+"分"+(d.uptimeSec%60)+"秒 / 投稿 "+d.posts+"件"+(d.lastActivitySec!=null?" / 最終活動 "+(d.lastActivitySec<60?d.lastActivitySec+"秒前":Math.floor(d.lastActivitySec/60)+"分前"):"");
     document.getElementById("body").innerHTML=
       "<h2>スレッド</h2><table><tr><th>状態</th><th>名前</th><th>フォルダ</th><th>進捗</th><th>メンバー</th><th>目標</th></tr>"+
-      (rows(d.threads,(t)=>{const st={done:["完了","#86efac"],working:["作業中","#fbbf24"],waiting:["未着手","#a3a3a8"],idle:["—","#6e6e73"]}[t.state]||["—","#6e6e73"];return "<tr><td style='color:"+st[1]+"'>"+st[0]+"</td><td class='mono'># "+esc(t.name)+"</td><td>"+esc(t.folder??"")+"</td><td><div class='bar'><i style='width:"+t.percent+"%'></i></div><span class='dim mono'>"+t.done+"/"+t.total+"</span></td><td>"+rows(t.members??[],(m)=>{const sc={idle:"#a3a3a8",working:"#fbbf24",done:"#86efac",error:"#fca5a5","budget-stop":"#fca5a5"}[m.status]||"#a3a3a8";return "<span class='mem1' title='"+esc(m.status)+"'><i class='mdot' style='background:"+sc+"'></i><span style='color:hsl("+hue(m.id)+" 45% 72%)'>"+esc(m.displayName)+"</span></span>";})+"</td><td class='dim'>"+esc(t.goal)+"</td></tr>";})||"<tr><td colspan='6' class='dim'>開いているスレッドはありません</td></tr>")+"</table>"+
+      (rows(d.threads,(t)=>{const st={done:["完了","#86efac"],working:["作業中","#fbbf24"],waiting:["未着手","#a3a3a8"],idle:["—","#6e6e73"]}[t.state]||["—","#6e6e73"];const ps=t.paused?"<span class='warn'>[停止中]</span> ":"";return "<tr><td>"+ps+"<span style='color:"+st[1]+"'>"+st[0]+"</span></td><td class='mono'># "+esc(t.name)+"</td><td>"+esc(t.folder??"")+"</td><td><div class='bar'><i style='width:"+t.percent+"%'></i></div><span class='dim mono'>"+t.done+"/"+t.total+"</span></td><td>"+rows(t.members??[],(m)=>{const sc={idle:"#a3a3a8",working:"#fbbf24",done:"#86efac",error:"#fca5a5","budget-stop":"#fca5a5"}[m.status]||"#a3a3a8";return "<span class='mem1' title='"+esc(m.status)+"'><i class='mdot' style='background:"+sc+"'></i><span style='color:hsl("+hue(m.id)+" 45% 72%)'>"+esc(m.displayName)+"</span></span>";})+"</td><td class='dim'>"+esc(t.goal)+"</td></tr>";})||"<tr><td colspan='6' class='dim'>開いているスレッドはありません</td></tr>")+"</table>"+
       "<h2>タスク(未着手 "+d.tasks.open.length+" / 作業中 "+d.tasks.claimed.length+" / 完了 "+d.tasks.doneCount+")</h2><table><tr><th>状態</th><th>タスク</th><th>担当</th><th>内容</th></tr>"+
       rows(d.tasks.claimed,(t)=>"<tr><td class='warn'>作業中</td><td class='mono'>"+esc(t.id)+"</td><td class='mono'>"+esc(t.agent)+"</td><td class='dim'>"+esc(t.summary)+"</td></tr>")+
       rows(d.tasks.open,(t)=>"<tr><td class='dim'>未着手</td><td class='mono'>"+esc(t.id)+"</td><td></td><td class='dim'>"+esc(t.summary)+"</td></tr>")+"</table>"+
