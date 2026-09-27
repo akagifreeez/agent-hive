@@ -67,3 +67,22 @@ test("監査保護: 拒否されても監査台帳自体は記録され続ける
   assert.equal(sh.ok, false);
   rmTree(ws);
 });
+
+test("監査保護(実行後検知): 変数展開/base64で迂回したstate/への書き込みも検知され警告が返る", async () => {
+  const ws = mktmp();
+  const tools = mkTools(ws);
+  // 静的解析を迂回: base64デコード+変数展開経由でstate/へ書き込む(コマンド文字列に state を含まない)
+  const r = await tools.execute("bash", { command: "d=$(echo c3RhdGU=|base64 -d); mkdir -p $d; echo tampered > $d/audit.jsonl" });
+  assert.equal(r.ok, false, "state/変化は検知され拒否扱いになるべき");
+  assert.match(r.text, /state. の内容が変更/);
+  rmTree(ws);
+});
+
+test("監査保護(実行後検知): state/を触らないコマンドは警告なしで成功する", async () => {
+  const ws = mktmp();
+  const tools = mkTools(ws);
+  const r2 = await tools.execute("bash", { command: "echo hi > out3.txt" });
+  assert.equal(r2.ok, true);
+  assert.ok(!r2.text.includes("警告"));
+  rmTree(ws);
+});
