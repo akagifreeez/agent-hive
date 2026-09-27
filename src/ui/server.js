@@ -570,7 +570,7 @@ export function detectNpmScripts(workspace) {
   }
 }
 
-export function handleDevserver({ method, body = {}, workspace, uiPort }) {
+export async function handleDevserver({ method, body = {}, workspace, uiPort }) {
   if (method === "GET") {
     const pkg = readFileSyncSafe(join(workspace, "package.json"));
     let scripts = [];
@@ -592,9 +592,27 @@ export function handleDevserver({ method, body = {}, workspace, uiPort }) {
     try { scripts = JSON.parse(readFileSyncSafe(join(workspace, "package.json")) ?? "{}").scripts ?? {}; } catch { /* 同上 */ }
     if (!script || !scripts[script]) return { status: 400, body: { ok: false, error: `scriptが見つかりません: ${script}` } };
     const child = spawn("npm", ["run", script], { cwd: workspace, shell: true, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
-    const url = body.url ? String(body.url) : `http://localhost:${uiPort && uiPort !== 0 ? uiPort : 7789}/`;
+    // PORT=<番号> をstdoutから検出してURLを確定する(既定はUIポート、手動指定も可)
+    let out = "";
+    let detectedPort = null;
+    child.stdout.on("data", (d) => {
+      out += String(d);
+      const m = out.match(/PORT=(\d+)/);
+      if (m && detectedPort === null) detectedPort = Number(m[1]);
+    });
+    child.stderr.on("data", () => {});
+    child.on("exit", () => { if (devserverProc?.child === child) devserverProc = null; });
+    let url = body.url ? String(body.url) : null;
+    if (!url) {
+      // 起動完了(スクリプト出力 or 一定時間)を待ってURLを確定。PORT出力があればそちらを優先
+      const deadline = Date.now() + DEVSERVER_START_TIMEOUT_MS;
+      while (detectedPort === null && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      url = detectedPort ? `http://localhost:${detectedPort}` : `http://localhost:${uiPort && uiPort !== 0 ? uiPort : 7789}/`;
+    }
     devserverProc = { pid: child.pid, script, url, child };
-    return { status: 200, body: { ok: true, pid: child.pid, script, url } };
+    return { status: 200, body: { ok: true, pid: child.pid, script, url, port: detectedPort ?? null } };
   }
   if (action === "stop") {
     if (!devserverProc) return { status: 400, body: { ok: false, error: "起動中のdevserverはありません" } };
