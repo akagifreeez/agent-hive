@@ -16,10 +16,13 @@ const mgr = new SpawnManager({ mainWorkspace: ws, worktreeRoot: ws + "-wt", boar
   modelFactory: () => ({ maxTokens: 4000, async chat({ messages }) {
     const last = String(messages[messages.length - 1].content ?? "");
     console.log("TURN last:", last.slice(0, 60).replace(/\n/g, " "));
-    if (last.includes("create_task")) {
-      if (last.includes("finish_task")) return { content: null, toolCalls: [{ id: "c2", name: "finish_task", arguments: { task_id: "spawn-impl-99" } }], raw: { role: "assistant", content: null, tool_calls: [] }, usage };
-      return { content: "起票しました", toolCalls: [], raw: { role: "assistant", content: "起票しました", tool_calls: [] }, usage };
+    if (last.includes("finish_task を呼んで")) {
+      return { content: null, toolCalls: [{ id: "c3", name: "claim_next_task", arguments: {} }], raw: { role: "assistant", content: null, tool_calls: [] }, usage };
     }
+    if (last.includes("請求できるタスクはありません")) {
+      return { content: "終了します", toolCalls: [], raw: { role: "assistant", content: "終了します", tool_calls: [] }, usage };
+    }
+    if (last.includes("create_task")) return { content: "起票しました", toolCalls: [], raw: { role: "assistant", content: "起票しました", tool_calls: [] }, usage };
     return { content: null, toolCalls: [{ id: "c1", name: "create_task", arguments: { task_id: "spawn-impl-99-followup", body: "x", project: "t" } }], raw: { role: "assistant", content: null, tool_calls: [] }, usage };
   } })
 });
