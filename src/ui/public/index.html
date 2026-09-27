@@ -149,6 +149,9 @@
   .room-folder-btn { margin-left: auto; background: none; border: none; color: var(--label-tertiary); cursor: pointer; font-size: 10px; padding: 0 3px; opacity: 0; flex-shrink: 0; }
   .room:hover .room-folder-btn { opacity: 1; }
   .room-folder-btn:hover { color: var(--accent); }
+  .room-folder-btn + .room-folder-btn { margin-left: 0; }
+  .room-folder-btn.paused { opacity: 1; color: var(--accent); }
+  .room.paused .sub { color: var(--accent); }
 
   #composer { border-top: 1px solid var(--separator); padding: 10px 16px 12px; background: var(--bg-elevated); position: relative; box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.14); }
   #suggest { position: absolute; bottom: 100%; left: 16px; right: 16px; background: var(--bg-elevated); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: var(--shadow-overlay); max-height: 240px; overflow-y: auto; z-index: 5; }
@@ -419,8 +422,9 @@ function renderNav(threads) {
   const ths = q ? all.filter((t) => t.name.toLowerCase().includes(q) || (t.goal ?? "").toLowerCase().includes(q) || (t.folder ?? "").toLowerCase().includes(q)) : all;
   $("nav-thread-label").textContent = `スレッド${all.length ? ` (${ths.length}/${all.length})` : ""}`;
   const makeRoom = (parent, t) => {
+    const isPaused = t.id !== "__main__" && ((lastState?.live.threads ?? []).find((x) => x.name === t.id)?.paused ?? false);
     const d = document.createElement("div");
-    d.className = "room" + (selectedThread === t.id ? " active" : "");
+    d.className = "room" + (selectedThread === t.id ? " active" : "") + (isPaused ? " paused" : "");
     // 進捗(タスクの完了率)をサブに足す
     let prog = "";
     if (t.id !== "__main__") {
@@ -462,6 +466,18 @@ function renderNav(threads) {
         else refresh();
       };
       d.appendChild(fb);
+      // 一時停止/再開(Claude Squad手本)。停止中はトークンを消さず、再開で続きから
+      const pb = document.createElement("button");
+      pb.className = "room-folder-btn" + (isPaused ? " paused" : "");
+      pb.title = isPaused ? "稼働を再開" : "スレッドを一時停止(トークン消費なしで休ませる)";
+      pb.textContent = isPaused ? "再" : "停";
+      pb.onclick = async (e) => {
+        e.stopPropagation();
+        const r = await (await fetch("/api/pause", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: t.id, paused: !isPaused }) })).json();
+        if (r.error) toast(r.error);
+        else refresh();
+      };
+      d.appendChild(pb);
     }
     parent.appendChild(d);
   };

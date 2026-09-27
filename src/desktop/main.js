@@ -73,6 +73,7 @@ async function bootstrap() {
       config, bus, autoStart: false,
       onSay: (text, thread) => controller?.say(text, thread),
       onFeedback: (req) => controller?.feedback(req),
+      onThreadPause: (req) => controller?.setThreadPaused(req),
       onAttach: (path, dataUrl, note, thread) => controller?.attachImage(note, dataUrl, thread, path),
       onThread: (req) => controller?.openThread(req),
       onCloseThread: (req) => controller?.closeThread(req),
