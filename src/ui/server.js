@@ -1,11 +1,7 @@
 // ローカルWebUI。依存ゼロ(node:http + SSE)。後からElectron殻で包む前提なので
 // 描画はブラウザ側に寄せ、サーバーは状態API+SSEストリームだけを持つ。
 import { createServer } from "node:http";
-<<<<<<< HEAD
-import { spawn as childSpawn } from "node:child_process";
-=======
 import { spawn } from "node:child_process";
->>>>>>> main
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -497,20 +493,12 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
-<<<<<<< HEAD
-      if (url.pathname === "/api/devserver" && req.method === "GET") {
-        // scripts一覧(テストが期待する検出API)
-        return json(res, { scripts: Object.keys((() => { try { return JSON.parse(readFileSync(join(config.workspace, "package.json"), "utf8")).scripts ?? {}; } catch { return {}; } })()) });
-      }
-=======
       if (url.pathname === "/api/devserver" && req.method === "GET") return json(res, { servers: [...devServers.entries()].map(([script, e]) => ({ script, pid: e.child.pid, port: e.port, startedAt: e.startedAt })) });
->>>>>>> main
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
         req.on("end", async () => {
           try {
-<<<<<<< HEAD
             const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
             if (body.action === "stop") {
               // script指定が無いstopは「現在起動中の最初のサーバー」を止める(単一運用前提)
@@ -529,15 +517,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
               started.opened = await openInBrowser(started.url);
             }
             json(res, started);
-=======
-            const { action, script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-            if (action === "stop") {
-              // script未指定なら最後に起動したサーバーを止める(単一運用の簡便さ優先)
-              const target = script ?? [...devServers.keys()].at(-1);
-              return json(res, stopDevServer(target));
-            }
-            json(res, await startDevServer(script, config.workspace));
->>>>>>> main
           } catch (err) {
             json(res, { ok: false, error: err.message }, err.status ?? 400);
           }
