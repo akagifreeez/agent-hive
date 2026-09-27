@@ -342,8 +342,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const overlaps = detectTaskOverlap(String(args.body ?? ""), [...l.open, ...l.claimed]);
         const warn = (overlaps ?? [])
           .map((o) => `警告: 既存タスク ${o.taskId} が同じファイル(${o.files.join(", ")})を扱っています。重複の可能性。中止ならtasks cancel ${o.taskId}`)
-          .join("
-");
+          .join("\n");
         return {
           ok: true,
           text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""})。${warn ? "
