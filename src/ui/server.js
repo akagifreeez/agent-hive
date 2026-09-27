@@ -494,12 +494,17 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
-        req.on("end", () => {
+        req.on("end", async () => {
           try {
             const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
             const action = body.action ?? "start";
             if (action === "stop") return json(res, stopDevServer(body.script ?? ""));
-            json(res, startDevServer(body.script, config.workspace));
+            const started = startDevServer(body.script, config.workspace);
+            if (started.ok && !started.alreadyRunning) {
+              started.port = await waitForPort(body.script);
+              started.url = started.port ? `http://localhost:${started.port}` : null;
+            }
+            json(res, started);
           } catch (err) {
             json(res, { ok: false, error: err.message }, 400);
           }
@@ -571,6 +576,7 @@ function startDevServer(script, workspace) {
     const prev = devServers.get(script);
     return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port };
   }
+  if (!existsSync(abs)) throw new Error(`起動対象ファイルがありません: ${target}`);
   const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"] });
   const entry = { child, port: null, startedAt: Date.now() };
   devServers.set(script, entry);
@@ -584,6 +590,17 @@ function startDevServer(script, workspace) {
   child.stderr.on("data", () => {});
   child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
   return { ok: true, script, pid: child.pid };
+}
+
+// 起動直後はポート未確定。スクリプトが「PORT=<番号>」を出すまで最大ms待つ(疎通用URLの解決)
+async function waitForPort(script, ms = 5000) {
+  const entry = devServers.get(script);
+  if (!entry) return null;
+  const deadline = Date.now() + ms;
+  while (entry.port === null && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return entry.port;
 }
 
 function stopDevServer(script) {
