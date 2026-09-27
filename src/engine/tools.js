@@ -668,25 +668,26 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         return { ok: false, text: `このコマンドは拒否されました(${verdict.reason})。別の安全な方法で作業を続けてください。` };
       }
     }
-    // 実行後の state/ 変化検知(可視化目的)。静的解析を変数展開等で迂回された場合の
-    // 最後の防衛線: 実行前後で state/ 配下のファイル一覧+サイズを比較し、変化があれば
-    // 拒否ログ(bus emit)を出し、応答テキストへ警告を付ける(実行自体は取り消せない)
-    const stateDir = resolve(mainWorkspace ?? workspace, "state");
-    const before = stateSnapshot(stateDir);
-    const out = await runCommand({ command, cwd: workspace, timeoutMs, outputLimit: BASH_OUTPUT_LIMIT });
-    const after = stateSnapshot(stateDir);
-    if (after !== before) {
-      bus.emit("permission.denied", { agent: agent.id, command, reason: "state/配下がbash実行中に変更されました" });
-      return { ...out, ok: false, text: `${out.text}
-[警告] bash実行中に監査領域 state/ の内容が変更されました。エンジン内部データ(state/)の書き換えは禁止されています。` };
+    // 事後検知: 変数展開($d/…)やbase64等の迂回で事前チェックを素通りした書き込みを、
+    // 実行前後の state/ スナップショット比較で検出する(実行は取り消せないため可視化が目的)。
+    const before = snapshotState();
+    const res = await runCommand({ command, cwd: workspace, timeoutMs, outputLimit: BASH_OUTPUT_LIMIT });
+    const after = snapshotState();
+    const changed = diffSnapshot(before, after);
+    if (changed.length > 0) {
+      bus.emit("permission.denied", { agent: agent.id, command, stateChanged: changed });
+      res.ok = false;
+      res.text = `${res.text}
+[警告] このコマンドは監査領域 state/ 配下を変更しました(${changed.join(", ")})。state/ への書き込みは禁止されています。監査台帳の改変は検出・記録されます。`;
     }
-    return out;
+    return res;
   }
 
-  // state/ 配下の簡易スナップショット(相対パス+サイズの連結。存在しなければ空文字)
-  function stateSnapshot(dir) {
-    let out = "";
-    const walk = (d, rel) => {
+  // state/ 配下のファイル一覧+サイズ+mtimeのスナップショット(事後改ざん検知用)
+  function snapshotState() {
+    const root = join(workspace, "state");
+    const out = new Map();
+    const walk = (d) => {
       let entries;
       try {
         entries = readdirSync(d, { withFileTypes: true });
@@ -694,15 +695,33 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         return;
       }
       for (const e of entries) {
-        const r = rel ? `${rel}/${e.name}` : e.name;
-        if (e.isDirectory()) walk(join(d, e.name), r);
-        else if (e.isFile()) {
-          try { out += `${r}:${statSync(join(d, e.name)).size};`; } catch { /* 競合は無視 */ }
+        const p = join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else {
+          try {
+            const st = statSync(p);
+            out.set(p, `${st.size}:${st.mtimeMs}`);
+          } catch { /* 消えたファイルは無視 */ }
         }
       }
     };
-    walk(dir, "");
+    walk(root);
     return out;
+  }
+
+  function diffSnapshot(before, after) {
+    // 表示はスラッシュ区切りに統一(Windowsのバックスラッシュを正規化)
+    const rel = (p) => {
+      const r = workspace ? p.slice(workspace.length + 1) : p;
+      return r.split(/\\|\//).join("/");  };
+    const changed = [];
+    for (const [p, v] of after) {
+      if (before.get(p) !== v) changed.push(rel(p));
+    }
+    for (const p of before.keys()) {
+      if (!after.has(p)) changed.push(rel(p));
+    }
+    return changed;
   }
 
   return { specs, execute, detectShell };

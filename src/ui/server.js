@@ -71,7 +71,8 @@ export function getActiveUiToken() { return activeUiToken; }
 
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
-  const uiToken = newUiToken();
+  // UIトークン。環境変数 HIVE_UI_TOKEN(CLI等の外部クライアント用)で上書きできる
+  const uiToken = process.env.HIVE_UI_TOKEN || newUiToken();
   // /api/exec(開発用シェル)もエージェントと同じPermissionGateを通す(UIからの任意コマンド実行を承認制に)
   const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
@@ -597,6 +598,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       server.close();
     },
+    token: uiToken,
   };
 }
 
