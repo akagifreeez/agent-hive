@@ -2,8 +2,12 @@
 // 描画はブラウザ側に寄せ、サーバーは状態API+SSEストリームだけを持つ。
 import { createServer } from "node:http";
 <<<<<<< HEAD
+import { spawn } from "node:child_process";
+=======
+<<<<<<< HEAD
 import { spawn as childSpawn } from "node:child_process";
 =======
+>>>>>>> main
 >>>>>>> main
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
@@ -479,12 +483,17 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
 <<<<<<< HEAD
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
+      if (url.pathname === "/api/devserver" && req.method === "GET") return json(res, { servers: [...devServers.entries()].map(([script, e]) => ({ script, pid: e.child.pid, port: e.port, startedAt: e.startedAt })) });
+=======
+<<<<<<< HEAD
+      if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
       if (url.pathname === "/api/devserver" && req.method === "GET") {
         // scripts一覧 + 起動中サーバー一覧
         let scriptNames = [];
         try { scriptNames = Object.keys(JSON.parse(readFileSync(join(config.workspace, "package.json"), "utf8")).scripts ?? {}); } catch { }
         return json(res, { scripts: scriptNames, servers: [...devServers.entries()].map(([script, e]) => ({ script, pid: e.child.pid, port: e.port, startedAt: e.startedAt })) });
       }
+>>>>>>> main
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
@@ -607,7 +616,7 @@ async function startDevServer(script, workspace) {
   if (!cmd || typeof cmd !== "string") throw new Error(`scripts[${script}] が見つかりません`);
   const parts = cmd.split(/\s+/);
   const bin = parts[0] === "node" ? process.execPath : parts[0];
-  const child = childSpawn(bin, parts.slice(1), { cwd: workspace, detached: false });
+  const child = spawn(bin, parts.slice(1), { cwd: workspace, detached: false });
   const entry = { child, port: null, url: undefined, startedAt: Date.now() };
   devServers.set(script, entry);
   child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
@@ -619,6 +628,8 @@ async function startDevServer(script, workspace) {
     throw new Error("サーバーが起動しませんでした(PORT出力なし)");
   }
   return { ok: true, script, pid: child.pid, port: entry.port, url };
+<<<<<<< HEAD
+=======
   // 疎通確認(起動直後は受け付け準備中のことがあるので数回リトライ)
   let reachable = false;
   for (let i = 0; i < 10 && !reachable; i++) {
@@ -626,6 +637,7 @@ async function startDevServer(script, workspace) {
   }
   if (!reachable) { try { child.kill(); } catch { } throw new Error(`疎通確認に失敗しました: ${url}`); }
   return { ok: true, script, pid: child.pid, port: entry.port, url };
+>>>>>>> main
 }
 
 function stopDevServer(script) {
