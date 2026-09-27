@@ -295,11 +295,22 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           t = tasks.claim(agent, opts);
         }
         if (!t) {
+          // 診断: project一致の未着手タスクがあるのに請求できない=role不一致が濃厚。
+          // 「無い」としか返さないと実在するタスクを見失って空待ち・退場になる(r7で実際に発生)
+          let hint = "";
+          if (args.project) {
+            try {
+              const open = tasks.list().open.filter((x) => (x.project || "") === String(args.project));
+              if (open.length) {
+                hint = `\n[診断] project「${args.project}」の未着手タスクが${open.length}件あります: ${open.map((x) => `${x.id}${x.role ? `(role:${x.role})` : ""}`).join(", ")}。あなたのロールは${agent.role}です。roleが一致するタスクか、role指定の無いタスクだけを請求できます。`;
+              }
+            } catch {}
+          }
           return {
             ok: true,
             claimMiss: true,
             text: args.project
-              ? `請求できるタスクはありません(project: ${args.project} のタスクは無いか、全て完了済み)。`
+              ? `請求できるタスクはありません(project: ${args.project} のタスクは無いか、全て完了済み)。${hint}`
               : "請求できるタスクはありません。",
           };
         }

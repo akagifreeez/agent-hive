@@ -81,6 +81,7 @@ export async function runAgentLoop({
   seenBoard = null, // 前回までの既読位置(chat常駐時はホストが保持。nullならラウンド開始時点まで既読)
   memory = null, // 永続記憶(memory/の権威ファイル)の注入文脈。無ければnull
   drainInput = null, // () => ターン境界で割込ませる入力の配列(steering)。呼ぶたに取り出す
+  peekInput = null, // () => 未処理入力が待っているか(取り出さず覗くだけ)。idle退場の抑制に使う
   claimMissesLimit = 3, // 連続請求ミス何回でidle終了するか(追加ワーカーは1で早期退場)
 }) {
   if (!messages) {
@@ -102,6 +103,7 @@ export async function runAgentLoop({
   let toolFailStreak = 0; // 連続で失敗したツール呼び出しの回数(打ち切り判定用)
   let toolTurnsSinceCompact = 0; // 最終圧縮からのツール実行ターン数
   let rapidRefills = 0;
+  let sawInput = false; // ラウンド中にユーザー入力(steering)を届けたか。idle退場の抑制に使う
   bus.emit("agent.status", { agent: agent.id, status: "working" });
 
   // 担当者不在になる終わり方のとき、請求中タスクをopenへ戻す(凍結防止)
@@ -142,7 +144,10 @@ export async function runAgentLoop({
         }
         steered++;
       }
-      if (steered) bus.emit("agent.steered", { agent: agent.id, count: steered });
+      if (steered) {
+        sawInput = true;
+        bus.emit("agent.steered", { agent: agent.id, count: steered });
+      }
     }
 
     // microcompact(ZCode移植): 古いツール結果をプレースホルダへ(LLM不要)
@@ -206,6 +211,16 @@ export async function runAgentLoop({
       }
       messages.push(...reminders.splice(0));
       if (claimMisses >= claimMissesLimit) {
+        // ユーザー入力が待っている/届けたばかりで未応答のときはidle退場しない。
+        // 退場すると入力に答える前にラウンドが捨てられる(r7で実際に発生: ラウンド中のsayが
+        // steeringで届いたまま、請求ミス3回で退場して応答が消えた)。
+        // 救助は入力1件につき1回。それでも応答せず請求ミスを続ければ従来どおり退場する。
+        if (peekInput?.() || sawInput) {
+          sawInput = false;
+          claimMisses = 0;
+          messages.push({ role: "user", content: "[システム] 未処理のユーザー入力があります。請求よりも先に応答してください。" });
+          continue;
+        }
         releaseClaims("idle待機終了");
         board.post(agent.id, `[待機終了] 請求できるタスクが${claimMissesLimit}回連続で無かったため終了します。`);
         bus.emit("agent.status", { agent: agent.id, status: "done" });
