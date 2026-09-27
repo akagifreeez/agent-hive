@@ -1,7 +1,7 @@
 // エージェントに渡すツール一式。ファイル系はワークスペース配下に閉じ込める
 // (パス検証で workspace 外への脱出を拒否)。bashは cwd=ワークスペースで実行し、
 // 承認制ゲート(gate)を通す。
-import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, existsSync, renameSync } from "node:fs";
+import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, existsSync, renameSync, realpathSync } from "node:fs";
 import { resolve, join, dirname, sep } from "node:path";
 import { runCommand, detectShell } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
