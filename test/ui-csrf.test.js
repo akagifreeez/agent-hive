@@ -5,7 +5,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bus } from "../src/engine/board.js";
-import { startUi, isLocalOrigin } from "../src/ui/server.js";
+import { startUi as _startUi, isLocalOrigin } from "../src/ui/server.js";
+// test-hf-token-inject: UIサーバーのPOSTはCSRFトークンを要求するため、
+// テスト内のfetchは全てトークン付きへ差し替える(startUi後にtokenedFetchOn()を呼ぶ)
+import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
+tokenedFetchOn();
+
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-uicsrf-"));
@@ -29,7 +34,7 @@ test("全POSTエンドポイントが外部Originを403で拒否する", async (
   const ws = mktmp();
   try {
     const config = mkConfig(ws);
-    const ui = await startUi({ config, modelFactory: () => ({}), bus: new Bus(), autoStart: false });
+    const ui = await startUiTokenized(_startUi, { config, modelFactory: () => ({}), bus: new Bus(), autoStart: false });
     try {
       const base = `http://127.0.0.1:${config.ui.port}`;
       for (const path of ["/api/thread", "/api/tasks", "/api/say", "/api/exec", "/api/permission", "/api/workflow", "/api/pause", "/api/folder", "/api/close", "/api/model", "/api/perm", "/api/merge-feedback"]) {
@@ -56,7 +61,7 @@ test("/api/exec がPermissionGateを通す(denyパターンは403)", async () =>
   try {
     const config = mkConfig(ws);
     config.permissions = { deny: ["forbidden-cmd"] };
-    const ui = await startUi({ config, modelFactory: () => ({}), bus: new Bus(), autoStart: false });
+    const ui = await startUiTokenized(_startUi, { config, modelFactory: () => ({}), bus: new Bus(), autoStart: false });
     try {
       const base = `http://127.0.0.1:${config.ui.port}`;
       const r = await fetch(base + "/api/exec", {

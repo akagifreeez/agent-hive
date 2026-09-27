@@ -8,7 +8,12 @@ import { Board, Bus } from "../src/engine/board.js";
 import { TaskBlackboard } from "../src/engine/tasks.js";
 import { ChatHost } from "../src/engine/chat.js";
 import { createTools } from "../src/engine/tools.js";
-import { startUi } from "../src/ui/server.js";
+import { startUi as _startUi } from "../src/ui/server.js";
+// test-hf-token-inject: UIサーバーのPOSTはCSRFトークンを要求するため、
+// テスト内のfetchは全てトークン付きへ差し替える(startUi後にtokenedFetchOn()を呼ぶ)
+import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
+tokenedFetchOn();
+
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-pause-"));
@@ -64,7 +69,7 @@ test("API: /api/pauseはonThreadPauseへ{project, paused}を渡す。チャッ�
   const bus = new Bus();
   const config = { workspace: ws, ui: { port: 0 }, model: { model: "m" }, agents: [] };
   const got = [];
-  const ui = await startUi({
+  const ui = await startUiTokenized(_startUi, {
     config, modelFactory: () => ({}), bus, autoStart: false,
     onThreadPause: (req) => { got.push(req); return { ok: true, name: req.project, paused: req.paused }; },
   });
@@ -76,7 +81,7 @@ test("API: /api/pauseはonThreadPauseへ{project, paused}を渡す。チャッ�
 
   // コールバック無し(シナリオモード等)では使えない
   const config2 = { workspace: ws, ui: { port: 0 }, model: { model: "m" }, agents: [] };
-  const ui2 = await startUi({ config: config2, modelFactory: () => ({}), bus, autoStart: false });
+  const ui2 = await startUiTokenized(_startUi, { config: config2, modelFactory: () => ({}), bus, autoStart: false });
   const r2 = await fetch(`http://127.0.0.1:${config2.ui.port}/api/pause`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: "demo", paused: true }) });
   assert.equal(r2.status, 400);
   ui.close();

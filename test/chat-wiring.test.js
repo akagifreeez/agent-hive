@@ -6,8 +6,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bus } from "../src/engine/board.js";
-import { startUi } from "../src/ui/server.js";
+import { startUi as _startUi } from "../src/ui/server.js";
 import { chatUiHandlers } from "../src/ui/chat-wiring.js";
+// test-hf-token-inject: UIサーバーのPOSTはCSRFトークンを要求するため、
+// テスト内のfetchは全てトークン付きへ差し替える(startUi後にtokenedFetchOn()を呼ぶ)
+import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
+tokenedFetchOn();
+
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-wire-"));
@@ -32,7 +37,7 @@ test("chatUiHandlers: 設定・スレッド・フォルダ・pause・feedbackの
     feedback: (req) => { calls.push(["fb", req.taskId]); return { ok: true, id: "fb-x", thread: "__main__" }; },
     setThreadPaused: (req) => { calls.push(["pause", req.project, req.paused]); return { ok: true, name: req.project, paused: req.paused }; },
   };
-  const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false, ...chatUiHandlers(controller) });
+  const ui = await startUiTokenized(_startUi, { config, modelFactory: () => ({}), bus, autoStart: false, ...chatUiHandlers(controller) });
   const base = `http://127.0.0.1:${config.ui.port}`;
   const post = async (path, body) => {
     const r = await fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
