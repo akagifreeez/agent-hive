@@ -36,7 +36,8 @@ test("devserver起動時にブラウザオープンが呼ばれる(open:falseで
     const config = { workspace: ws, ui: { port: 0 }, model: { model: "t" }, agents: [], budget: { maxTokensPerRun: 1 } };
     const ui = await startUi({ config, modelFactory: () => ({}), bus: new Bus(), autoStart: false });
     const base = `http://127.0.0.1:${config.ui.port}`;
-    const post = (b) => fetch(`${base}/api/devserver`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
+    const token = JSON.parse((await (await fetch(`${base}/`)).text()).match(/window.HIVE_TOKEN = (".*?")/)[1]);
+    const post = (b) => fetch(`${base}/api/devserver`, { method: "POST", headers: { "content-type": "application/json", "x-hive-token": token }, body: JSON.stringify(b) });
 
     // open:false で起動 → ブラウザを開かずURLだけ返る
     const r = await post({ action: "start", script: "serve", open: false });
