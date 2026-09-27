@@ -31,7 +31,6 @@ test("GET /api/audit: ツール実行後に記録が読める(limit省略50・�
   const tools = createTools({ agent, workspace: ws, mainWorkspace: ws, board: null, tasks, bus });
   await tools.execute("write_file", { path: "notes/hello.txt", content: "hi" });
   await tools.execute("bash", { command: "echo audit-api" });
-
   const ui = await startUi({ config: mkConfig(ws), modelFactory: () => ({}), bus, autoStart: false });
   const base = `http://127.0.0.1:${ws ? "" : ""}`;
   void base;
