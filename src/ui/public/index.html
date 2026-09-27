@@ -905,6 +905,7 @@ function renderAgentLog(a) {
 function renderMemoryTab(body) {
   const state = lastState;
   const files = (state?.files ?? []).filter((f) => f.startsWith("memory/") && f.endsWith(".md"));
+  const expiredSet = new Set((state?.memoryFiles ?? []).filter((m) => m.expired).map((m) => m.path));
   const sec = document.createElement("div");
   sec.className = "sec";
   sec.textContent = "永続記憶(memory/・全エージェントに常時注入・読み取り専用)";
@@ -914,6 +915,12 @@ function renderMemoryTab(body) {
   for (const f of files) {
     const li = document.createElement("li");
     li.textContent = f;
+    if (expiredSet.has(f)) {
+      const tag = document.createElement("span");
+      tag.textContent = "期限切れ";
+      tag.style.cssText = "color:#fca5a5;font-size:11px;margin-left:8px;";
+      li.appendChild(tag);
+    }
     li.onclick = async () => {
       const r = await (await fetch("/api/file?path=" + encodeURIComponent(f))).json();
       body.querySelector(".filepanel")?.remove();
