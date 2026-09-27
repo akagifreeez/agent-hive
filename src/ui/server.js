@@ -486,6 +486,10 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
 <<<<<<< HEAD
+      if (url.pathname === "/api/devserver" && req.method === "GET") {
+        return json(res, { scripts: detectNpmScripts(config.workspace) });
+=======
+<<<<<<< HEAD
       if (url.pathname === "/api/devserver") {
         if (req.method === "GET") return json(res, { scripts: (() => { try { return Object.keys(JSON.parse(readFileSafe(config.workspace, "package.json") || "{}").scripts ?? {}); } catch { return []; } })(), running: null });
         if (req.method === "POST") {
@@ -505,15 +509,31 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
       if (url.pathname === "/api/devserver" && req.method === "GET") {
         return json(res, { scripts: detectNpmScripts(config.workspace).map((s) => s.name) });
+>>>>>>> main
       }
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
-        req.on("end", () => {
+        req.on("end", async () => {
           try {
+<<<<<<< HEAD
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            const action = body.action ?? "start";
+            if (action === "stop") {
+              const r = stopDevServer(body.script ?? "");
+              return json(res, r, r.ok ? 200 : 400);
+            }
+            const r = startDevServer(body.script, config.workspace);
+            if (r.alreadyRunning) return json(res, { ok: false, error: "既に起動しています" }, 400);
+            // ダミーサーバーが "PORT=<n>" を出力するのを短時間待ってurlを確定させる
+            for (let i = 0; i < 40 && !r.port; i++) await new Promise((res2) => setTimeout(res2, 50));
+            r.url = r.port ? `http://127.0.0.1:${r.port}` : null;
+            return json(res, r);
+=======
             const { action, script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
             if (action === "stop") return json(res, stopDevServer(script ?? ""));
             json(res, startDevServer(script, config.workspace));
+>>>>>>> main
           } catch (err) {
             json(res, { ok: false, error: err.message }, 400);
           }
@@ -599,12 +619,31 @@ function startDevServer(script, workspace) {
   if (!script || typeof script !== "string") throw new Error("scriptが空です");
   const abs = resolve(workspace, script);
   if (!abs.startsWith(resolve(workspace) + sep)) throw new Error("ワークスペース外のスクリプトは起動できません");
+<<<<<<< HEAD
+  if (devServers.has(script)) {
+    const prev = devServers.get(script);
+    return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port };
+  }
+  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "ignore"], detached: false });
+=======
   if (devServers.has(script)) throw new Error(`スクリプト ${script} は既に起動しています`);
   // stdoutから "PORT=<n>" を拾ってURLを返す(スクリプト側はport 0でlistenして出力する規約)
   const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"], detached: false });
+>>>>>>> main
   const entry = { child, port: null, startedAt: Date.now() };
 >>>>>>> main
   devServers.set(script, entry);
+<<<<<<< HEAD
+  // 起動直後にサーバーが標準出力へ "PORT=<n>" を出す運用を想定。検出できたらurlを添える
+  let out = "";
+  child.stdout.on("data", (d) => {
+    out += d.toString();
+    const m = out.match(/PORT=(\d+)/);
+    if (m) entry.port = Number(m[1]);
+  });
+  child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
+  return { ok: true, script, pid: child.pid, port: entry.port, url: entry.port ? `http://127.0.0.1:${entry.port}` : null };
+=======
   entry.child.stdout.on("data", (d) => {
     const m = String(d).match(/PORT=(\d+)/);
     if (m) entry.port = Number(m[1]);
@@ -612,6 +651,7 @@ function startDevServer(script, workspace) {
   child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
 <<<<<<< HEAD
   return { ok: true, script, pid: child.pid, url };
+>>>>>>> main
 }
 
 function stopDevServer(script) {
@@ -897,4 +937,13 @@ function readAuditTail(workspace, limit) {
     } catch { /* ファイルが無い世代は無視 */ }
   }
   return lines.slice(-n).reverse();
+}
+
+export function detectNpmScripts(workspace) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd }));
+  } catch {
+    return [];
+  }
 }
