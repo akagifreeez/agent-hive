@@ -4,16 +4,17 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startUi } from "../src/ui/server.js";
+import { startUi as _startUi } from "../src/ui/server.js";
+// test-hf-token-inject: UIサーバーのPOSTはCSRFトークンを要求するため、
+// テスト内のfetchは全てトークン付きへ差し替える(startUi後にtokenedFetchOn()を呼ぶ)
+import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
+tokenedFetchOn();
 import { Bus } from "../src/engine/board.js";
 import { TaskBlackboard } from "../src/engine/tasks.js";
 
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* ロックは無視 */ } }
 
-let uiToken = "";
-async function fetchJson(url, opts = {}) {
-  opts = { ...opts, headers: { ...(opts.headers ?? {}) } };
-  if (opts.method === "POST") opts.headers["x-hive-token"] = uiToken;
+async function fetchJson(url, opts) {
   const r = await fetch(url, opts);
   return { status: r.status, body: await r.json() };
 }
@@ -45,9 +46,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
     agents: [],
     budget: { maxTokensPerRun: 1 },
   };
-  const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
-  const html = await (await fetch(`http://127.0.0.1:${config.ui.port}/`)).text();
-  uiToken = JSON.parse(html.match(/window.HIVE_TOKEN = (".*?")/)[1]);
+  const ui = await startUiTokenized(_startUi, { config, modelFactory: () => ({}), bus, autoStart: false });
   const base = `http://127.0.0.1:${config.ui.port}`;
 
   // scripts検出(GET /api/scripts。/api/devserverはGETで起動中サーバー一覧を返す)
