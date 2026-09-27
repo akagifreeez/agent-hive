@@ -32,10 +32,11 @@ test("全POSTエンドポイントが外部Originを403で拒否する", async (
     const ui = await startUi({ config, modelFactory: () => ({}), bus: new Bus(), autoStart: false });
     try {
       const base = `http://127.0.0.1:${config.ui.port}`;
+      const tok = { "x-hive-token": ui.token };
       for (const path of ["/api/thread", "/api/tasks", "/api/say", "/api/exec", "/api/permission", "/api/workflow", "/api/pause", "/api/folder", "/api/close", "/api/model", "/api/perm", "/api/merge-feedback"]) {
         const r = await fetch(base + path, {
           method: "POST",
-          headers: { origin: "http://evil.example.com", "content-type": "application/json" },
+          headers: { origin: "http://evil.example.com", "content-type": "application/json", ...tok },
           body: "{}",
         });
         assert.equal(r.status, 403, `${path} should be 403`);
@@ -43,7 +44,7 @@ test("全POSTエンドポイントが外部Originを403で拒否する", async (
       // localhostオリジンなら通る(403以外。パスによっては400等)
       const ok = await fetch(base + "/api/tasks", {
         method: "POST",
-        headers: { origin: "http://localhost", "content-type": "application/json" },
+        headers: { origin: "http://localhost", "content-type": "application/json", ...tok },
         body: "{}",
       });
       assert.notEqual(ok.status, 403);
@@ -59,9 +60,10 @@ test("/api/exec がPermissionGateを通す(denyパターンは403)", async () =>
     const ui = await startUi({ config, modelFactory: () => ({}), bus: new Bus(), autoStart: false });
     try {
       const base = `http://127.0.0.1:${config.ui.port}`;
+      const tok = { "x-hive-token": ui.token };
       const r = await fetch(base + "/api/exec", {
         method: "POST",
-        headers: { origin: "http://localhost", "content-type": "application/json" },
+        headers: { origin: "http://localhost", "content-type": "application/json", ...tok },
         body: JSON.stringify({ command: "echo forbidden-cmd" }),
       });
       assert.equal(r.status, 403);
@@ -70,7 +72,7 @@ test("/api/exec がPermissionGateを通す(denyパターンは403)", async () =>
       // 許可されたコマンドは実行される
       const ok = await fetch(base + "/api/exec", {
         method: "POST",
-        headers: { origin: "http://localhost", "content-type": "application/json" },
+        headers: { origin: "http://localhost", "content-type": "application/json", ...tok },
         body: JSON.stringify({ command: "echo hive-ok" }),
       });
       assert.equal(ok.status, 200);
