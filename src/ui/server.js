@@ -9,6 +9,7 @@ import { runScenario } from "../runner.js";
 import { TaskBlackboard } from "../engine/tasks.js";
 import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
+import { listMemoryWithExpiry } from "../engine/memory.js";
 import { runCommand } from "../engine/exec.js";
 import { PermissionGate } from "../engine/permissions.js";
 import { spawn } from "node:child_process";
@@ -649,6 +650,17 @@ function json(res, obj, status = 200) {
 let devserverProc = null; // { pid, script, url }
 const DEVSERVER_START_TIMEOUT_MS = 10000;
 
+// package.jsonのnpm scripts検出({name, cmd}配列。読めない/無ければ空配列)。
+// /api/scripts と UIのscripts一覧で使う。マージ過程で定義が落ちたため復元(2026-09-27)
+export function detectNpmScripts(workspace) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd: String(cmd) }));
+  } catch {
+    return [];
+  }
+}
+
 export function handleDevserver({ method, body = {}, workspace, uiPort }) {
   if (method === "GET") {
     const pkg = readFileSyncSafe(join(workspace, "package.json"));
@@ -658,8 +670,15 @@ export function handleDevserver({ method, body = {}, workspace, uiPort }) {
   }
   const action = String(body.action ?? "");
   if (action === "start") {
-    if (devserverProc) return { status: 400, body: { ok: false, error: `すでに起動中です: ${devserverProc.script} (pid ${devserverProc.pid})` } };
-    const script = String(body.script ?? "").trim();
+    // 二重起動は拒否でなく起動中プロセスを返す(UIの連打・再読込でも壊れない)
+    const reqScript = String(body.script ?? "").trim();
+    if (devserverProc && devserverProc.child.exitCode === null) {
+      if (devserverProc.script === reqScript) {
+        return { status: 200, body: { ok: true, alreadyRunning: true, pid: devserverProc.pid, script: devserverProc.script, url: devserverProc.url } };
+      }
+      return { status: 400, body: { ok: false, error: `別のscriptが起動中です: ${devserverProc.script} (pid ${devserverProc.pid})` } };
+    }
+    const script = reqScript;
     let scripts = {};
     try { scripts = JSON.parse(readFileSyncSafe(join(workspace, "package.json")) ?? "{}").scripts ?? {}; } catch { /* 同上 */ }
     if (!script || !scripts[script]) return { status: 400, body: { ok: false, error: `scriptが見つかりません: ${script}` } };
@@ -713,6 +732,12 @@ export async function handleWtdiff({ mainWorkspace, worktreeRoot, agentId, limit
 export function buildMonitorSnapshot({ config, live, tasks, startedAt }) {
   const list = tasks.list();
   const all = [...list.open, ...list.claimed, ...list.done];
+  // 監査台帳の行数(無ければ0)。モニタに記録件数として出す
+  let auditCount = 0;
+  try {
+    const auditFile = join(config.workspace, "state", "audit.jsonl");
+    if (existsSync(auditFile)) auditCount = readFileSync(auditFile, "utf8").split("\n").filter((l) => l.trim()).length;
+  } catch { /* 読めなければ0のまま */ }
   const prog = (project) => {
     const inP = all.filter((t) => (t.project || "") === project);
     return { total: inP.length, done: inP.filter((t) => t.state === "done").length };
@@ -744,6 +769,7 @@ export function buildMonitorSnapshot({ config, live, tasks, startedAt }) {
     phase,
     lastActivitySec: lastAt ? Math.floor((Date.now() - lastAt) / 1000) : null,
     totalTasks: all.length,
+    auditCount,
     threads: (live.threads ?? []).map((t) => {
       const pr = prog(t.name);
       const claimed = claimedIn[t.name] ?? 0;

@@ -50,6 +50,12 @@ export function listMemoryFiles(workspace) {
   return readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
 }
 
+// memory/*.mdの一覧に期限切れフラグを付けたもの(/api/memory・UIメモリタブ用)。
+// 期限切れは注入から外れるだけなので、UIでは「期限切れ」と見せる
+export function listMemoryWithExpiry(workspace) {
+  return listMemoryFiles(workspace).map((name) => ({ name, expired: isMemoryExpired(workspace, name) }));
+}
+
 // 先頭のメタ行の ttl: <数><m|h|d> から寿命を解析する。宣言が無ければnull(永久)
 function memoryTtlMs(body) {
   for (const l of body.split("\n")) {
