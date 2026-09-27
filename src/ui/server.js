@@ -469,12 +469,17 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
                   if (url || Date.now() - t0 > 5000 || proc.exitCode !== null) { clearInterval(iv); done(); }
                 }, 50);
               });
+              devServer.proc = proc;
               poll().then(() => {
                 json(res, url ? { ok: true, pid: proc.pid, url } : { ok: true, pid: proc.pid, url: null });
               });
             } else if (action === "stop") {
-              if (!devServer.proc) throw new Error("起動していません");
-              devServer.proc.kill();
+              if (!devServer.proc || devServer.proc.exitCode !== null) { devServer.proc = null; throw new Error("起動していません"); }
+              devServer.proc.kill("SIGTERM");
+              // shell越しに孫プロセスが残らないよう、一定時間後に強制終了
+              const victim = devServer.proc;
+              const killer = setTimeout(() => { try { if (victim.exitCode === null) victim.kill("SIGKILL"); } catch { /* 既に終了 */ } }, 2000);
+              if (killer.unref) killer.unref();
               devServer.proc = null;
               json(res, { ok: true });
             } else {
