@@ -20,6 +20,7 @@
 | タスクの受け入れ基準 | —(単一エージェントなので不要) | — | create_task/UIにacceptance欄。claim返値で先頭提示、一覧に「基準あり」バッジ。修正依頼タスクにも自動で付く | 採用済み(2026-09-27、MetaGPTの成果物契約を翻訳)。途中参加ワーカーの完成判定のブレ防止 |
 | 差分レビュー→再実行ループ | レビュー指摘は会話で返す | 同左 | マージ差分パネルから修正依頼を送信→該当スレッドにfb-タスク起票+ボード告知でワーカーを起こす(/api/merge-feedback) | 採用済み(2026-09-27、Vibe Kanban手本) |
 | スレッドの一時停止 | — | — | ナビの「停」ボタン+/api/pauseでスレッド稼働を停止。起床と自動増員を止めてトークン消費ゼロで休み、「再」で保留分(指示・タスク)を拾い直して続行 | 採用済み(2026-09-27、Claude Squad手本) |
+| CLI操作 | zcode TUI本体 | CLIが本来の形 | bin/hive.js(依存ゼロのHTTPクライアント): status/tasks/threads/say/board/watch/chat/feedback/pause/resume/usage。稼働中の本体(UIサーバー)にREST+SSEで接続。SSH先など端末からも操作可 | 採用済み(2026-09-27)。本体はブラウザUI+常駐トレイ、CLIはその操作面 |
 | 定時実行 | cron/アイドル時実行の automations を内蔵 | 無し(OSのcronで代用) | 無し | 不要。PC常駐アプリとしてはOSのタスクスケジューラで足りる |
 
 ## 2. 権限と安全
@@ -90,3 +91,4 @@
 - 2026-09-26: ナビ検索を実装(スレッド名・目標・フォルダで絞込、Escapeでクリア)し採否を更新。フォルダ分類は「編」ボタンで後から付け替え可能(threads.jsonに永続化)
 - 2026-09-27: 他プロジェクト(Claude Squad/Vibe Kanban/MassGen/claude-flow/MetaGPT等)の調査結果から費用対効果の高い順に4点を実装し採否を更新。①マージ差分パネルからの修正依頼送信(/api/merge-feedback→fb-タスク起票+スレッド通知) ②タスクの受け入れ基準(acceptanceメタ+claim先頭提示+一覧バッジ) ③監査台帳(state/audit.jsonl、5MBでローテート) ④メモリTTL(ttl:宣言、寿命切れは注入から除外)。同日、⑤スレッドの一時停止/再開(ナビ「停/再」ボタン+/api/pause、停止中は起床・増員を停止)を追加
 - 2026-09-27: チャット肥大化対策としてボード履歴をBoardStore(ディスク索引型)に変更。起動時は各JSONLの末尾だけ読み、過去の頁はバイトオフセット索引の2分探索で必要範囲のみ読む(追記は差分スキャン)。Board/エージェント側もRAMを末尾1000件に上限化、mem-*.jsonは一時ファイル経由の原子書込に。/api/boardはthread指定でスレッド単位の頁送りに対応(旧来のthread無し指定はRAM優先+ディスクフォールバックで互換維持)
+- 2026-09-27: CLI対応(bin/hive.js)。稼働中のhive本体にREST+SSEで接続する依存ゼロのクライアントで、status/tasks/threads/say/board/watch/chat/feedback/pause/resume/usage を端末から実行できる。package.jsonにbin+hiveエントリ、READMEにCLI節、electron-builderの同梱にbin/を追加

@@ -59,6 +59,19 @@ ZCode OSS(`adapters/model`、`runtime/helpers`、`runtime/methods`)のコード�
 
 動かし方: `npm run chat`(= `node src/index.js --chat`)→ UIの入力欄から指示。ユーザー入力は全メインを時間差で起こし(同時だと議論にならないため)、ボードの`@表示名`で特定のメインを呼べる。メインの役割: アルファ=設計・実装統括/ベータ=検証・レビュー統括/ガンマ=進行・調整。
 
+CLI(稼働中のhiveを端末から操作。依存ゼロ・`npm run cli` または `node bin/hive.js`):
+
+```
+hive status                   # 稼働状態(モデル/タスク/スレッド/直近マージ)
+hive say "指示テキスト"        # メインチャットへ発言(-t スレッド名で宛先指定)
+hive watch | chat             # ボードの流し見 / 対話モード(Ctrl+Cで抜ける。本体は常駐し続ける)
+hive tasks / threads / usage  # タスク・スレッド・消費の一覧
+hive pause <スレッド> / resume <スレッド>   # スレッドの一時停止/再開(トークン消費ゼロで休む)
+hive feedback <taskId> <コメント>          # マージ済み差分への修正依頼
+```
+
+ポートが既定(7789)と違うときは `--port N` または環境変数 `HIVE_UI_PORT`。
+
 ### スポーン済みエージェントの後始末(v5.1)
 
 - **ターン上限で中断したスポーン済みエージェントは、同じworktree・同じ記憶で1回だけ自動継続**する

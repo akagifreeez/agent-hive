@@ -10,7 +10,9 @@ function usage() {
 
   node src/index.js --run     ヘッドレス実行(UI無し。結果をコンソールへ)
   node src/index.js --serve   UI付き実行(localhost、シナリオは自動開始)
-  node src/index.js --chat    メインチャット常駐モード(UIの入力欄から指示。シナリオ自動開始なし)`);
+  node src/index.js --chat    メインチャット常駐モード(UIの入力欄から指示。シナリオ自動開始なし)
+
+  稼働中のhiveを端末から操作するCLI: node bin/hive.js --help`);
 }
 
 async function main() {
