@@ -67,6 +67,10 @@ async function bootstrap() {
     notify("シナリオ完了", `「${config.scenario.name}」が終了しました。ボードを確認してください。`));
   bus.on("permission.request", (p) =>
     notify(`承認要求 #${p.id}`, `コマンドの承認待ち: ${p.command.slice(0, 80)}`));
+  bus.on("merge.completed", (p) =>
+    notify(`マージ: ${p.taskId}`, (p.summary ?? "").trim() || `${p.agent} がタスクをマージしました。`));
+  bus.on("thread.opened", (p) =>
+    notify(`スレッド開始: ${p.name}`, p.goal ?? ""));
 
   if (SCENARIO) {
     await startUi({ config, modelFactory: () => new OpenAIModel(config.model), bus, autoStart: true });
