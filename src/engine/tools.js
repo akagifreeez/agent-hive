@@ -619,10 +619,10 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       }
       // その他の指示子は state/ 参照より後ろに現れたら書き込みとみなす
       const i = norm.indexOf(w);
-      return i >= 0 && (i > stateIdx || /(^|[\s;&|])cd\s+(\.\/)?state/.test(norm.slice(0, i)));
+      return i >= 0 && (i > stateIdx || norm.slice(0, i).match(/(^|[\s;&|])cd\s+(\.\/)?state/) !== null);
     });
     if (hit) return hit;
-    const cd = norm.match(/(^|[\s;&|])cd\s+(\.\/)?state/);
+    const cd = norm.match(/(^|[\s;&|])cd\s+(\.\/)?state/);
     if (cd && WRITE_INDICATORS.some((w) => norm.slice(cd.index).includes(w))) return "cd state";
     return null;
   }
