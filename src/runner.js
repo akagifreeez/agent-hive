@@ -159,7 +159,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
         mainWorkspace: config.workspace,
         board: threadBoard, tasks, bus, gate,
         spawner: manager,
+
         crossPoster,
+
       })),
       board: threadBoard, tasks, bus, ledger,
       budget: config.budget,
@@ -289,6 +291,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     bus.emit("thread.folder", { name, folder: folderName });
     return { ok: true, name, folder: folderName };
   };
+
 
   // スレッドの一時停止/再開(Claude Squad手本)。__main__はリーダー自身を休ませる。
   // 停止中はワーカーの起床と自動増員を止めるのでトークンを消さない
