@@ -247,8 +247,13 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (url.pathname === "/api/board") {
         const before = Number(url.searchParams.get("before"));
         const thread = url.searchParams.get("thread");
+        // thread指定: そのスレッドのJSONLから直接読む(before無し=ディスクの末尾200)。
+        // RAMに同スレッドの投稿が無い場合も過去ログへ届くようにするため
+        if (thread) {
+          const b = Number.isFinite(before) && before > 0 ? before : null;
+          return json(res, boardStore.pageThread(thread, b, 200));
+        }
         if (Number.isFinite(before) && before > 0) {
-          if (thread) return json(res, boardStore.pageThread(thread, before, 200));
           // 互換経路(thread指定なし): まずRAMの末尾から旧ロジック。RAMに無い深い過去はディスクから
           const all = [...live.board].sort((a, b) => a.id - b.id);
           const idx = all.findIndex((p) => p.id === before);
