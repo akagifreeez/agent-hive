@@ -1138,7 +1138,7 @@ async function renderDevserver(body) {
     startB.onclick = async () => {
       const script = sel.value;
       const url = await askText({ title: "起動後のURL", label: "ブラウザで開く先", value: "http://localhost:3000/", ok: "起動" });
-      const r = await (await hfetch("/api/devserver", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start", script, url }) })).json();
+      const r = await (await hfetch("/api/devserver", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start", script, url, open: true }) })).json();
       if (!r.ok) { toast(`エラー: ${r.error}`, "err"); return; }
       toast(`devserver ${script} を起動しました(pid ${r.pid})`, "ok");
       render();

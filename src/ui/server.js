@@ -514,8 +514,9 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           try {
             const parsed = JSON.parse(body || "{}");
             const r = handleDevserver({ method: "POST", body: parsed, workspace: config.workspace, uiPort: config.ui.port });
-            // fix-devserver-browser-connect: 起動成功時は検出URLを既定ブラウザで開く(open:falseで抑止)
-            if (r.status === 200 && r.body?.ok && !r.body.alreadyRunning && parsed.open !== false && typeof r.body.url === "string") {
+            // 起動成功時のブラウザオープンは明示要求(open:true)のときだけ。
+            // デフォルトで開くとテストやAPI呼び出しのたびに標準ブラウザのタブが量産される
+            if (r.status === 200 && r.body?.ok && !r.body.alreadyRunning && parsed.open === true && typeof r.body.url === "string") {
               r.body.opened = await openInBrowser(r.body.url);
             }
             json(res, r.body ?? r, r.status ?? 200);
