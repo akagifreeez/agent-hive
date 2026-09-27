@@ -118,6 +118,8 @@
   .permcard .btn { margin-right: 6px; }
 
   #stream { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 1px; }
+  /* 投稿をflexで縮めない: 潰れると文字がクリップされて読めなくなる。あふれはスクロールで扱う */
+  #stream > * { flex-shrink: 0; }
   .msg { padding: 5px 10px; font-size: 13px; border-radius: 4px; }
   .msg:hover { background: var(--fill); }
   .msg .who { font-size: 12px; color: hsl(var(--ah, 210) 45% 74%); margin-bottom: 2px; font-weight: 600; }
