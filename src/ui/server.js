@@ -563,8 +563,7 @@ export function listMemoryWithExpiry(workspace, now = Date.now()) {
 export function countAuditLines(workspace) {
   try {
     const raw = readFileSync(join(workspace, "state", "audit.jsonl"), "utf8");
-    return raw.split("
-").filter((l) => l.trim()).length;
+    return raw.split("\n").filter((l) => l.trim()).length;
   } catch {
     return 0;
   }
