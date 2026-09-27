@@ -2,7 +2,7 @@ import { loadConfig } from "./config.js";
 import { OpenAIModel } from "./model/openai.js";
 import { runScenario, runChat } from "./runner.js";
 import { Bus } from "./engine/board.js";
-import { startUi } from "./ui/server.js";
+import { startUi, newUiToken } from "./ui/server.js";
 import { chatUiHandlers } from "./ui/chat-wiring.js";
 import { wireConsoleLog } from "./log.js";
 
