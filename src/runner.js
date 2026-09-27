@@ -159,6 +159,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
         mainWorkspace: config.workspace,
         board: threadBoard, tasks, bus, gate,
         spawner: manager,
+        crossPoster,
       })),
       board: threadBoard, tasks, bus, ledger,
       budget: config.budget,
@@ -269,6 +270,14 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     return { ok: true };
   };
 
+  // crosstalk: 指定スレッドのボードへ直接投稿する(to_thread引数用)。不在スレッドはエラー
+  const crossPoster = (threadName, from, text) => {
+    const t = threads.get(String(threadName ?? "").trim());
+    if (!t) return { ok: false, error: `スレッド ${threadName} は開いていません` };
+    const post = t.board.post(from, text);
+    return { ok: true, id: post.id };
+  };
+
   // スレッドのフォルダ(ナビ表示用分類)を付け替え。openThreadと同じ正規化を適用
   const setThreadFolder = ({ project, folder }) => {
     const name = String(project).trim();
@@ -316,6 +325,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       mainWorkspace: config.workspace,
       board: mainBoard, tasks, bus, gate,
       spawner: manager,
+      crossPoster,
       threadOpener: openThread,
       threadCloser: closeThread,
     })),
