@@ -31,7 +31,7 @@ const HELP = `agent-hive CLI — 稼働中のhiveを端末から操作する
 `;
 
 function parseGlobalArgs(argv) {
-  const opts = { port: Number(env.HIVE_UI_PORT) || 7789, thread: null, limit: 30 };
+  const opts = { port: Number(env.HIVE_UI_PORT) || 7789, thread: null, limit: 30, token: env.HIVE_UI_TOKEN || null };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -47,10 +47,12 @@ function base(port) {
   return `http://127.0.0.1:${port}`;
 }
 
-async function api(port, path, body = null) {
+async function api(port, path, body = null, token = null) {
   let res;
   try {
-    res = await fetch(base(port) + path, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : undefined);
+    const headers = { "content-type": "application/json", origin: "http://localhost" };
+    if (token) headers["x-hive-token"] = token;
+    res = await fetch(base(port) + path, body ? { method: "POST", headers, body: JSON.stringify(body) } : undefined);
   } catch {
     console.error(`hive本体に接続できません(${base(port)})。先に desktop(npm run desktop)か node src/index.js --chat で起動してください。`);
     exit(1);
@@ -143,7 +145,7 @@ async function cmdSay(o, text) {
     console.error("言うことがありません。hive say \"テキスト\" の形で指定してください。");
     exit(1);
   }
-  await api(o.port, "/api/say", body);
+  await api(o.port, "/api/say", body, o.token);
   console.log(`送信しました${o.thread ? ` (${o.thread})` : ""}。`);
 }
 
@@ -154,7 +156,7 @@ async function cmdFeedback(o, args) {
     console.error("使い方: hive feedback <taskId> <コメント>");
     exit(1);
   }
-  const r = await api(o.port, "/api/merge-feedback", { taskId, comment });
+  const r = await api(o.port, "/api/merge-feedback", { taskId, comment }, o.token);
   console.log(`起票: ${r.id} (${r.thread})`);
 }
 
@@ -164,7 +166,7 @@ async function cmdPause(o, args, paused) {
     console.error("使い方: hive pause <スレッド名>(省略時は --thread)");
     exit(1);
   }
-  const r = await api(o.port, "/api/pause", { project, paused });
+  const r = await api(o.port, "/api/pause", { project, paused }, o.token);
   console.log(`${r.name} を${r.paused ? "停止" : "再開"}しました。`);
 }
 
@@ -260,7 +262,7 @@ async function cmdTaskAction(o, args, action) {
     console.error(`使い方: hive tasks ${action} <taskId>`);
     exit(1);
   }
-  const r = await api(o.port, "/api/tasks", { action, id });
+  const r = await api(o.port, "/api/tasks", { action, id }, o.token);
   console.log(`${id} を${{ cancel: "中止", release: "解放", reopen: "再open" }[action]}しました。`);
   return r;
 }
