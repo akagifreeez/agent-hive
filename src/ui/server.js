@@ -508,34 +508,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
-      if (url.pathname === "/api/devserver" && req.method === "GET") {
-        // scripts一覧 + 起動中サーバーの状態
-        const running = [...devServers.entries()].map(([script, e]) => ({ script, pid: e.child.pid, startedAt: e.startedAt }));
-        return json(res, { scripts: detectNpmScripts(config.workspace).map((s) => s.name), running });
-      }
-      if (url.pathname === "/api/devserver" && req.method === "POST") {
-        const chunks = [];
-        req.on("data", (d) => chunks.push(d));
-        req.on("end", async () => {
-          try {
-            const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-            const action = body.action ?? "start";
-            if (action === "stop") return json(res, stopDevServer(body.script ?? ""));
-            const started = startDevServer(body.script, config.workspace);
-            if (started.ok && !started.alreadyRunning) {
-              started.port = await waitForPort(body.script);
-              started.url = started.port ? `http://localhost:${started.port}` : null;
-            }
-            json(res, started);
-          } catch (err) {
-            json(res, { ok: false, error: err.message }, 400);
-          }
-        });
-        return;
-      }
-      if (url.pathname === "/api/devserver" && req.method === "DELETE") {
-        return json(res, stopDevServer(url.searchParams.get("script") ?? ""));
-      }
       if (url.pathname === "/markdown.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
         return res.end(readFileSync(join(PUBLIC, "markdown.js")));
@@ -572,70 +544,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     // 待ち受けを邪魔しない走行
     runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
   }
-  return { close: () => { stopAllDevServers(); server.close(); } };
-}
-
-/* ============ /api/devserver: 開発用ダミーサーバーの起動/停止 ============ */
-// ワークスペース内スクリプトを子プロセスで起動し、疎通確認してpidを返す。
-// 重複起動防止(同じscriptは1プロセスのみ)、DELETEで終了。UIサーバー終了時にも全停止。
-const devServers = new Map(); // script => { child, port, startedAt }
-
-function startDevServer(script, workspace) {
-  if (!script || typeof script !== "string") throw new Error("scriptが空です");
-  // script は npm scripts 名か実ファイルパスのどちらも可。npm scripts名なら
-  // package.json のコマンドから実ファイル(最初の .mjs/.js 引数)を解決する
-  let target = script;
-  const npmScripts = detectNpmScripts(workspace);
-  const found = npmScripts.find((s) => s.name === script);
-  if (found) {
-    const m = found.cmd.match(/([^\s]+\.(?:mjs|cjs|js))/);
-    if (!m) throw new Error(`npm script「${script}」から起動対象ファイルを解決できません`);
-    target = m[1];
-  }
-  const abs = resolve(workspace, target);
-  if (!abs.startsWith(resolve(workspace) + sep)) throw new Error("ワークスペース外のスクリプトは起動できません");
-  if (devServers.has(script)) {
-    const prev = devServers.get(script);
-    return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port };
-  }
-  if (!existsSync(abs)) throw new Error(`起動対象ファイルがありません: ${target}`);
-  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"] });
-  const entry = { child, port: null, startedAt: Date.now() };
-  devServers.set(script, entry);
-  // スクリプトが「PORT=<番号>」をstdoutへ出したら拾って疎通用URLを保持する
-  let buf = "";
-  child.stdout.on("data", (d) => {
-    buf += String(d);
-    const m = buf.match(/PORT=(\d+)/);
-    if (m && entry.port === null) entry.port = Number(m[1]);
-  });
-  child.stderr.on("data", () => {});
-  child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
-  return { ok: true, script, pid: child.pid };
-}
-
-// 起動直後はポート未確定。スクリプトが「PORT=<番号>」を出すまで最大ms待つ(疎通用URLの解決)
-async function waitForPort(script, ms = 5000) {
-  const entry = devServers.get(script);
-  if (!entry) return null;
-  const deadline = Date.now() + ms;
-  while (entry.port === null && Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  return entry.port;
-}
-
-function stopDevServer(script) {
-  const entry = devServers.get(script);
-  if (!entry) return { ok: false, error: "起動中のサーバーがありません" };
-  devServers.delete(script);
-  try { entry.child.kill(); } catch { /* 既に終了している場合は無視 */ }
-  return { ok: true, script, pid: entry.child.pid };
-}
-
-function stopAllDevServers() {
-  for (const [, entry] of devServers) { try { entry.child.kill(); } catch { /* 無視 */ } }
-  devServers.clear();
+  return { close: () => { if (devserverProc) { try { if (process.platform === "win32") runCommand({ command: `taskkill /PID ${devserverProc.pid} /T /F`, timeoutMs: 5000, outputLimit: 1000 }); else process.kill(-devserverProc.pid, "SIGTERM"); } catch { /* 無視 */ } } server.close(); } };
 }
 
 function json(res, obj, status = 200) {
