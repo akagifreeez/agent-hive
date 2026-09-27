@@ -24,6 +24,7 @@ const HELP = `agent-hive CLI — 稼働中のhiveを端末から操作する
   chat [--thread 名前]      対話モード。入力した行がそのまま発言になる
   feedback <taskId> <コメント>  マージ済み差分への修正依頼を送る
   pause <スレッド> / resume <スレッド>  スレッドの一時停止/再開
+  audit                     監査台帳(state/audit.jsonl)の直近記録を見る(-n 件数、既定30)
   usage                     トークン消費の直近サマリ
 
   --port N                  UIサーバーのポート(既定: HIVE_UI_PORT または 7789)
@@ -253,6 +254,28 @@ async function cmdUsage(o) {
   console.log(`${DIM}履歴${hist.length}件。詳細は GET /api/usage${RESET}`);
 }
 
+async function cmdTaskAction(o, args, action) {
+  const id = args[0];
+  if (!id) {
+    console.error(`使い方: hive tasks ${action} <taskId>`);
+    exit(1);
+  }
+  const r = await api(o.port, "/api/tasks", { action, id });
+  console.log(`${id} を${{ cancel: "中止", release: "解放", reopen: "再open" }[action]}しました。`);
+  return r;
+}
+
+async function cmdAudit(o) {
+  const r = await api(o.port, `/api/audit?limit=${o.limit}`);
+  const audit = r.audit ?? [];
+  console.log(`${ACCENT}監査台帳 ${audit.length}件${RESET}`);
+  for (const e of audit) {
+    const at = e.at ? String(e.at).replace("T", " ").slice(0, 19) : "-";
+    console.log(`  ${DIM}${at}${RESET} ${BOLD}${e.tool ?? e.name ?? "?"}${RESET} ${DIM}${e.agent ?? ""}${RESET} ${JSON.stringify(e.args ?? e.input ?? {})}`.slice(0, 200));
+  }
+  if (!audit.length) console.log("(記録なし)");
+}
+
 async function main() {
   const { opts, rest } = parseGlobalArgs(argv.slice(2));
   const [cmd, ...args] = rest;
@@ -265,7 +288,12 @@ async function main() {
     const s = await api(opts.port, "/api/state");
     return fmtThreads(s.live?.threads ?? []);
   }
-  if (cmd === "tasks") return cmdTasks(opts, args[0]);
+  if (cmd === "tasks") {
+    const sub = args[0];
+    if (sub === "cancel" || sub === "release" || sub === "reopen") return cmdTaskAction(opts, args.slice(1), sub);
+    return cmdTasks(opts, sub);
+  }
+  if (cmd === "audit") return cmdAudit(opts);
   if (cmd === "board") return cmdBoard(opts);
   if (cmd === "say") return cmdSay(opts, args);
   if (cmd === "feedback") return cmdFeedback(opts, args);

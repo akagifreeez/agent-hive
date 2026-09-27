@@ -11,7 +11,7 @@ import { readSkill } from "./skills.js";
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0 }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null }) {
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
   const specs = [
@@ -114,8 +114,8 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "post_to_board",
-      description: "共有ボードへ報告・指摘・質問を投稿する。他の全エージェントの目に留まる。",
-      parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"], additionalProperties: false },
+      description: "共有ボードへ報告・指摘・質問を投稿する。他の全エージェントの目に留まる。to_threadにスレッド名を指定するとそのスレッドのボードへ直接投稿する(自分のボードには載らない)。相手のメンバーを起こしたいときは本文に@表示名を含める。",
+      parameters: { type: "object", properties: { text: { type: "string" }, to_thread: { type: "string", description: "投稿先スレッド名(省略時は自分のボード)" } }, required: ["text"], additionalProperties: false },
     },
     {
       name: "wait_for_board",
@@ -331,7 +331,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
           return { ok: false, text: "task_idは英小文字数字とハイフンで付けてください。" };
         }
-        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "" });
+        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "", createdBy: agent.id });
         if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
         return { ok: true, text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""})。` };
       }
@@ -552,6 +552,14 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       case "bash":
         return await gatedBash(String(args.command ?? ""), clamp(Number(args.timeout_ms) || maxBashMs, 1000, 120000));
       case "post_to_board": {
+        const dest = String(args.to_thread ?? "").trim();
+        if (dest) {
+          // crosstalk: 指定スレッドのボードへ直接投稿(自分のボードには載せない)。不在ならエラー
+          if (!crossPoster) return { ok: false, text: "このスレッドからは他スレッドへ投稿できません" };
+          const r = crossPoster(dest, agent.id, String(args.text ?? ""));
+          if (!r.ok) return { ok: false, text: r.error ?? "投稿できませんでした" };
+          return { ok: true, text: `スレッド ${dest} のボード#${r.id}へ投稿しました。` };
+        }
         const post = board.post(agent.id, String(args.text ?? ""));
         return { ok: true, text: `ボード#${post.id}へ投稿しました。` };
       }
