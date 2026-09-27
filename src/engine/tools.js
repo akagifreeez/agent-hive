@@ -635,7 +635,18 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     const norm = String(command ?? "");
     const stateRef = /(^|[\s"'`(;&|])(\.?\/)*state\//.test(norm) || /(^|[\s"'(;&|])state(["\s;&|)]|$)/.test(norm);
     if (!stateRef) return null;
-    const hit = WRITE_INDICATORS.find((w) => norm.includes(w));
+    // 書き込み指示子が state/ 参照より後ろに現れる場合のみ書き込みとみなす
+    // (「ls state/」等の読み取りでは指示子が前にあっても無関係)
+    const stateIdx = Math.min(...[...norm.matchAll(/state\//g)].map((m) => m.index));
+    const hit = WRITE_INDICATORS.find((w) => {
+      // リダイレクト(> / >>)は「> state/...」の形で直後対象を見る
+      if (w === ">" || w === ">>") {
+        return />>\s*\S*state\//.test(norm) || /(^|[^>])>\s*\S*state\//.test(norm);
+      }
+      // その他の指示子は state/ 参照より後ろに現れたら書き込みとみなす
+      const i = norm.indexOf(w);
+      return i >= 0 && (i > stateIdx || /(^|[\s;&|])cd\s+(\.\/)?state/.test(norm.slice(0, i)));
+    });
     if (hit) return hit;
     const cd = norm.match(/(^|[\s;&|])cd\s+(\.\/)?state/);
     if (cd && WRITE_INDICATORS.some((w) => norm.slice(cd.index).includes(w))) return "cd state";
