@@ -1,0 +1,17 @@
+[2026-09-27T15:51:30.695Z] 実験開始: mode=single label=s1 agents=1
+Could not find 'utils/'
+results: [{"ok":false,"endedBy":"turn-limit","error":"ターン上限(18)に達しました","seenBoard":0}]
+[2026-09-27T15:53:35.151Z] 結果 mode=single
+{
+ "wallSec": 124,
+ "tasksDone": 0,
+ "tasksClaimedLeft": 1,
+ "agents": 1,
+ "tokens": {
+  "prompt": 112176,
+  "completion": 6698
+ },
+ "costUsd": 0.01,
+ "testsPass": false
+}
+recorded: {"mode":"single","label":"s1","wallSec":124,"done":0,"claimedLeft":1,"tokens":{"calls":18,"promptTokens":112176,"completionTokens":6698,"reasoningTokens":5663,"costUsd":0.010061480000000001},"testsPass":false,"endedBy":"turn-limit","workspace":"C:\\Users\\AKAGIF~1\\AppData\\Local\\Temp\\exp-single-mMAMvv"}
