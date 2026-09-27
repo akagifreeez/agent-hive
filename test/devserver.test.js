@@ -10,7 +10,10 @@ import { TaskBlackboard } from "../src/engine/tasks.js";
 
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* ロックは無視 */ } }
 
-async function fetchJson(url, opts) {
+let uiToken = "";
+async function fetchJson(url, opts = {}) {
+  opts = { ...opts, headers: { ...(opts.headers ?? {}) } };
+  if (opts.method === "POST") opts.headers["x-hive-token"] = uiToken;
   const r = await fetch(url, opts);
   return { status: r.status, body: await r.json() };
 }
@@ -43,6 +46,8 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
     budget: { maxTokensPerRun: 1 },
   };
   const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
+  const html = await (await fetch(`http://127.0.0.1:${config.ui.port}/`)).text();
+  uiToken = JSON.parse(html.match(/window.HIVE_TOKEN = (".*?")/)[1]);
   const base = `http://127.0.0.1:${config.ui.port}`;
 
   // scripts検出(GET /api/scripts。/api/devserverはGETで起動中サーバー一覧を返す)
