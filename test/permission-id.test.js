@@ -15,7 +15,7 @@ async function startTestUi() {
   const ws = mkdtempSync(join(tmpdir(), "hive-perm-id-"));
   const bus = new Bus();
   const tasks = new TaskBlackboard(ws, bus);
-  const gate = new PermissionGate({ bus, askTimeoutSec: 30 });
+  const gate = new PermissionGate({ bus, askTimeoutSec: 30, deny: [], ask: ["git push"] });
   const config = { workspace: ws, ui: { port: 0 }, model: { model: "test" }, agents: [], budget: { maxTokensPerRun: 1 }, permissions: {} };
   const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
   return { ws, bus, gate, base: `http://127.0.0.1:${config.ui.port}`, close: () => { try { ui?.close?.(); } catch {} rmTree(ws); } };
@@ -35,7 +35,7 @@ test("/api/permission: 未知のidは404で拒否され、verdictイベントが
 test("/api/permission: 正当なpending idは承認でき、gate.checkが解決する", async () => {
   const t = await startTestUi();
   try {
-    const checkPromise = t.gate.check("rm -rf /tmp/x");
+    const checkPromise = t.gate.check("git push origin main");
     // permission.requestがlive.requestsに載るのを待つ
     await new Promise((res) => setTimeout(res, 100));
     const st = await fetch(`${t.base}/api/state`).then((r) => r.json());
