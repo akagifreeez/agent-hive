@@ -36,7 +36,7 @@ test("GET /api/audit: ツール実行後に記録が読める(新しい順・lim
   const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
   const base = `http://127.0.0.1:${config.ui.port}`;
   try {
-    const r = await fetchJson(`http://127.0.0.1:${config.ui.port}/api/audit`);
+    const r = await fetchJson(`${base}/api/audit`);
     assert.equal(r.status, 200);
     assert.ok(Array.isArray(r.body.audit));
     assert.equal(r.body.audit.length, 2);
@@ -48,7 +48,7 @@ test("GET /api/audit: ツール実行後に記録が読める(新しい順・lim
     assert.equal(r.body.audit[1].tool, "write_file");
     assert.equal(r.body.audit[1].path, "notes/hello.txt");
     // limit指定
-    const r2 = await fetchJson(`http://127.0.0.1:${config.ui.port}/api/audit?limit=1`);
+    const r2 = await fetchJson(`${base}/api/audit?limit=1`);
     assert.equal(r2.body.audit.length, 1);
     assert.equal(r2.body.audit[0].tool, "bash");
     // tsはISO時刻

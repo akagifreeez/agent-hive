@@ -11,6 +11,7 @@ export class TaskBlackboard {
     this.claimed = join(this.dir, "claimed");
     this.done = join(this.dir, "done");
     this.bus = bus;
+    this.createdBy = new Map(); // taskId => 起票者agentId(退場時掃除用の起票記録)
     for (const d of [this.open, this.claimed, this.done]) mkdirSync(d, { recursive: true });
   }
 
@@ -20,11 +21,12 @@ export class TaskBlackboard {
 
   // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
   // acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
-  create({ id, role, body, project = "", acceptance = "" }) {
+  create({ id, role, body, project = "", acceptance = "", createdBy = null }) {
     const f = join(this.open, `${id}.md`);
     if (existsSync(f)) return false;
     const meta = metaLines(project, role, acceptance);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
+    if (createdBy) this.createdBy.set(id, createdBy);
     this.bus?.emit("task.created", { taskId: id, project: String(project ?? "") });
     return true;
   }
@@ -62,6 +64,29 @@ export class TaskBlackboard {
       return true;
     }
     return false;
+  }
+
+  // 指定エージェントが起票した未完了タスク(open/claimed)を掃除してdoneへ。
+  // 対象: createdBy記録のあるもの + spawn-*管理タスク(自分のブリーフ自体)。
+  // 他人が起票したタスクは掃除しない(誰かの仕事を消さない)。
+  autoResolveCreatedBy(agentId, note = null) {
+    const cleaned = [];
+    const own = (taskId) => taskId.startsWith("spawn-") && taskId.includes(agentId)
+      || this.createdBy.get(taskId) === agentId;
+    for (const f of readdirSync(this.open).filter((x) => x.endsWith(".md"))) {
+      const taskId = f.replace(/\.md$/, "");
+      if (!own(taskId)) continue;
+      if (this.autoResolve(taskId, note)) cleaned.push(taskId);
+    }
+    for (const f of readdirSync(this.claimed).filter((x) => x.endsWith(".md"))) {
+      const base = f.replace(/\.md$/, "");
+      const idx = base.indexOf("--");
+      const holder = base.slice(0, idx);
+      const taskId = base.slice(idx + 2);
+      if (holder !== agentId || !own(taskId)) continue;
+      if (this.autoResolve(taskId, note)) cleaned.push(taskId);
+    }
+    return cleaned;
   }
 
   // role一致を優先して請求(無ければrole指定なし)。opts.projectで文脈(プロジェクト)を絞れる——
