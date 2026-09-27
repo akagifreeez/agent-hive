@@ -11,6 +11,7 @@ import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { listMemoryWithExpiry } from "../engine/memory.js";
 import { runCommand } from "../engine/exec.js";
+import { openInBrowser } from "../engine/browser.js";
 import { PermissionGate } from "../engine/permissions.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
@@ -52,6 +53,21 @@ import { randomBytes } from "node:crypto";
 export function newUiToken() {
   return randomBytes(24).toString("base64url");
 }
+
+// テスト用: トークン取得込みのstartUi。テストは await startUiTokenized({...}) とするだけで
+// POSTトークン要求に対応できる(併せて tokenedFetchOn() を呼ぶとglobal fetchのPOSTへ自動付与)
+export async function startUiTokenized(args) {
+  const ui = await startUi(args);
+  const html = await (await fetch(`http://127.0.0.1:${args.config.ui.port}/`)).text();
+  const m = html.match(/window\.HIVE_TOKEN = (".*?");/);
+  setActiveUiToken(m ? JSON.parse(m[1]) : "");
+  return ui;
+}
+
+// テストランナー側のactiveトークン(ラッパーfetchが参照)。実行時コードは使わない
+let activeUiToken = "";
+export function setActiveUiToken(t) { activeUiToken = t; }
+export function getActiveUiToken() { return activeUiToken; }
 
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
@@ -113,7 +129,11 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     "thread.closed": (p) => {
       live.threads = live.threads.filter((t) => t.name !== p.name);
       for (const [id, a] of Object.entries(live.agents)) {
-        if (id.startsWith(p.name + "-") || id === p.name) delete live.agents[id];
+        // ID接頭辞(<name>-)とthreadフィールドの両方で紐付く(追加ワーカーはimpl-N等の
+        // 汎用IDでthreadだけが宛先を持つ。接頭辞判定だけだと閉じても残ってしまう)
+        if (id.startsWith(p.name + "-") || id === p.name || (a.thread ?? "__main__") === p.name) {
+          delete live.agents[id];
+        }
       }
     },
     "thread.folder": (p) => {
@@ -235,7 +255,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       // 総件数: チャットモードではディスクが真実。RAMのみのボード(未永続化)はRAM件数で代用
-      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       if (url.pathname === "/api/board") {
@@ -480,6 +500,30 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
+      if (url.pathname === "/api/memory") return json(res, { memory: listMemoryWithExpiry(config.workspace) });
+      if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
+      if (url.pathname === "/api/devserver") {
+        if (req.method === "GET") {
+          const r = handleDevserver({ method: "GET", workspace: config.workspace, uiPort: config.ui.port });
+          return json(res, { scripts: (detectNpmScripts(config.workspace) ?? []).map((s) => s.name), running: r.running });
+        }
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", async () => {
+          try {
+            const parsed = JSON.parse(body || "{}");
+            const r = handleDevserver({ method: "POST", body: parsed, workspace: config.workspace, uiPort: config.ui.port });
+            // fix-devserver-browser-connect: 起動成功時は検出URLを既定ブラウザで開く(open:falseで抑止)
+            if (r.status === 200 && r.body?.ok && !r.body.alreadyRunning && parsed.open !== false && typeof r.body.url === "string") {
+              r.body.opened = await openInBrowser(r.body.url);
+            }
+            json(res, r.body ?? r, r.status ?? 200);
+          } catch (err) {
+            json(res, { ok: false, error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/audit") return json(res, { audit: readAuditTail(config.workspace, Number(url.searchParams.get("limit")) || 200) });
       if (url.pathname === "/api/wtdiff") {
         const r = await handleWtdiff({ mainWorkspace: config.workspace, worktreeRoot: config.worktrees.dir, agentId: url.searchParams.get("agent"), limit: Number(url.searchParams.get("limit")) || undefined });
@@ -513,8 +557,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        // POST用のCSRFトークンをHTMLへ埋め込む(スクリプトから window.HIVE_TOKEN で参照)
-        return res.end(readFileSync(join(PUBLIC, "index.html")).toString("utf8").replace("/*__HIVE_TOKEN__*/", JSON.stringify(uiToken)));
+        // POST用のCSRFトークンをHTMLへ埋め込む("__HIVE_TOKEN__"の文字列リテラルを実トークンへ置換)
+        return res.end(readFileSync(join(PUBLIC, "index.html")).toString("utf8").replace('"__HIVE_TOKEN__"', JSON.stringify(uiToken)));
       }
       res.writeHead(404).end();
     } catch (err) {
@@ -548,15 +592,11 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     close: () => {
       // 起動中のdevserverがあれば停止(UI終了時に子プロセスを残さない)
       if (devserverProc) {
-        try {
-          if (process.platform === "win32") runCommand({ command: `taskkill /PID ${devserverProc.pid} /T /F`, timeoutMs: 5000, outputLimit: 1000 });
-          else { try { process.kill(-devserverProc.pid, "SIGTERM"); } catch { try { devserverProc.child.kill(); } catch { /* 無視 */ } } }
-        } catch { /* 既に終了している場合は無視 */ }
+        killDevserverTree(devserverProc);
         devserverProc = null;
       }
       server.close();
     },
-    token: uiToken,
   };
 }
 
@@ -738,6 +778,61 @@ export function detectNpmScripts(workspace) {
   } catch {
     return [];
   }
+}
+
+/* ============ /api/devserver: package.json scriptsの起動/停止 ============ */
+// 同時1プロセス。child_process.spawnで長時間起動し、pid保持+stopでkillする。
+// runCommand(タイムアウトで殺す)ではなくspawnを使うのがポイント。
+let devserverProc = null; // { pid, script, url, child }
+
+export function handleDevserver({ method, body = {}, workspace, uiPort }) {
+  if (method === "GET") {
+    const pkg = readFileSyncSafe(join(workspace, "package.json"));
+    let scripts = [];
+    try { scripts = Object.keys(JSON.parse(pkg ?? "{}").scripts ?? {}); } catch { /* 不正package.jsonは空 */ }
+    return { scripts, running: devserverProc ? { pid: devserverProc.pid, script: devserverProc.script, url: devserverProc.url } : null };
+  }
+  const action = String(body.action ?? "");
+  if (action === "start") {
+    // 二重起動は拒否でなく起動中プロセスを返す(UIの連打・再読込でも壊れない)
+    const reqScript = String(body.script ?? "").trim();
+    if (devserverProc && devserverProc.child.exitCode === null) {
+      if (devserverProc.script === reqScript) {
+        return { status: 200, body: { ok: true, alreadyRunning: true, pid: devserverProc.pid, script: devserverProc.script, url: devserverProc.url } };
+      }
+      return { status: 400, body: { ok: false, error: `別のscriptが起動中です: ${devserverProc.script} (pid ${devserverProc.pid})` } };
+    }
+    const script = reqScript;
+    let scripts = {};
+    try { scripts = JSON.parse(readFileSyncSafe(join(workspace, "package.json")) ?? "{}").scripts ?? {}; } catch { /* 同上 */ }
+    if (!script || !scripts[script]) return { status: 400, body: { ok: false, error: `scriptが見つかりません: ${script}` } };
+    const child = spawn("npm", ["run", script], { cwd: workspace, shell: true, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    const url = body.url ? String(body.url) : `http://localhost:${uiPort && uiPort !== 0 ? uiPort : 7789}/`;
+    devserverProc = { pid: child.pid, script, url, child };
+    return { status: 200, body: { ok: true, pid: child.pid, script, url } };
+  }
+  if (action === "stop") {
+    if (!devserverProc) return { status: 400, body: { ok: false, error: "起動中のdevserverはありません" } };
+    killDevserverTree(devserverProc);
+    devserverProc = null;
+    return { status: 200, body: { ok: true } };
+  }
+  return { status: 400, body: { ok: false, error: `不明なaction: ${action}` } };
+}
+
+// devserverのプロセスツリーを確実に殺す。shell:true の npm は cmd→node と子を生むので
+// pid単体のkillでは孫が残る(残骸がテストランナーをハングさせる原因)。/Tでツリーごと落とす
+function killDevserverTree(proc) {
+  if (!proc) return;
+  try {
+    if (process.platform === "win32") {
+      runCommand({ command: `taskkill /PID ${proc.pid} /T /F`, timeoutMs: 5000, outputLimit: 1000 });
+      // taskkillがpid自体を外した場合の子も拾う(孫の取りこぼし保険)
+      if (proc.child?.exitCode === null) { try { proc.child.kill("SIGKILL"); } catch { /* 無視 */ } }
+    } else {
+      try { process.kill(-proc.pid, "SIGTERM"); } catch { try { proc.child?.kill("SIGTERM"); } catch { /* 無視 */ } }
+    }
+  } catch { /* 既に終了している場合は無視 */ }
 }
 
 function readFileSafe(workspace, p) {
