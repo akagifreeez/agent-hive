@@ -53,35 +53,47 @@ test("同時finish: 2エージェントのマージが逐次化されmainが壊�
   rmTree(root);
 });
 
-test("競合自動取込(成功側): worktree内でgit merge mainが自動実行され再マージされる", async () => {
+test("競合自動取込(成功側): 初回マージ失敗→worktree内merge main→再マージで通る", async () => {
   const ws = makeWorkspace();
   await ensureGitRepo(ws);
   const root = `${ws}-wt`;
   const [wt] = Object.values(await setupWorktrees({ mainWorkspace: ws, worktreeRoot: root, agents: [{ id: "alpha" }] }));
   // main側が先に進む
-  writeFileSync(join(ws, "code.txt"), "line from main");
+  writeFileSync(join(ws, "main.txt"), "main side");
   await runCommand({ command: "git add -A && git -c user.name=t -c user.email=t@t commit -m 'main change'", cwd: ws, outputLimit: 1000 });
-  // alphaは別ファイルを変更(自動merge mainでクリーンに取込めるはず)
-  writeFileSync(join(wt, "alpha.txt"), "alpha new file");
-  const r1 = await mergeAgentWork({ mainWorkspace: ws, worktreePath: wt, agent: { id: "alpha" }, taskId: "t-auto" });
-  // 同一ファイル競合ではないのでそもそも通るケース。確実に競合を作る: 同一ファイルを両側で変更
-  assert.equal(r1.ok, true);
+  // alphaは別ファイルを変更
+  writeFileSync(join(wt, "alpha.txt"), "alpha side");
+  // exec注入: 最初の mainWorkspace への merge --no-ff を競合失敗に偽装し、自動取込経路を強制する
+  let firstMergeFailed = false;
+  const fakeExec = async (args) => {
+    if (!firstMergeFailed && args.cwd === ws && /git merge --no-ff/.test(args.command)) {
+      firstMergeFailed = true;
+      return { ok: false, text: "exit=1\nCONFLICT (content): Merge conflict in alpha.txt" };
+    }
+    return runCommand(args);
+  };
+  const r = await mergeAgentWork({ mainWorkspace: ws, worktreePath: wt, agent: { id: "alpha" }, taskId: "t-auto", exec: fakeExec });
+  assert.equal(r.ok, true);
+  assert.equal(r.autoMerged, true); // 自動取込経路を通った証
+  assert.equal(readFileSync(join(ws, "alpha.txt"), "utf8"), "alpha side");
+  assert.equal(readFileSync(join(ws, "main.txt"), "utf8"), "main side");
+  // worktree内に自動merge mainのコミットが残る
+  const log = await runCommand({ command: "git log --oneline -2", cwd: wt, outputLimit: 1000 });
+  assert.match(log.text, /auto-import/);
   rmTree(ws);
   rmTree(root);
 });
 
-test("競合自動取込(成功側): 同一ファイル競合でもworktree内merge mainで解決可能なら自動で通る", async () => {
+test("競合自動取込(成功側): worktreeがmainに遅れても自動merge mainで吸収される", async () => {
   const ws = makeWorkspace();
   await ensureGitRepo(ws);
   const root = `${ws}-wt`;
   const [wt] = Object.values(await setupWorktrees({ mainWorkspace: ws, worktreeRoot: root, agents: [{ id: "alpha" }] }));
-  // main側が先に進む(別ファイル)
+  // main側が先に進む
   writeFileSync(join(ws, "main.txt"), "main side");
   await runCommand({ command: "git add -A && git -c user.name=t -c user.email=t@t commit -m 'main change'", cwd: ws, outputLimit: 1000 });
-  // alphaは同一ファイルの別行を変更 → worktree内 merge main は競合するが…
-  // 自動取込が「クリーンに通る」ケースを作る: alphaの変更はmainと非衝突の別ファイルにする
+  // alphaは別ファイルを変更
   writeFileSync(join(wt, "alpha.txt"), "alpha side");
-  // mainをさらに進めてalphaのブランチに非Fast-forwardな差分を作る
   const r = await mergeAgentWork({ mainWorkspace: ws, worktreePath: wt, agent: { id: "alpha" }, taskId: "t-auto2" });
   assert.equal(r.ok, true);
   assert.equal(readFileSync(join(ws, "alpha.txt"), "utf8"), "alpha side");
@@ -102,11 +114,15 @@ test("競合自動取込(失敗側): 競合マーカーが残る形ならconflic
   writeFileSync(join(wt, "code.txt"), "line from alpha");
   const r1 = await mergeAgentWork({ mainWorkspace: ws, worktreePath: wt, agent: { id: "alpha" }, taskId: "t-conflict" });
   assert.equal(r1.conflict, true);
-  // 案内メッセージに解消案内が含まれる(tools.js側のtextだが、ここではconflictフラグとmain無傷を検証)
+  // 案内メッセージに解消案内が含まれる
+  assert.match(r1.text ?? "", /競合ファイルを解消/);
   assert.equal(readFileSync(join(ws, "code.txt"), "utf8"), "line from main"); // mainは無傷
-  // worktree内に競合マーカーが残る(自動merge mainが失敗したまま)
-  const status = await runCommand({ command: "git status --porcelain", cwd: wt, outputLimit: 1000 });
-  assert.match(status.text, /code\.txt/);
+  // worktreeはマージ前の状態に戻っている(エージェントが手動でmerge mainすると競合マーカーが出る)
+  const manual = await runCommand({ command: "git merge main", cwd: wt, outputLimit: 2000 });
+  assert.equal(manual.ok, false);
+  const marker = readFileSync(join(wt, "code.txt"), "utf8");
+  assert.match(marker, /<<<<<<< /);
+  assert.match(marker, />>>>>>> /);
   rmTree(ws);
   rmTree(root);
 });
