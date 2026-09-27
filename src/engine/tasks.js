@@ -18,11 +18,12 @@ export class TaskBlackboard {
     for (const t of tasks ?? []) this.create(t);
   }
 
-  // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ
-  create({ id, role, body, project = "" }) {
+  // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
+  // acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
+  create({ id, role, body, project = "", acceptance = "" }) {
     const f = join(this.open, `${id}.md`);
     if (existsSync(f)) return false;
-    const meta = metaLines(project, role);
+    const meta = metaLines(project, role, acceptance);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
     this.bus?.emit("task.created", { taskId: id, project: String(project ?? "") });
     return true;
@@ -158,18 +159,19 @@ export class TaskBlackboard {
     };
     const open = readdirSync(this.open).filter((f) => f.endsWith(".md")).sort().map((f) => {
       const meta = readMeta(join(this.open, f));
-      return { state: "open", id: f.replace(/\.md$/, ""), agent: null, role: meta.role, project: meta.project, summary: summarize(bodyOf(readFileSync(join(this.open, f), "utf8"))), path: `tasks/open/${f}` };
+      return { state: "open", id: f.replace(/\.md$/, ""), agent: null, role: meta.role, project: meta.project, acceptance: meta.acceptance ?? "", summary: summarize(bodyOf(readFileSync(join(this.open, f), "utf8"))), path: `tasks/open/${f}` };
     });
     const claimed = readdirSync(this.claimed).filter((f) => f.endsWith(".md")).sort().map((f) => {
       const meta = readMeta(join(this.claimed, f));
       const base = f.replace(/\.md$/, "");
       const idx = base.indexOf("--");
-      return { state: "claimed", id: base.slice(idx + 2), agent: base.slice(0, idx), role: meta.role, project: meta.project, summary: summarize(bodyOf(readFileSync(join(this.claimed, f), "utf8"))), path: `tasks/claimed/${f}` };
+      return { state: "claimed", id: base.slice(idx + 2), agent: base.slice(0, idx), role: meta.role, project: meta.project, acceptance: meta.acceptance ?? "", summary: summarize(bodyOf(readFileSync(join(this.claimed, f), "utf8"))), path: `tasks/claimed/${f}` };
     });
     const done = readdirSync(this.done).filter((f) => f.endsWith(".md")).sort().map((f) => {
       const base = f.replace(/\.md$/, "");
       const idx = base.indexOf("--");
-      return { state: "done", id: base.slice(idx + 2), agent: base.slice(0, idx), role: null, project: readMeta(join(this.done, f)).project, summary: summarize(bodyOf(readFileSync(join(this.done, f), "utf8"))), path: `tasks/done/${f}` };
+      const meta = readMeta(join(this.done, f));
+      return { state: "done", id: base.slice(idx + 2), agent: base.slice(0, idx), role: null, project: meta.project, acceptance: meta.acceptance ?? "", summary: summarize(bodyOf(readFileSync(join(this.done, f), "utf8"))), path: `tasks/done/${f}` };
     });
     return { open, claimed, done };
   }
@@ -242,29 +244,34 @@ export class TaskBlackboard {
   }
 }
 
-// メタ行(role:/project:)は先頭の空行までに置く。旧形式(role行のみ)も読める。
+// メタ行(role:/project:/acceptance:)は先頭の空行までに置く。旧形式(role行のみ)も読める。
 // tools.jsのgather_context絞込でも使うのでexportする。
 export function readMeta(file) {
   try {
-    const meta = { role: null, project: "" };
+    const meta = { role: null, project: "", acceptance: "" };
     for (const l of readFileSync(file, "utf8").split("\n")) {
       if (!l.trim()) break;
       const r = l.match(/^role:\s*(.+)$/);
       if (r) meta.role = r[1].trim() || null;
       const p = l.match(/^project:\s*(.+)$/);
       if (p) meta.project = p[1].trim();
+      const a = l.match(/^acceptance:\s*(.+)$/);
+      if (a) meta.acceptance = a[1].trim();
     }
     return meta;
   } catch {
-    return { role: null, project: "" };
+    return { role: null, project: "", acceptance: "" };
   }
 }
 
-function metaLines(project, role) {
+function metaLines(project, role, acceptance = "") {
   const lines = [];
   const proj = String(project ?? "").trim().replace(/[\r\n]/g, "");
   if (proj) lines.push(`project: ${proj.slice(0, 60)}`);
   if (role) lines.push(`role: ${role}`);
+  // 受け入れ基準は1行(改行は空白へ潰す)でメタに持つ。claim本文にもそのまま載る
+  const acc = String(acceptance ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (acc) lines.push(`acceptance: ${acc}`);
   return lines.length ? lines.join("\n") + "\n" : "";
 }
 

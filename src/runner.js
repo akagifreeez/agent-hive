@@ -358,6 +358,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       tasks.create({
         id,
         project: th ?? "",
+        acceptance: "レビューコメントの指摘がすべて解消していること(修正後の差分で確認可能)",
         body: `[修正依頼] マージ済みタスク ${taskId} の差分へのレビューコメント:\n${text}\n\n該当箇所とその周辺を確認して修正し、通常どおり finish_task で完了してください。`,
       });
       const host = th ? threads.get(th).host : leadHost;

@@ -127,14 +127,14 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   for (const [type, fn] of Object.entries(record)) bus.on(type, fn);
 
   // タスクの直接操作(チャットを介さずblackboardのファイルを触る。トークン消費ゼロ)
-  function handleTaskAction({ action, id, agent, role, body, project, path }) {
+  function handleTaskAction({ action, id, agent, role, body, project, path, acceptance }) {
     if (action === "create") {
       const taskBody = String(body ?? "").trim();
       if (!taskBody) return { ok: false, error: "bodyが空です" };
       let taskId = String(id ?? "").trim();
       if (!taskId) taskId = `task-${Date.now().toString(36)}`;
       if (!/^[a-z0-9][a-z0-9-]*$/.test(taskId)) return { ok: false, error: "task_idは英小文字数字とハイフン" };
-      if (!tasks.create({ id: taskId, role: role ? String(role) : null, project: String(project ?? "").trim(), body: taskBody })) return { ok: false, error: `task_id ${taskId} は既に存在します` };
+      if (!tasks.create({ id: taskId, role: role ? String(role) : null, project: String(project ?? "").trim(), body: taskBody, acceptance: acceptance ? String(acceptance) : "" })) return { ok: false, error: `task_id ${taskId} は既に存在します` };
       return { ok: true, id: taskId };
     }
     if (action === "release") {
