@@ -331,7 +331,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
           return { ok: false, text: "task_idは英小文字数字とハイフンで付けてください。" };
         }
-        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "" });
+        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "", createdBy: agent.id });
         if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
         return { ok: true, text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""})。` };
       }
