@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import os from "node:os";
 import { runScenario } from "../runner.js";
 import { TaskBlackboard } from "../engine/tasks.js";
+import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
 import { listWorkspaceFiles } from "../engine/tools.js";
@@ -25,12 +26,14 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
 
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
+  // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
+  const boardStore = new BoardStore(config.workspace);
   const live = {
     // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
     // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
     agents: {},
-    // 永続化済みのボード履歴を復元(再起動後も過去ログが見える)
-    board: loadPersistedBoardPosts(config.workspace),
+    // 起動時は各ボードファイルの末尾だけ復元。全文はstate/のJSONLに残り、/api/boardで頁送り
+    board: boardStore.latest(400),
     requests: [],
     threads: [],
     // マージの差分(新着順・最大20件)。UIのマージ行クリックでdiffを見せる
@@ -117,7 +120,11 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         a.costUsd = (a.costUsd ?? 0) + (u.costUsd ?? 0);
       }
     },
-    "board": (p) => { live.board.push(p); },
+    "board": (p) => {
+      live.board.push(p);
+      // RAMに置くのは末尾だけ。全文はJSONLが真実で、古い分は/api/boardがディスクから読む
+      if (live.board.length > 800) live.board.splice(0, live.board.length - 800);
+    },
     "permission.request": (p) => { live.requests.push({ ...p, state: "pending" }); },
     "permission.resolved": (p) => {
       const r = live.requests.find((x) => x.id === p.id);
@@ -189,14 +196,23 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
-      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: live.board.length }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
-      // ボード履歴の頁送り: before=<id> でそのIDより前の投稿を返す(未指定は末尾200件)
+      // 総件数: チャットモードではディスクが真実。RAMのみのボード(未永続化)はRAM件数で代用
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
+      // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
+      // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       if (url.pathname === "/api/board") {
         const before = Number(url.searchParams.get("before"));
+        const thread = url.searchParams.get("thread");
+        if (Number.isFinite(before) && before > 0) {
+          if (thread) return json(res, boardStore.pageThread(thread, before, 200));
+          // 互換経路(thread指定なし): まずRAMの末尾から旧ロジック。RAMに無い深い過去はディスクから
+          const all = [...live.board].sort((a, b) => a.id - b.id);
+          const idx = all.findIndex((p) => p.id === before);
+          if (idx > 0) return json(res, { posts: all.slice(0, idx).slice(-200), total: boardStore.total() });
+          return json(res, { posts: boardStore.pageMixed(before, 200), total: boardStore.total() });
+        }
         const all = [...live.board].sort((a, b) => a.id - b.id);
-        const idx = Number.isFinite(before) && before > 0 ? all.findIndex((p) => p.id === before) : -1;
-        const base = idx > 0 ? all.slice(0, idx) : all;
-        return json(res, { posts: base.slice(-200), total: all.length });
+        return json(res, { posts: all.slice(-200), total: boardStore.total() });
       }
       if (url.pathname === "/api/thread" && req.method === "POST" && onThread) {
         let body = "";
