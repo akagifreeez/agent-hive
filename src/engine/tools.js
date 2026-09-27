@@ -348,8 +348,6 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""})。` + (warn ? "
 
 " + warn : ""),
-
-" + warn : ""}`,
         };
       }
       case "spawn_agent": {
