@@ -721,11 +721,3 @@ function readAuditTail(workspace, limit) {
   }
   return lines.slice(-n).reverse();
 }
-function readFileSyncSafe(p) {
-  try {
-    return JSON.parse(readFileSync(p, "utf8"));
-  } catch {
-    return [];
-  }
-}
-
