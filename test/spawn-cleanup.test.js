@@ -42,6 +42,7 @@ test("cleanup: idle退場したexpendableワーカーの未完了spawn-*管理�
       async chat({ messages }) {
         const last = messages[messages.length - 1].content ?? "";
         if (String(last).includes("ボードへ投入しました")) {
+        if (String(last).includes("create_task") || String(last).includes("ボードへ投入") || String(last).includes("既に存在")) {
           // create_taskのツール結果を受け取った後は何もせず終わる(→請求ミス→idle退場)
           return { content: "起票しました", toolCalls: [], raw: { role: "assistant", content: "起票しました", tool_calls: [] }, usage: { promptTokens: 10, completionTokens: 5, reasoningTokens: 0, costUsd: 0.0001 } };
         }

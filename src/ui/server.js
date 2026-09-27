@@ -10,6 +10,7 @@ import { TaskBlackboard } from "../engine/tasks.js";
 import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
+import { listMemoryFiles, isMemoryExpired } from "../engine/memory.js";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -432,6 +433,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
+      if (url.pathname === "/api/memory") return json(res, { files: listMemoryWithExpiry(config.workspace) });
       if (url.pathname === "/api/audit") return json(res, { audit: readAuditTail(config.workspace, Number(url.searchParams.get("limit")) || 200) });
       if (url.pathname === "/api/wtdiff") {
         const r = await handleWtdiff({ mainWorkspace: config.workspace, worktreeRoot: config.worktrees.dir, agentId: url.searchParams.get("agent"), limit: Number(url.searchParams.get("limit")) || undefined });
@@ -458,6 +460,22 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
+      if (url.pathname === "/api/devserver" && req.method === "POST") {
+        const chunks = [];
+        req.on("data", (d) => chunks.push(d));
+        req.on("end", () => {
+          try {
+            const { script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            json(res, startDevServer(script, config.workspace));
+          } catch (err) {
+            json(res, { ok: false, error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/devserver" && req.method === "DELETE") {
+        return json(res, stopDevServer(url.searchParams.get("script") ?? ""));
+      }
       if (url.pathname === "/markdown.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
         return res.end(readFileSync(join(PUBLIC, "markdown.js")));
@@ -497,9 +515,59 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   }
 }
 
+/* ============ /api/devserver: 開発用ダミーサーバーの起動/停止 ============ */
+// ワークスペース内スクリプトを子プロセスで起動し、疎通確認してpidを返す。
+// 重複起動防止(同じscriptは1プロセスのみ)、DELETEで終了。UIサーバー終了時にも全停止。
+const devServers = new Map(); // script => { child, port, startedAt }
+
+function startDevServer(script, workspace) {
+  if (!script || typeof script !== "string") throw new Error("scriptが空です");
+  const abs = resolve(workspace, script);
+  if (!abs.startsWith(resolve(workspace) + sep)) throw new Error("ワークスペース外のスクリプトは起動できません");
+  if (devServers.has(script)) {
+    const prev = devServers.get(script);
+    return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port };
+  }
+  const { spawn } = require("node:child_process");
+  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: "ignore", detached: false });
+  const entry = { child, port: null, startedAt: Date.now() };
+  devServers.set(script, entry);
+  child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
+  return { ok: true, script, pid: child.pid };
+}
+
+function stopDevServer(script) {
+  const entry = devServers.get(script);
+  if (!entry) return { ok: false, error: "起動中のサーバーがありません" };
+  devServers.delete(script);
+  try { entry.child.kill(); } catch { /* 既に終了している場合は無視 */ }
+  return { ok: true, script, pid: entry.child.pid };
+}
+
+function stopAllDevServers() {
+  for (const [, entry] of devServers) { try { entry.child.kill(); } catch { /* 無視 */ } }
+  devServers.clear();
+}
+
 function json(res, obj, status = 200) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(obj));
+}
+
+// /api/memory用: メモリ一覧に期限切れフラグを付ける(isMemoryExpiredに委譲)
+export function listMemoryWithExpiry(workspace, now = Date.now()) {
+  return listMemoryFiles(workspace).map((f) => ({ name: f, path: `memory/${f}`, expired: isMemoryExpired(workspace, f, now) }));
+}
+
+// モニタ用: state/audit.jsonl の行数(無ければ0)
+export function countAuditLines(workspace) {
+  try {
+    const raw = readFileSync(join(workspace, "state", "audit.jsonl"), "utf8");
+    return raw.split("
+").filter((l) => l.trim()).length;
+  } catch {
+    return 0;
+  }
 }
 
 
