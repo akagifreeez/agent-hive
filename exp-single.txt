@@ -1,0 +1,17 @@
+[2026-09-27T15:46:12.280Z] 実験開始: mode=single agents=1
+Could not find 'utils/'
+results: [{"ok":false,"endedBy":"turn-limit","error":"ターン上限(18)に達しました","seenBoard":0}]
+[2026-09-27T15:50:47.980Z] 結果 mode=single
+{
+ "wallSec": 276,
+ "tasksDone": 0,
+ "tasksClaimedLeft": 1,
+ "agents": 1,
+ "tokens": {
+  "prompt": 122103,
+  "completion": 19090
+ },
+ "costUsd": 0.019,
+ "testsPass": false
+}
+workspace: C:\Users\AKAGIF~1\AppData\Local\Temp\exp-single-enn2tb
