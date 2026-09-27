@@ -1,7 +1,7 @@
 // エージェントに渡すツール一式。ファイル系はワークスペース配下に閉じ込める
 // (パス検証で workspace 外への脱出を拒否)。bashは cwd=ワークスペースで実行し、
 // 承認制ゲート(gate)を通す。
-import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, existsSync, renameSync } from "node:fs";
+import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, existsSync, renameSync, realpathSync } from "node:fs";
 import { resolve, join, dirname, sep } from "node:path";
 import { runCommand, detectShell } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
@@ -11,7 +11,9 @@ import { readSkill } from "./skills.js";
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
+
 export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null }) {
+
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
   const specs = [
@@ -114,8 +116,10 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "post_to_board",
+
       description: "共有ボードへ報告・指摘・質問を投稿する。他の全エージェントの目に留まる。to_threadにスレッド名を指定するとそのスレッドのボードへ直接投稿する(自分のボードには載らない)。相手のメンバーを起こしたいときは本文に@表示名を含める。",
       parameters: { type: "object", properties: { text: { type: "string" }, to_thread: { type: "string", description: "投稿先スレッド名(省略時は自分のボード)" } }, required: ["text"], additionalProperties: false },
+
     },
     {
       name: "wait_for_board",
@@ -552,6 +556,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       case "bash":
         return await gatedBash(String(args.command ?? ""), clamp(Number(args.timeout_ms) || maxBashMs, 1000, 120000));
       case "post_to_board": {
+
         const dest = String(args.to_thread ?? "").trim();
         if (dest) {
           // crosstalk: 指定スレッドのボードへ直接投稿(自分のボードには載せない)。不在ならエラー
@@ -562,6 +567,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         }
         const post = board.post(agent.id, String(args.text ?? ""));
         return { ok: true, text: `ボード#${post.id}へ投稿しました。` };
+
       }
       case "wait_for_board": {
         const sec = clamp(Number(args.timeout_sec) || 60, 5, 180);
@@ -590,6 +596,26 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     if (full !== root && !full.startsWith(root + sep)) {
       throw new Error(`ワークスペース外のパスは扱えません: ${p}`);
     }
+    // symlink経由の脱出を拒否: 実体(realpath)がワークスペース内に収まっていること。
+    // 存在しないパスは作成前提なので、最も近い存在する親を辿って検証する
+    let probe = full;
+    for (;;) {
+      try {
+        const real = realpathSync(probe);
+        if (real !== root && !real.startsWith(root + sep)) {
+          throw new Error(`ワークスペース外を指すsymlink/パスは扱えません: ${p}`);
+        }
+        break;
+      } catch (err) {
+        if (err && err.code === "ENOENT") {
+          const parent = dirname(probe);
+          if (parent === probe) break; // ルートまで辿った(全て未存在)
+          probe = parent;
+          continue;
+        }
+        throw err;
+      }
+    }
     return full;
   }
 
@@ -601,7 +627,38 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
   }
 
   // 承認制ゲート: 禁止パターンは即拒否、要承認パターンはUI承認を待つ
+  // 監査領域(state/)保護: bash経由での監査台帳・ボードJSONL等の改ざんを拒否する。
+  // 完全な解析は不可能だが、state/ へのパス参照 + 書き込み指示子の組合せを検出して拒否し、
+  // 改ざんを高コスト化する(監査回避経路の主要穴を塞ぐ)。
+  const WRITE_INDICATORS = [">>", ">", "tee ", "cp ", "mv ", "rm ", "truncate", "dd ", "sed -i", "perl -i", "unlink"];
+  function auditTampering(command) {
+    const norm = String(command ?? "");
+    const stateRef = /(^|[\s"'`(;&|])(\.?\/)*state\//.test(norm) || /(^|[\s"'(;&|])state(["\s;&|)]|$)/.test(norm);
+    if (!stateRef) return null;
+    // 書き込み指示子が state/ 参照より後ろに現れる場合のみ書き込みとみなす
+    // (「ls state/」等の読み取りでは指示子が前にあっても無関係)
+    const stateIdx = Math.min(...[...norm.matchAll(/state\//g)].map((m) => m.index));
+    const hit = WRITE_INDICATORS.find((w) => {
+      // リダイレクト(> / >>)は「> state/...」の形で直後対象を見る
+      if (w === ">" || w === ">>") {
+        return />>\s*\S*state\//.test(norm) || /(^|[^>])>\s*\S*state\//.test(norm);
+      }
+      // その他の指示子は state/ 参照より後ろに現れたら書き込みとみなす
+      const i = norm.indexOf(w);
+      return i >= 0 && (i > stateIdx || /(^|[\s;&|])cd\s+(\.\/)?state/.test(norm.slice(0, i)));
+    });
+    if (hit) return hit;
+    const cd = norm.match(/(^|[\s;&|])cd\s+(\.\/)?state/);
+    if (cd && WRITE_INDICATORS.some((w) => norm.slice(cd.index).includes(w))) return "cd state";
+    return null;
+  }
+
   async function gatedBash(command, timeoutMs) {
+    const tamper = auditTampering(command);
+    if (tamper) {
+      bus.emit("permission.denied", { agent: agent.id, command });
+      return { ok: false, text: `このコマンドは拒否されました(監査領域 state/ への書き込み操作「${tamper.trim()}」を検出)。監査台帳は改変できません。` };
+    }
     if (gate) {
       const verdict = await gate.check(command);
       if (!verdict.allowed) {
