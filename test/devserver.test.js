@@ -61,30 +61,32 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   assert.ok(started.body.pid > 0);
   assert.ok(typeof started.body.url === "string" && started.body.url.startsWith("http://"));
 
-  // 二重起動は拒否
+  // 二重起動は同じプロセスを返す(alreadyRunning)
   const dup = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "start", script: "serve" }),
   });
-  assert.equal(dup.status, 400);
+  assert.equal(dup.status, 200);
+  assert.equal(dup.body.alreadyRunning, true);
+  assert.equal(dup.body.pid, started.body.pid);
 
   // 停止
   const stopped = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "stop" }),
+    body: JSON.stringify({ action: "stop", script: "serve" }),
   });
   assert.equal(stopped.status, 200);
   assert.ok(stopped.body.ok);
 
-  // 停止後の二重停止は400
+  // 停止後の二重停止はエラー
   const dupStop = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "stop" }),
+    body: JSON.stringify({ action: "stop", script: "serve" }),
   });
-  assert.equal(dupStop.status, 400);
+  assert.equal(dupStop.body.ok, false);
 
   ui.close();
   rmTree(ws);
