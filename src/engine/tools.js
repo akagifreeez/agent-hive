@@ -34,7 +34,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "create_task",
-      description: "新しい仕事をタスクボードへ投入する。レビュー指摘の修正など後続の仕事を生んだときに使う。task_idは英小文字数字とハイフン。projectに文脈(取り組み名)を付けると、その取り組みのタスクとしてグルーピングされる。",
+      description: "新しい仕事をタスクボードへ投入する。レビュー指摘の修正など後続の仕事を生んだときに使う。task_idは英小文字数字とハイフン。projectに文脈(取り組み名)を付けると、その取り組みのタスクとしてグルーピングされる。acceptanceに受け入れ基準(何ができたら完了とみなすか)を1文で書くと、ワーカーの完成判定がブレなくなる。",
       parameters: {
         type: "object",
         properties: {
@@ -42,6 +42,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           role: { type: "string", description: "担当ロール(impl/review/lead等)。省略で誰でも可" },
           project: { type: "string", description: "文脈(プロジェクト)名。関連する取り組みに統一" },
           body: { type: "string", description: "具体的な指示(何を/どう確認するか/完了条件)" },
+          acceptance: { type: "string", description: "受け入れ基準。完了とみなす客観的な条件を1文で(例: npm testが通り、境界の両側を検証している)" },
         },
         required: ["task_id", "body"],
         additionalProperties: false,
@@ -257,7 +258,9 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
               : "請求できるタスクはありません。",
           };
         }
-        return { ok: true, text: `タスク ${t.id} を請求しました。\n\n${t.body}` };
+        // 受け入れ基準(acceptance:メタ行)があれば先頭で目立たせる(完成判定のブレ防止)
+        const acc = t.body.match(/^acceptance:\s*(.+)$/m);
+        return { ok: true, text: `タスク ${t.id} を請求しました。${acc ? `\n受け入れ基準: ${acc[1].trim()}` : ""}\n\n${t.body}` };
       }
       case "finish_task": {
         const taskId = String(args.task_id ?? "");
@@ -287,9 +290,9 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
           return { ok: false, text: "task_idは英小文字数字とハイフンで付けてください。" };
         }
-        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? "") });
+        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "" });
         if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
-        return { ok: true, text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""})。` };
+        return { ok: true, text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""})。` };
       }
       case "spawn_agent": {
         if (!spawner) return { ok: false, text: "このエージェントにはスポーン権限がありません。" };
