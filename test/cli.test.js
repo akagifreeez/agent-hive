@@ -120,17 +120,17 @@ test("CLI: cancel/release/reopen/auditが実サーバーに対して動く", asy
   assert.match(c2.stderr, /中止できません/);
 
   // release: 担当のいないタスクは解放できない
-  const r = await runCli(["tasks", "release", "cli-t2"], port, token;
+  const r = await runCli(["tasks", "release", "cli-t2"], port, token);
   assert.notEqual(r.code, 0);
   assert.match(r.stderr, /解放できません/);
 
   // reopen: doneタスクを再open(一旦cancel済みのcli-t1はdone扱い)
-  const ro = await runCli(["tasks", "reopen", "cli-t1"], port, token;
+  const ro = await runCli(["tasks", "reopen", "cli-t1"], port, token);
   assert.equal(ro.code, 0);
   assert.match(ro.stdout, /cli-t1/);
 
   // audit: 新しい順に表示
-  const a = await runCli(["audit", "-n", "10"], port, token;
+  const a = await runCli(["audit", "-n", "10"], port, token);
   assert.equal(a.code, 0);
   const ai = a.stdout.indexOf("new");
   const ao = a.stdout.indexOf("old");
