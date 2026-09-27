@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { loadConfig, dataDir } from "../config.js";
 import { OpenAIModel } from "../model/openai.js";
 import { startUi } from "../ui/server.js";
+import { chatUiHandlers } from "../ui/chat-wiring.js";
 import { runChat } from "../runner.js";
 import { Bus } from "../engine/board.js";
 import { wireConsoleLog } from "../log.js";
@@ -75,17 +76,7 @@ async function bootstrap() {
     let controller = null;
     await startUi({
       config, bus, autoStart: false,
-      onSay: (text, thread) => controller?.say(text, thread),
-      onFeedback: (req) => controller?.feedback(req),
-      onThreadPause: (req) => controller?.setThreadPaused(req),
-      onAttach: (path, dataUrl, note, thread) => controller?.attachImage(note, dataUrl, thread, path),
-      onThread: (req) => controller?.openThread(req),
-      onCloseThread: (req) => controller?.closeThread(req),
-      onFolder: (req) => controller?.setThreadFolder(req),
-      onModel: (patch) => controller?.setModel(patch),
-      onPermMode: (mode) => controller?.setPermMode(mode),
-      onWorkflow: (name) => controller?.runWorkflow(name),
-      onListWorkflows: () => controller?.listWorkflows() ?? [],
+      ...chatUiHandlers(controller),
     });
     controller = await runChat({ config, bus });
   }
