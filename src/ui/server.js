@@ -82,6 +82,49 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   const tasks = new TaskBlackboard(config.workspace, bus);
   const clients = new Set();
 
+  /* ============ ボード全文検索(/api/board?q=) ============ */
+  const BOARD_SEARCH_DEFAULT_LIMIT = 50;
+  // q=<語> で全スレッド横断の本文部分一致。約2MBのJSONLも線形走査で十分。
+  // ヒットは新しい順(at降順→id降順)で limit 件。thread= で1スレッドに絞れる。
+  const searchBoard = (rawQuery, { thread = null, limit = BOARD_SEARCH_DEFAULT_LIMIT } = {}) => {
+    const q = String(rawQuery ?? "");
+    if (!q.trim()) return { ok: false, error: "検索語(q)が空です" };
+    const qLower = q.toLowerCase();
+    const max = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 200) : BOARD_SEARCH_DEFAULT_LIMIT;
+
+    const hits = [];
+    // ディスク(JSONL)をBoardStore経由で走査。ファイル名→スレッド名を復元して投稿に載せる
+    for (const f of boardStore.files()) {
+      const name = f === "board__main__.jsonl" ? "__main__" : f.replace(/^board-/, "").replace(/\.jsonl$/, "");
+      if (thread && name !== thread) continue;
+      const ix = boardStore.indexFor(f);
+      ix.sync();
+      for (let i = 0; i < ix.ids.length; i++) {
+        // 1行ずつ軽く読む(readRangeで範囲取得→パース)。ヒットのみ保持
+        const posts = ix.readRange(i, i + 1);
+        if (!posts.length) continue;
+        const p = posts[0];
+        if (typeof p.text === "string" && p.text.toLowerCase().includes(qLower)) hits.push(p);
+      }
+    }
+    // RAMのみの投稿(未永続化のチャットモード分)も走査。ディスク側との二重掲載は
+    // thread+id の組で重複排除する(idはスレッドごとに独立採番のためid単独では一意でない)
+    const seen = new Set(hits.map((p) => `${p.thread ?? "__main__"}#${p.id}`));
+    for (const p of live.board) {
+      const th = p.thread ?? "__main__";
+      if (thread && th !== thread) continue;
+      if (typeof p.text !== "string" || !p.text.toLowerCase().includes(qLower)) continue;
+      const key = `${th}#${p.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hits.push(p);
+    }
+
+    // 新しい順(at降順、同時刻はid降順=同じスレッド内では投稿が新しいほど先)
+    hits.sort((a, b) => (b.at ?? 0) - (a.at ?? 0) || b.id - a.id);
+    return { ok: true, query: q, thread: thread ?? null, total: hits.length, posts: hits.slice(0, max) };
+  };
+
   const record = {
     "agent.status": (p) => {
       live.agents[p.agent] = { ...live.agents[p.agent], status: p.status };
@@ -245,7 +288,16 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
+      // ?q= があるときは全文検索モード(全スレッド横断の本文部分一致)
       if (url.pathname === "/api/board") {
+        const q = url.searchParams.get("q");
+        if (q !== null) {
+          const r = searchBoard(q, {
+            thread: url.searchParams.get("thread"),
+            limit: Number(url.searchParams.get("limit")),
+          });
+          return json(res, r, r.ok ? 200 : 400);
+        }
         const before = Number(url.searchParams.get("before"));
         const thread = url.searchParams.get("thread");
         // thread指定: そのスレッドのJSONLから直接読む(before無し=ディスクの末尾200)。
