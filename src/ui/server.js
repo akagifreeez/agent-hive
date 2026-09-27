@@ -491,55 +491,14 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
-<<<<<<< HEAD
-      if (url.pathname === "/api/devserver" && req.method === "GET") {
-        return json(res, { scripts: detectNpmScripts(config.workspace) });
-=======
-<<<<<<< HEAD
-      if (url.pathname === "/api/devserver") {
-        if (req.method === "GET") return json(res, { scripts: (() => { try { return Object.keys(JSON.parse(readFileSafe(config.workspace, "package.json") || "{}").scripts ?? {}); } catch { return []; } })(), running: null });
-        if (req.method === "POST") {
-          const chunks = [];
-          req.on("data", (d) => chunks.push(d));
-          req.on("end", () => {
-            try {
-              const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-              const r = handleDevserverAction(body, config.workspace, config.ui.port);
-              json(res, r, r.status ?? (r.ok ? 200 : 400));
-            } catch (err) {
-              json(res, { ok: false, error: err.message }, 400);
-            }
-          });
-          return;
-=======
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
-      if (url.pathname === "/api/devserver" && req.method === "GET") {
-        return json(res, { scripts: detectNpmScripts(config.workspace).map((s) => s.name) });
->>>>>>> main
-      }
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
-        req.on("end", async () => {
+        req.on("end", () => {
           try {
-<<<<<<< HEAD
-            const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-            const action = body.action ?? "start";
-            if (action === "stop") {
-              const r = stopDevServer(body.script ?? "");
-              return json(res, r, r.ok ? 200 : 400);
-            }
-            const r = startDevServer(body.script, config.workspace);
-            if (r.alreadyRunning) return json(res, { ok: false, error: "既に起動しています" }, 400);
-            // ダミーサーバーが "PORT=<n>" を出力するのを短時間待ってurlを確定させる
-            for (let i = 0; i < 40 && !r.port; i++) await new Promise((res2) => setTimeout(res2, 50));
-            r.url = r.port ? `http://127.0.0.1:${r.port}` : null;
-            return json(res, r);
-=======
-            const { action, script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-            if (action === "stop") return json(res, stopDevServer(script ?? ""));
+            const { script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
             json(res, startDevServer(script, config.workspace));
->>>>>>> main
           } catch (err) {
             json(res, { ok: false, error: err.message }, 400);
           }
@@ -547,12 +506,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/devserver" && req.method === "DELETE") {
-        try {
-          return json(res, stopDevServer(url.searchParams.get("script") ?? ""));
-        } catch (err) {
-          return json(res, { ok: false, error: err.message }, 400);
->>>>>>> main
-        }
+        return json(res, stopDevServer(url.searchParams.get("script") ?? ""));
       }
       if (url.pathname === "/markdown.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
@@ -586,106 +540,39 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   if (config.ui.monitorPort) {
     await startMonitor({ config, live, tasks, startedAt });
   }
+  return { close: () => { stopAllDevServers(); server.close(); } };
   if (autoStart) {
     // 待ち受けを邪魔しない走行
     runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
   }
-  return { close: () => { stopAllDevServers(); server.close(); } };
 }
 
 /* ============ /api/devserver: 開発用ダミーサーバーの起動/停止 ============ */
 // ワークスペース内スクリプトを子プロセスで起動し、疎通確認してpidを返す。
 // 重複起動防止(同じscriptは1プロセスのみ)、DELETEで終了。UIサーバー終了時にも全停止。
-let devPort = null; // UIサーバーの実ポート(start応答のurl用)
-const devServers = new Map(); // script => { child, startedAt }
-
-function handleDevserverAction(body, workspace, uiPort = null) {
-  if (uiPort) devPort = uiPort;
-  const action = String(body.action ?? "");
-  if (action === "start") return startDevServer(String(body.script ?? ""), workspace);
-  if (action === "stop") return stopDevServer(String(body.script ?? ""));
-  return { ok: false, error: `不明なaction: ${action}` };
-}
+const devServers = new Map(); // script => { child, port, startedAt }
 
 function startDevServer(script, workspace) {
-<<<<<<< HEAD
-  if (!script) throw new Error("scriptが空です");
-  // package.jsonのscriptsから実行コマンドを引く(直接ファイル指定はさせない)
-  let scripts = {};
-  try { scripts = JSON.parse(readFileSafe(workspace, "package.json") || "{}").scripts ?? {}; } catch { /* 不正package.json */ }
-  const command = scripts[script];
-  if (!command) throw new Error(`scriptが見つかりません: ${script}`);
-  if (devServers.has(script)) {
-    return { status: 400, ok: false, error: `すでに起動中です: ${script} (pid ${devServers.get(script).child.pid})` };
-  }
-  const child = spawn(command, { cwd: workspace, shell: true, stdio: "ignore", detached: process.platform !== "win32" });
-  const url = `http://localhost:${devPort ?? 7789}/`;
-  const entry = { child, startedAt: Date.now() };
-=======
   if (!script || typeof script !== "string") throw new Error("scriptが空です");
   const abs = resolve(workspace, script);
   if (!abs.startsWith(resolve(workspace) + sep)) throw new Error("ワークスペース外のスクリプトは起動できません");
-<<<<<<< HEAD
   if (devServers.has(script)) {
     const prev = devServers.get(script);
     return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port };
   }
-  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "ignore"], detached: false });
-=======
-  if (devServers.has(script)) throw new Error(`スクリプト ${script} は既に起動しています`);
-  // stdoutから "PORT=<n>" を拾ってURLを返す(スクリプト側はport 0でlistenして出力する規約)
-  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"], detached: false });
->>>>>>> main
+  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: "ignore", detached: false });
   const entry = { child, port: null, startedAt: Date.now() };
->>>>>>> main
   devServers.set(script, entry);
-<<<<<<< HEAD
-  // 起動直後にサーバーが標準出力へ "PORT=<n>" を出す運用を想定。検出できたらurlを添える
-  let out = "";
-  child.stdout.on("data", (d) => {
-    out += d.toString();
-    const m = out.match(/PORT=(\d+)/);
-    if (m) entry.port = Number(m[1]);
-  });
   child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
-  return { ok: true, script, pid: child.pid, port: entry.port, url: entry.port ? `http://127.0.0.1:${entry.port}` : null };
-=======
-  entry.child.stdout.on("data", (d) => {
-    const m = String(d).match(/PORT=(\d+)/);
-    if (m) entry.port = Number(m[1]);
-  });
-  child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
-<<<<<<< HEAD
-  return { ok: true, script, pid: child.pid, url };
->>>>>>> main
+  return { ok: true, script, pid: child.pid };
 }
 
 function stopDevServer(script) {
-  let entry = null;
-  for (const [k, v] of devServers) { if (!script || k === script) { entry = v; devServers.delete(k); break; } }
-  if (!entry) throw new Error("起動中のdevserverはありません");
-  try {
-    if (process.platform === "win32") spawn(`taskkill /PID ${entry.child.pid} /T /F`, { shell: true, stdio: "ignore" });
-    else process.kill(-entry.child.pid, "SIGTERM");
-  } catch { /* 既に終了している場合は無視 */ }
-  return { ok: true, script: script ?? "", pid: entry.child.pid };
-=======
-  return { ok: true, script, pid: child.pid, port: entry.port, url: `http://127.0.0.1:${entry.port ?? 0}` };
-}
-
-function stopDevServer(script) {
-  if (!script) {
-    // script省略時は全停止。1つも起動していなければ400にするためthrow
-    if (devServers.size === 0) throw new Error("起動中のサーバーがありません");
-    stopAllDevServers();
-    return { ok: true, stopped: "all" };
-  }
   const entry = devServers.get(script);
-  if (!entry) throw new Error("起動中のサーバーがありません");
+  if (!entry) return { ok: false, error: "起動中のサーバーがありません" };
   devServers.delete(script);
   try { entry.child.kill(); } catch { /* 既に終了している場合は無視 */ }
   return { ok: true, script, pid: entry.child.pid };
->>>>>>> main
 }
 
 function stopAllDevServers() {
@@ -943,13 +830,4 @@ function readAuditTail(workspace, limit) {
     } catch { /* ファイルが無い世代は無視 */ }
   }
   return lines.slice(-n).reverse();
-}
-
-export function detectNpmScripts(workspace) {
-  try {
-    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
-    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd }));
-  } catch {
-    return [];
-  }
 }
