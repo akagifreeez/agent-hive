@@ -472,7 +472,11 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         req.on("end", async () => {
           try {
             const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-            if (body.action === "stop") return json(res, stopDevServer(body.script ?? ""));
+            if (body.action === "stop") {
+              // script指定が無いstopは「現在起動中の最初のサーバー」を止める(単一運用前提)
+              const target = body.script ?? (devServers.size ? devServers.keys().next().value : "");
+              return json(res, stopDevServer(String(target)));
+            }
             json(res, await startDevServer(body.script, config.workspace));
           } catch (err) {
             json(res, { ok: false, error: err.message }, 400);
@@ -556,7 +560,16 @@ async function startDevServer(script, workspace) {
     const prev = devServers.get(script);
     return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port, url: prev.url ?? null };
   }
-  const child = childSpawn(process.execPath, [abs], { cwd: workspace, detached: false });
+  // script引数はnpm scriptsの「名前」。package.jsonからコマンド文字列を解決して起動する
+  let cmd;
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+    cmd = pkg.scripts?.[script];
+  } catch { /* 下でエラー */ }
+  if (!cmd || typeof cmd !== "string") throw new Error(`scripts[${script}] が見つかりません`);
+  const parts = cmd.split(/\s+/);
+  const bin = parts[0] === "node" ? process.execPath : parts[0];
+  const child = childSpawn(bin, parts.slice(1), { cwd: workspace, detached: false });
   const entry = { child, port: null, url: undefined, startedAt: Date.now() };
   devServers.set(script, entry);
   child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
