@@ -347,6 +347,23 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       host.attachImage(note, dataUrl, path);
       return { ok: true };
     },
+    // 差分レビューからの修正依頼: 該当スレッドにタスクを起票し、ワーカーを起こして気づかせる。
+    // メイン(__main__)のマージならリーダーへ届ける(起票はプロジェクトなし=リーダーが割当を判断)
+    feedback: ({ taskId, comment, thread }) => {
+      const base = String(taskId ?? "").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 40);
+      const text = String(comment ?? "").trim();
+      if (!base || !text) return { error: "taskIdとコメントが必要です" };
+      const th = thread && threads.has(thread) ? thread : null;
+      const id = `fb-${base}-${Date.now().toString(36)}`;
+      tasks.create({
+        id,
+        project: th ?? "",
+        body: `[修正依頼] マージ済みタスク ${taskId} の差分へのレビューコメント:\n${text}\n\n該当箇所とその周辺を確認して修正し、通常どおり finish_task で完了してください。`,
+      });
+      const host = th ? threads.get(th).host : leadHost;
+      host.say(`[修正依頼] タスク ${taskId} の差分にフィードバックが届きました。未着手タスク ${id} として起票済みです。確認して対応してください。`);
+      return { ok: true, id, thread: th ?? "__main__" };
+    },
     setModel: (patch) => {
       if (patch.model !== undefined) runtime.model = String(patch.model).trim() || null;
       if (patch.effort !== undefined) runtime.effort = ["low", "medium", "high"].includes(patch.effort) ? patch.effort : null;
