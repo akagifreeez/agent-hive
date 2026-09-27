@@ -47,11 +47,25 @@ function base(port) {
   return `http://127.0.0.1:${port}`;
 }
 
+// CSRFトークン: サーバー再起動で変わるため、最初の呼び出し時に / から自動取得して覚える。
+// GETはトークン不要で、トークンは同一オリジンのHTMLにしか出ない(ローカルCLIが読むのは安全)。
+// HIVE_UI_TOKEN環境変数があればそちらを優先(自動取得できない環境向け)
+let cachedToken = null;
+async function getToken(port, fallback) {
+  if (fallback) return fallback;
+  if (cachedToken != null) return cachedToken;
+  try {
+    const html = await (await fetch(base(port) + "/")).text();
+    const m = html.match(/window\.HIVE_TOKEN = "([^"]*)"/);
+    cachedToken = m ? m[1] : "";
+  } catch { cachedToken = ""; }
+  return cachedToken;
+}
+
 async function api(port, path, body = null, token = null) {
   let res;
   try {
-    const headers = { "content-type": "application/json", origin: "http://localhost" };
-    if (token) headers["x-hive-token"] = token;
+    const headers = { "content-type": "application/json", origin: "http://localhost", "x-hive-token": await getToken(port, token) };
     res = await fetch(base(port) + path, body ? { method: "POST", headers, body: JSON.stringify(body) } : undefined);
   } catch {
     console.error(`hive本体に接続できません(${base(port)})。先に desktop(npm run desktop)か node src/index.js --chat で起動してください。`);
