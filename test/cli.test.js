@@ -88,3 +88,55 @@ test("CLI: 本体が無いときは分かりやすいエラーで非ゼロ終了
   assert.notEqual(r.code, 0);
   assert.match(r.stderr, /接続できません/);
 });
+
+test("CLI: cancel/release/reopen/auditが実サーバーに対して動く", async () => {
+  const ws = mktmp();
+  const bus = new Bus();
+  const config = { workspace: ws, ui: { port: 0 }, model: { model: "test-model" }, agents: [] };
+  const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
+  const port = config.ui.port;
+
+  // タスクを2件起票(1件はdoneにしておいてreopenを試す)
+  const mk = (id) => fetch(`http://127.0.0.1:${port}/api/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, body: "テスト用" }) });
+  await (await mk("cli-t1")).json();
+  await (await mk("cli-t2")).json();
+
+  // audit台帳の代わりのファイルを用意(新しい順で表示されること)
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  mkdirSync(join(ws, "state"), { recursive: true });
+  writeFileSync(join(ws, "state", "audit.jsonl"), [
+    JSON.stringify({ at: "2020-01-01T00:00:00Z", tool: "old" }),
+    JSON.stringify({ at: "2021-01-01T00:00:00Z", tool: "new" }),
+  ].join("\n") + "\n");
+
+  // cancel: openのタスクを中止
+  const c = await runCli(["tasks", "cancel", "cli-t1"], port);
+  assert.equal(c.code, 0);
+  assert.match(c.stdout, /cli-t1/);
+
+  // cancel: openでないタスクはエラーで非ゼロ
+  const c2 = await runCli(["tasks", "cancel", "cli-t1"], port);
+  assert.notEqual(c2.code, 0);
+  assert.match(c2.stderr, /中止できません/);
+
+  // release: 担当のいないタスクは解放できない
+  const r = await runCli(["tasks", "release", "cli-t2"], port);
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /解放できません/);
+
+  // reopen: doneタスクを再open(一旦cancel済みのcli-t1はdone扱い)
+  const ro = await runCli(["tasks", "reopen", "cli-t1"], port);
+  assert.equal(ro.code, 0);
+  assert.match(ro.stdout, /cli-t1/);
+
+  // audit: 新しい順に表示
+  const a = await runCli(["audit", "-n", "10"], port);
+  assert.equal(a.code, 0);
+  const ai = a.stdout.indexOf("new");
+  const ao = a.stdout.indexOf("old");
+  assert.ok(ai >= 0 && ao >= 0 && ai < ao, `新しい順であること: ${a.stdout}`);
+  assert.match(a.stdout, /2/); // 件数表示
+
+  ui.close();
+  rmTree(ws);
+});

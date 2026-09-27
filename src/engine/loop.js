@@ -33,6 +33,9 @@ const COMMON_RULES = `
 // 暴走検知(ZCode runtime/helpers/model-anomaly.ts の移植): 同一ツール+同一引数の
 // 連続呼び出しを検知してリマインダを注入する。回数での打ち切りより先に効く保険。
 export const REPEAT_CALL_WARN_THRESHOLD = 3;
+// 連続で失敗するツール呼び出しの打ち切りしきい値。失敗→失敗→失敗のループはturn-limitまで
+// トークンを浪費するだけなので、しきい値到達でidle退場扱い(退場時掃除も走る)にする。
+export const TOOL_FAIL_STREAK_LIMIT = 3;
 export const MAX_REPEAT_CALL_WARNINGS_PER_TURN = 3;
 // rapid-refillブレーカー(ZCode runtime/methods/turn-loop-state.ts の移植):
 // 圧縮後3ターン未満でまた圧縮が要る状態が3連続なら、圧縮が追いついていないとして打ち切る。
@@ -96,6 +99,7 @@ export async function runAgentLoop({
   let runTokens = 0; // このラン(ループ実行)自体の消費。予算判定はラン単位(セッション累積だと常駐chatが使い切りで brick する)
   let lastToolSig = null; // 暴走検知: 直前のツール呼び出しシグネチャ
   let repeatStreak = 0;
+  let toolFailStreak = 0; // 連続で失敗したツール呼び出しの回数(打ち切り判定用)
   let toolTurnsSinceCompact = 0; // 最終圧縮からのツール実行ターン数
   let rapidRefills = 0;
   bus.emit("agent.status", { agent: agent.id, status: "working" });
@@ -178,6 +182,15 @@ export async function runAgentLoop({
         }
         bus.emit("tool.result", { agent: agent.id, tool: tc.name, ok: out.ok, brief: out.text.slice(0, 120) });
         messages.push({ role: "tool", tool_call_id: tc.id, content: out.text.slice(0, 12000) });
+        // 失敗ツール結果の連続は打ち切り: モデルが失敗を学習せず同じ失敗を繰り返す場合、
+        // turn-limitまでトークンを浪費するより1回の失敗で次の手(諦め/別アプローチ)へ進ませる
+        if (!out.ok) toolFailStreak += 1; else toolFailStreak = 0;
+        if (toolFailStreak >= TOOL_FAIL_STREAK_LIMIT) {
+          releaseClaims("ツール失敗の連続");
+          board.post(agent.id, `[停止] ツール呼び出しが${toolFailStreak}回連続で失敗したため終了します。同じ入力では同じ結果になります。`);
+          bus.emit("agent.status", { agent: agent.id, status: "tool-fail-loop" });
+          return { ok: false, endedBy: "tool-fail-loop", error: `ツール失敗が${toolFailStreak}回連続`, seenBoard: seen };
+        }
         // idle強制終了: 連続3回の請求失敗はプロンプトでなくエンジンが数える
         if (tc.name === "claim_next_task") {
           claimMisses = out.claimMiss ? claimMisses + 1 : 0;

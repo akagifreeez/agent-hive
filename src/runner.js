@@ -159,6 +159,10 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
         mainWorkspace: config.workspace,
         board: threadBoard, tasks, bus, gate,
         spawner: manager,
+
+        crossPoster,
+        resolveBoard,
+
       })),
       board: threadBoard, tasks, bus, ledger,
       budget: config.budget,
@@ -269,6 +273,21 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     return { ok: true };
   };
 
+  // crosstalk: 指定スレッドのボードへ直接投稿する(to_thread引数用)。不在スレッドはエラー
+  const crossPoster = (threadName, from, text) => {
+    const t = threads.get(String(threadName ?? "").trim());
+    if (!t) return { ok: false, error: `スレッド ${threadName} は開いていません` };
+    const post = t.board.post(from, text);
+    return { ok: true, id: post.id };
+  };
+
+  // to_thread宛先解決(design-to-thread.md): 自分のボード/threads/__main__を解決。他はnull
+  const resolveBoard = (threadName) => {
+    const name = String(threadName ?? "").trim();
+    if (name === mainBoard.name) return mainBoard;
+    return threads.get(name)?.board ?? null;
+  };
+
   // スレッドのフォルダ(ナビ表示用分類)を付け替え。openThreadと同じ正規化を適用
   const setThreadFolder = ({ project, folder }) => {
     const name = String(project).trim();
@@ -280,6 +299,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     bus.emit("thread.folder", { name, folder: folderName });
     return { ok: true, name, folder: folderName };
   };
+
 
   // スレッドの一時停止/再開(Claude Squad手本)。__main__はリーダー自身を休ませる。
   // 停止中はワーカーの起床と自動増員を止めるのでトークンを消さない
@@ -316,6 +336,8 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       mainWorkspace: config.workspace,
       board: mainBoard, tasks, bus, gate,
       spawner: manager,
+      crossPoster,
+      resolveBoard,
       threadOpener: openThread,
       threadCloser: closeThread,
     })),
@@ -491,6 +513,8 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       tasks,
       bus,
       gate,
+      // scenario実行ではスレッド機構が無いので自分のボードのみ解決(他スレッド宛はok:false)
+      resolveBoard: (name) => (String(name ?? "").trim() === board.name ? board : null),
     });
     const shellKind = await tools.detectShell();
     const agentWithCtx = { ...agent, scenarioName: config.scenario.name };

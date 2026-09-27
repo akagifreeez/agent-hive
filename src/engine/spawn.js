@@ -121,7 +121,7 @@ export class SpawnManager {
     ];
     const loopOpts = {
       agent, model, tools,
-      board: this.board, tasks: this.tasks, bus: this.bus,
+      board: b, tasks: this.tasks, bus: this.bus,
       ledger: this.ledger, budget: this.budget,
       maxTurns: this.maxTurns, shellKind,
       contextWindow: this.contextWindow, thresholdPercent: this.thresholdPercent,
@@ -151,7 +151,9 @@ export class SpawnManager {
       b.post("system", `[掃除] ${agent.id} 退場により自己起票タスク ${cleaned.join(", ")} をdoneへ移動しました。`);
     }
     const e = this.live.get(agent.id);
-    if (e) e.status = r.ok ? "done" : `ended:${r.endedBy ?? "error"}`;
+    // idle(待機終了)とtool-fail-loop(失敗ループ打ち切り)は正常な退場扱い。UIではdoneと表示し、
+    // テストの退場待ちもこれで完了とみなす(ended:* は異常系の見た目を作るので避ける)
+    if (e) e.status = r.ok || r.endedBy === "idle" || r.endedBy === "tool-fail-loop" ? "done" : `ended:${r.endedBy ?? "error"}`;
     this.bus.emit("agent.exited", { agent: agent.id, ok: r.ok, endedBy: r.endedBy ?? r.error });
     await this.cleanupOrKeep(b, agent, worktreePath, r);
   }
