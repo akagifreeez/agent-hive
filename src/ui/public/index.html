@@ -173,7 +173,7 @@
   table.usage-tbl th { text-align: left; color: var(--label-tertiary); font-weight: 600; padding: 2px 6px; border-bottom: 1px solid var(--separator); }
   table.usage-tbl td { padding: 2px 6px; border-bottom: 1px solid var(--separator); }
   table.usage-tbl tr.total td { color: var(--label); border-top: 1px solid var(--line-strong); font-weight: 600; }
-  table.audit-tbl { width: 100%; border-collapse: collapse; font-size: 11px; font-family: var(--font-mono); }
+  table.audit-tbl { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 11px; font-family: var(--font-mono); }
   table.audit-tbl th { text-align: left; color: var(--label-tertiary); font-weight: 600; padding: 2px 6px; border-bottom: 1px solid var(--separator); position: sticky; top: 0; background: var(--bg); }
   table.audit-tbl td { padding: 2px 6px; border-bottom: 1px solid var(--separator); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
   table.audit-tbl td.okmark { width: 14px; text-align: center; }
@@ -186,8 +186,9 @@
   .session-row input:focus { outline: none; border-color: var(--accent); }
   .session-item { display: flex; justify-content: space-between; align-items: center; padding: 3px 6px; font-size: 12px; border-bottom: 1px solid var(--separator); }
   .session-item:hover { background: var(--fill); }
-  #ctx-tabs { display: flex; border-bottom: 1px solid var(--separator); }
-  #ctx-tabs .ct { flex: 1; text-align: center; padding: 8px 0; font-size: 12px; color: var(--label-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: color var(--duration) var(--ease); }
+  #ctx-tabs { display: flex; border-bottom: 1px solid var(--separator); overflow-x: auto; scrollbar-width: none; }
+  #ctx-tabs::-webkit-scrollbar { display: none; }
+  #ctx-tabs .ct { flex: 1 0 auto; white-space: nowrap; text-align: center; padding: 8px 7px; font-size: 11px; color: var(--label-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: color var(--duration) var(--ease); }
   #ctx-tabs .ct:hover { color: var(--label); }
   #ctx-tabs .ct.active { color: var(--accent); border-bottom-color: var(--accent); }
   body.nopanel { grid-template-columns: 240px 1fr; }
@@ -413,6 +414,7 @@ let lastState = null;
 const BOARD_WINDOW = 200;
 let boardWindow = BOARD_WINDOW;
 const expandedMerges = new Set();
+const autoLoadedThreads = new Set(); // 自動遡読済みスレッド(1回限り。無限再描画を防ぐ)
 let anchorPid = null;
 const NAMES = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ", delta: "デルタ", system: "システム", you: "あなた", lead: "リーダー" };
 // ワーカー識別色: エージェントIDのハッシュから色相を安定生成する(状態はドットの色が担う)
@@ -571,6 +573,11 @@ function renderStream(state) {
   stream.innerHTML = "";
   // 描画は末尾200件に絞る(履歴が増えても軽く)。それより前は読み込みボタンで展開
   const posts = state.live.board.filter((p) => (p.thread ?? "__main__") === selectedThread);
+  // スレッド選択直後でRAMに投稿が無いときは、ディスクから1ページ自動遡読(1スレッド1回のみ)
+  if (!posts.length && selectedThread !== "__main__" && !autoLoadedThreads.has(selectedThread)) {
+    autoLoadedThreads.add(selectedThread);
+    queueMicrotask(() => loadOlderPosts(null));
+  }
   let shown = posts;
   if (posts.length > boardWindow) {
     shown = posts.slice(-boardWindow);
@@ -916,7 +923,7 @@ function renderAgentLog(a) {
 function renderMemoryTab(body) {
   const state = lastState;
   const files = (state?.files ?? []).filter((f) => f.startsWith("memory/") && f.endsWith(".md"));
-  const expiredSet = new Set((state?.memoryFiles ?? []).filter((m) => m.expired).map((m) => m.path));
+  const expiredSet = new Set((state?.memoryFiles ?? []).filter((m) => m.expired).map((m) => "memory/" + m.name));
   const sec = document.createElement("div");
   sec.className = "sec";
   sec.textContent = "永続記憶(memory/・全エージェントに常時注入・読み取り専用)";
@@ -1007,7 +1014,11 @@ function renderAuditTab(body) {
       tb.appendChild(tr);
     }
     tbl.appendChild(tb);
-    box.appendChild(tbl);
+    // 右パネル幅を超えるcmd列はラッパーで横スクロール(テーブル全体が溢れないように)
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "overflow-x:auto;max-width:100%;";
+    wrap.appendChild(tbl);
+    box.appendChild(wrap);
   };
   reload.onclick = load;
   load();
@@ -1453,9 +1464,10 @@ function renderAll() {
 
 // 頁送りAPIで以前の投稿を取得し、表示に前置きする(アンカーへスクロール復帰)
 async function loadOlderPosts(beforeId) {
-  if (beforeId == null) return;
-  // threadを付けてサーバー側でそのスレッドのJSONLから直接読ませる(RAMに無い過去分も出る)
-  const r = await hfetch(`/api/board?before=${beforeId}&thread=${encodeURIComponent(selectedThread)}`);
+  // threadを付けてサーバー側でそのスレッドのJSONLから直接読ませる(RAMに無い過去分も出る)。
+  // beforeIdがnullならディスク側の末尾200(=スレッド選択直後でRAMに投稿が無いときの自動遡読)
+  const q = beforeId == null ? `thread=${encodeURIComponent(selectedThread)}` : `before=${beforeId}&thread=${encodeURIComponent(selectedThread)}`;
+  const r = await hfetch(`/api/board?${q}`);
   if (!r.ok) return;
   const data = await r.json();
   const older = (data.posts ?? []).filter((p) => (p.thread ?? "__main__") === selectedThread);
