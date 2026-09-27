@@ -526,7 +526,6 @@ function startDevServer(script, workspace) {
     const prev = devServers.get(script);
     return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port };
   }
-  const { spawn } = require("node:child_process");
   const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: "ignore", detached: false });
   const entry = { child, port: null, startedAt: Date.now() };
   devServers.set(script, entry);
