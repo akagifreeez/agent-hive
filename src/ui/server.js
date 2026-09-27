@@ -480,21 +480,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
-      if (url.pathname === "/api/devserver") {
-        if (req.method === "GET") return json(res, handleDevserver({ method: "GET", workspace: config.workspace, uiPort: config.ui.port }));
-        let body = "";
-        req.on("data", (d) => (body += d));
-        req.on("end", () => {
-          try {
-            const r = handleDevserver({ method: "POST", body: JSON.parse(body || "{}"), workspace: config.workspace, uiPort: config.ui.port });
-            json(res, r.body ?? r, r.status ?? 200);
-          } catch (err) {
-            json(res, { ok: false, error: err.message }, 400);
-          }
-        });
-        return;
-      }
-      if (url.pathname === "/api/memory") return json(res, { files: listMemoryWithExpiry(config.workspace) });
       if (url.pathname === "/api/audit") return json(res, { audit: readAuditTail(config.workspace, Number(url.searchParams.get("limit")) || 200) });
       if (url.pathname === "/api/wtdiff") {
         const r = await handleWtdiff({ mainWorkspace: config.workspace, worktreeRoot: config.worktrees.dir, agentId: url.searchParams.get("agent"), limit: Number(url.searchParams.get("limit")) || undefined });
@@ -567,61 +552,6 @@ function json(res, obj, status = 200) {
   res.end(JSON.stringify(obj));
 }
 
-
-/* ============ /api/devserver: package.json scriptsの起動/停止 ============ */
-// 同時1プロセス。child_process.spawnで長時間起動し、pid保持+stopでkillする。
-// runCommand(タイムアウトで殺す)ではなくspawnを使うのがポイント。
-let devserverProc = null; // { pid, script, url }
-const DEVSERVER_START_TIMEOUT_MS = 10000;
-
-// package.jsonのnpm scripts検出({name, cmd}配列。読めない/無ければ空配列)。
-// /api/scripts と UIのscripts一覧で使う。マージ過程で定義が落ちたため復元(2026-09-27)
-export function detectNpmScripts(workspace) {
-  try {
-    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
-    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd: String(cmd) }));
-  } catch {
-    return [];
-  }
-}
-
-export function handleDevserver({ method, body = {}, workspace, uiPort }) {
-  if (method === "GET") {
-    const pkg = readFileSyncSafe(join(workspace, "package.json"));
-    let scripts = [];
-    try { scripts = Object.keys(JSON.parse(pkg ?? "{}").scripts ?? {}); } catch { /* 不正package.jsonは空 */ }
-    return { scripts, running: devserverProc ? { pid: devserverProc.pid, script: devserverProc.script, url: devserverProc.url } : null };
-  }
-  const action = String(body.action ?? "");
-  if (action === "start") {
-    // 二重起動は拒否でなく起動中プロセスを返す(UIの連打・再読込でも壊れない)
-    const reqScript = String(body.script ?? "").trim();
-    if (devserverProc && devserverProc.child.exitCode === null) {
-      if (devserverProc.script === reqScript) {
-        return { status: 200, body: { ok: true, alreadyRunning: true, pid: devserverProc.pid, script: devserverProc.script, url: devserverProc.url } };
-      }
-      return { status: 400, body: { ok: false, error: `別のscriptが起動中です: ${devserverProc.script} (pid ${devserverProc.pid})` } };
-    }
-    const script = reqScript;
-    let scripts = {};
-    try { scripts = JSON.parse(readFileSyncSafe(join(workspace, "package.json")) ?? "{}").scripts ?? {}; } catch { /* 同上 */ }
-    if (!script || !scripts[script]) return { status: 400, body: { ok: false, error: `scriptが見つかりません: ${script}` } };
-    const child = spawn("npm", ["run", script], { cwd: workspace, shell: true, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
-    const url = body.url ? String(body.url) : `http://localhost:${uiPort && uiPort !== 0 ? uiPort : 7789}/`;
-    devserverProc = { pid: child.pid, script, url, child };
-    return { status: 200, body: { ok: true, pid: child.pid, script, url } };
-  }
-  if (action === "stop") {
-    if (!devserverProc) return { status: 400, body: { ok: false, error: "起動中のdevserverはありません" } };
-    try {
-      if (process.platform === "win32") runCommand({ command: `taskkill /PID ${devserverProc.pid} /T /F`, timeoutMs: 5000, outputLimit: 1000 });
-      else process.kill(-devserverProc.pid, "SIGTERM");
-    } catch { /* 既に終了している場合は無視 */ }
-    devserverProc = null;
-    return { status: 200, body: { ok: true } };
-  }
-  return { status: 400, body: { ok: false, error: `不明なaction: ${action}` } };
-}
 
 /* ============ /api/wtdiff: worktreeとmainの差分 ============ */
 // agent/<id>ブランチのworktreeに対する main...agent/<id> の差分を返す。
@@ -784,6 +714,17 @@ tick();setInterval(tick,3000);
     }
   }
   return server;
+}
+
+// package.jsonのnpm scripts検出({name, cmd}配列。読めない/無ければ空配列)。
+// /api/scripts と UIのscripts一覧で使う。マージ過程で定義が落ちたため復元(2026-09-27)
+export function detectNpmScripts(workspace) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd: String(cmd) }));
+  } catch {
+    return [];
+  }
 }
 
 function readFileSafe(workspace, p) {
