@@ -26,8 +26,11 @@ async function main() {
   const modelFactory = () => new OpenAIModel(config.model);
 
   if (args.includes("--chat")) {
-    const controller = await runChat({ config, bus });
+    // デスクトップ殻と同じ順(UIの待ち受けを先に立ててからrunChat)。
+    // 逆だとリーダーの登録イベント(thread.opened)がUI立ち上がり前に消える
+    let controller = null;
     await startUi({ config, bus, autoStart: false, ...chatUiHandlers(controller) });
+    controller = await runChat({ config, bus });
     return;
   }
 
