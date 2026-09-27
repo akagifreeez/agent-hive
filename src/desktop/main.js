@@ -76,7 +76,7 @@ async function bootstrap() {
     let controller = null;
     await startUi({
       config, bus, autoStart: false,
-      ...chatUiHandlers(controller),
+      ...chatUiHandlers(() => controller),
     });
     controller = await runChat({ config, bus });
   }

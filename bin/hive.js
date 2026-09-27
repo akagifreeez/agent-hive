@@ -270,10 +270,14 @@ async function cmdTaskAction(o, args, action) {
 async function cmdAudit(o) {
   const r = await api(o.port, `/api/audit?limit=${o.limit}`);
   const audit = r.audit ?? [];
-  console.log(`${ACCENT}監査台帳 ${audit.length}件${RESET}`);
+  console.log(`${ACCENT}監査台帳 ${audit.length}件${RESET}(新しい順)`);
   for (const e of audit) {
-    const at = e.at ? String(e.at).replace("T", " ").slice(0, 19) : "-";
-    console.log(`  ${DIM}${at}${RESET} ${BOLD}${e.tool ?? e.name ?? "?"}${RESET} ${DIM}${e.agent ?? ""}${RESET} ${JSON.stringify(e.args ?? e.input ?? {})}`.slice(0, 200));
+    // 台帳の実フィールド: ts/tool/agent/ok/ms/blocked/cmd?/path?/brief
+    const at = e.ts ? String(e.ts).replace("T", " ").slice(0, 19) : "-";
+    const mark = e.blocked ? `${ACCENT}[block]${RESET}` : (e.ok ? `${DIM}ok${RESET}` : "×");
+    const detail = [e.cmd, e.path].filter(Boolean).join(" ");
+    const line = `  ${DIM}${at}${RESET} ${mark} ${BOLD}${e.tool ?? "?"}${RESET} ${DIM}${e.agent ?? ""}${RESET} ${detail} ${DIM}${e.brief ?? ""}${RESET}`;
+    console.log(line.slice(0, 220));
   }
   if (!audit.length) console.log("(記録なし)");
 }

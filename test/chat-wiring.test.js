@@ -8,8 +8,6 @@ import { join } from "node:path";
 import { Bus } from "../src/engine/board.js";
 import { startUi as _startUi } from "../src/ui/server.js";
 import { chatUiHandlers } from "../src/ui/chat-wiring.js";
-// test-hf-token-inject: UIサーバーのPOSTはCSRFトークンを要求するため、
-// テスト内のfetchは全てトークン付きへ差し替える(startUi後にtokenedFetchOn()を呼ぶ)
 import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
 tokenedFetchOn();
 
@@ -73,6 +71,22 @@ test("chatUiHandlers: 設定・スレッド・フォルダ・pause・feedbackの
   assert.ok(calls.some((c) => c[0] === "fb" && c[1] === "t1"));
   assert.ok(calls.some((c) => c[0] === "wf" && c[1] === "demo"));
 
+  ui.close();
+  rmTree(ws);
+});
+
+test("chatUiHandlers: getter渡しでも後から入るcontrollerに届く(UI先立ち上げ順)", async () => {
+  const ws = mktmp();
+  const bus = new Bus();
+  const config = { workspace: ws, ui: { port: 0 }, model: { model: "base-model" }, agents: [] };
+  const calls = [];
+  let controller = null; // この後代入される(UI先・runChat後の順を模擬)
+  const ui = await startUiTokenized(_startUi, { config, modelFactory: () => ({}), bus, autoStart: false, ...chatUiHandlers(() => controller) });
+  controller = { say: (t) => calls.push(["say", t]) };
+  const base = `http://127.0.0.1:${config.ui.port}`;
+  const r = await fetch(base + "/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "遅延参照テスト" }) });
+  assert.equal(r.status, 200);
+  assert.deepEqual(calls, [["say", "遅延参照テスト"]]);
   ui.close();
   rmTree(ws);
 });

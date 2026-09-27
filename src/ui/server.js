@@ -54,21 +54,6 @@ export function newUiToken() {
   return randomBytes(24).toString("base64url");
 }
 
-// テスト用: トークン取得込みのstartUi。テストは await startUiTokenized({...}) とするだけで
-// POSTトークン要求に対応できる(併せて tokenedFetchOn() を呼ぶとglobal fetchのPOSTへ自動付与)
-export async function startUiTokenized(args) {
-  const ui = await startUi(args);
-  const html = await (await fetch(`http://127.0.0.1:${args.config.ui.port}/`)).text();
-  const m = html.match(/window\.HIVE_TOKEN = (".*?");/);
-  setActiveUiToken(m ? JSON.parse(m[1]) : "");
-  return ui;
-}
-
-// テストランナー側のactiveトークン(ラッパーfetchが参照)。実行時コードは使わない
-let activeUiToken = "";
-export function setActiveUiToken(t) { activeUiToken = t; }
-export function getActiveUiToken() { return activeUiToken; }
-
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
   // UIトークン。環境変数 HIVE_UI_TOKEN(CLI等の外部クライアント用)で上書きできる
