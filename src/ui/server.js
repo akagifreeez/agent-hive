@@ -703,14 +703,6 @@ function persistUsage(workspace, entry) {
   } catch {}
 }
 
-function readFileSyncSafe(p) {
-  try {
-    return JSON.parse(readFileSync(p, "utf8"));
-  } catch {
-    return [];
-  }
-}
-
 // /api/audit: state/audit.jsonl(+1世代前 audit-1.jsonl)の末尾limit件を新着順で返す。
 // 台帳はtools.jsが書く真実で、ここは読み取り専用。壊れた行は無視する(簿記の失敗で止めない)
 function readAuditTail(workspace, limit) {
