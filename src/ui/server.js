@@ -10,6 +10,7 @@ import { TaskBlackboard } from "../engine/tasks.js";
 import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
+import { PermissionGate } from "../engine/permissions.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
@@ -45,6 +46,8 @@ export function isLocalOrigin(req) {
 
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
+  // /api/exec(開発用シェル)もエージェントと同じPermissionGateを通す(UIからの任意コマンド実行を承認制に)
+  const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
   const boardStore = new BoardStore(config.workspace);
   const live = {
@@ -188,6 +191,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
+    if (req.method === "POST" && !isLocalOrigin(req)) return json(res, { error: "localhost以外からのPOSTは拒否します" }, 403);
     try {
       if (url.pathname === "/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -419,6 +423,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           try {
             const { command } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
             if (!command || typeof command !== "string") throw new Error("commandが空です");
+            const verdict = await execGate.check(command);
+            if (!verdict.allowed) { json(res, { ok: false, text: `PermissionGateが拒否: ${verdict.reason ?? "許可されませんでした"}` }, 403); return; }
             const r = await runCommand({ command, cwd: config.workspace, timeoutMs: 120000, outputLimit: 16 * 1024 });
             json(res, r);
           } catch (err) {
