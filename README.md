@@ -260,3 +260,5 @@ UIの見た目: [docs/ui-preview.png](docs/ui-preview.png)(ダミー状態を流
 - ファイル系ツールはワークスペース配下のみ(パス検証でworkspace外を拒否)
 - **bashは承認制ゲートを通る(v2)**: `permissions.deny`パターンは即拒否、`ask`パターンはUIの承認ボタン待ち(既定120秒でタイムアウト拒否)。`--run`無人実行では実質すべてのaskコマンドが拒否される(止まられない経路に承認能力を置かない)
 - ループの暴走止め: maxTurns / 全体タイムアウト / 空応答連続の打ち切り
+
+配布物の動作(v7.1): 梱包時は書き込み可能データ(workspace/worktrees/hive.local.json/鍵ファイル)を `%APPDATA%\agent-hive` 配下に置く(`HIVE_DATA` で上書き可)。設定JSON・エージェントペルソナ・CLI(bin/hive.js)はアプリに同梱され、読み取りはインストール先から行う。梱包exeは `--smoke` を受け付ける(窓を出さずに立ち上がりだけ確認)。

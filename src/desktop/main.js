@@ -4,7 +4,7 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, dialog } from "electron";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig } from "../config.js";
+import { loadConfig, dataDir } from "../config.js";
 import { OpenAIModel } from "../model/openai.js";
 import { startUi } from "../ui/server.js";
 import { runChat } from "../runner.js";
@@ -35,6 +35,10 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function bootstrap() {
+  // 梱包実行時は書き込み可能な場所(userData)をデータ基準にする。設定JSON/personasは同梱物で読む
+  if (app.isPackaged && !process.env.HIVE_DATA) {
+    process.env.HIVE_DATA = app.getPath("userData");
+  }
   const config = loadConfig();
   const bus = new Bus();
   wireConsoleLog(bus);
@@ -111,7 +115,7 @@ async function bootstrap() {
     { label: "ワークスペースを変更...", click: async () => {
       const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"], title: "ワークスペースを選択" });
       if (r.canceled || !r.filePaths[0]) return;
-      writeFileSync(join(process.cwd(), "hive.local.json"), JSON.stringify({ workspace: r.filePaths[0], worktrees: { dir: join(r.filePaths[0], "wt") } }, null, 1));
+      writeFileSync(join(dataDir(), "hive.local.json"), JSON.stringify({ workspace: r.filePaths[0], worktrees: { dir: join(r.filePaths[0], "wt") } }, null, 1));
       app.relaunch();
       app.quit();
     } },
