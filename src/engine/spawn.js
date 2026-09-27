@@ -121,7 +121,7 @@ export class SpawnManager {
     ];
     const loopOpts = {
       agent, model, tools,
-      board: this.board, tasks: this.tasks, bus: this.bus,
+      board: b, tasks: this.tasks, bus: this.bus,
       ledger: this.ledger, budget: this.budget,
       maxTurns: this.maxTurns, shellKind,
       contextWindow: this.contextWindow, thresholdPercent: this.thresholdPercent,
