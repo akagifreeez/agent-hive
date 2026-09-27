@@ -744,6 +744,10 @@ export function loadPersistedBoardPosts(workspace) {
 }
 
 // state/usage.jsonへの蓄積(運用データ。直近200件)
+function readFileSyncSafe(p) {
+  try { return readFileSync(p, "utf8"); } catch { return null; }
+}
+
 function persistUsage(workspace, entry) {
   try {
     const dir = join(workspace, "state");
