@@ -579,7 +579,6 @@ export function countAuditLines(workspace) {
     return raw.split(String.fromCharCode(10)).filter((l) => l.trim()).length;
   } catch {
     return 0;
->>>>>>> main
   }
 }
 
