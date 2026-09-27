@@ -1,6 +1,7 @@
 // ローカルWebUI。依存ゼロ(node:http + SSE)。後からElectron殻で包む前提なので
 // 描画はブラウザ側に寄せ、サーバーは状態API+SSEストリームだけを持つ。
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,7 @@ import { TaskBlackboard } from "../engine/tasks.js";
 import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
+import { PermissionGate } from "../engine/permissions.js";
 import { listMemoryFiles, isMemoryExpired } from "../engine/memory.js";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
@@ -25,8 +27,28 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
+// CSRF/DNS rebinding対策: POSTのOrigin/Hostがlocalhost系か判定する。
+// ヘッダ無し(同一オリジン由来のcurl等)は許可し、外部オリジンのみ拒否。
+export function isLocalOrigin(req) {
+  const origin = String(req.headers.origin ?? "");
+  if (origin) {
+    try {
+      const o = new URL(origin);
+      if (o.hostname !== "localhost" && o.hostname !== "127.0.0.1" && o.hostname !== "::1") return false;
+    } catch { return false; }
+  }
+  const host = String(req.headers.host ?? "");
+  if (host) {
+    const h = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+    if (h !== "localhost" && h !== "127.0.0.1" && h !== "::1") return false;
+  }
+  return true;
+}
+
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
+  // /api/exec(開発用シェル)もエージェントと同じPermissionGateを通す(UIからの任意コマンド実行を承認制に)
+  const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
   const boardStore = new BoardStore(config.workspace);
   const live = {
@@ -170,6 +192,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
+    if (req.method === "POST" && !isLocalOrigin(req)) return json(res, { error: "localhost以外からのPOSTは拒否します" }, 403);
     try {
       if (url.pathname === "/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -198,7 +221,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       // 総件数: チャットモードではディスクが真実。RAMのみのボード(未永続化)はRAM件数で代用
-      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       if (url.pathname === "/api/board") {
@@ -395,6 +418,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           try {
             const { command } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
             if (!command || typeof command !== "string") throw new Error("commandが空です");
+            const verdict = await execGate.check(command);
+            if (!verdict.allowed) { json(res, { ok: false, text: `PermissionGateが拒否: ${verdict.reason ?? "許可されませんでした"}` }, 403); return; }
             const r = await runCommand({ command, cwd: config.workspace, timeoutMs: 120000, outputLimit: 16 * 1024 });
             json(res, r);
           } catch (err) {
@@ -460,6 +485,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
+      if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
@@ -508,7 +534,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   if (config.ui.monitorPort) {
     await startMonitor({ config, live, tasks, startedAt });
   }
-  return { close: () => server.close() };
+  return { close: () => { stopAllDevServers(); server.close(); } };
   if (autoStart) {
     // 待ち受けを邪魔しない走行
     runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
@@ -528,7 +554,6 @@ function startDevServer(script, workspace) {
     const prev = devServers.get(script);
     return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port };
   }
-  const { spawn } = require("node:child_process");
   const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: "ignore", detached: false });
   const entry = { child, port: null, startedAt: Date.now() };
   devServers.set(script, entry);
@@ -554,6 +579,18 @@ function json(res, obj, status = 200) {
   res.end(JSON.stringify(obj));
 }
 
+/* ============ /api/scripts: package.jsonのscripts検出 ============ */
+// ワークスペースのpackage.jsonからnpm scriptsを読み、UIの右パネルに一覧できる形で返す。
+// scriptsが無い/読めない場合は空配列(UIは「スクリプトなし」表示になる)。
+export function detectNpmScripts(workspace) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd }));
+  } catch {
+    return [];
+  }
+}
+
 // /api/memory用: メモリ一覧に期限切れフラグを付ける(isMemoryExpiredに委譲)
 export function listMemoryWithExpiry(workspace, now = Date.now()) {
   return listMemoryFiles(workspace).map((f) => ({ name: f, path: `memory/${f}`, expired: isMemoryExpired(workspace, f, now) }));
@@ -563,12 +600,11 @@ export function listMemoryWithExpiry(workspace, now = Date.now()) {
 export function countAuditLines(workspace) {
   try {
     const raw = readFileSync(join(workspace, "state", "audit.jsonl"), "utf8");
-    return raw.split(chr(10)).filter((l) => l.trim()).length;
+    return raw.split(String.fromCharCode(10)).filter((l) => l.trim()).length;
   } catch {
     return 0;
   }
 }
-
 
 /* ============ /api/wtdiff: worktreeとmainの差分 ============ */
 // agent/<id>ブランチのworktreeに対する main...agent/<id> の差分を返す。
@@ -686,7 +722,7 @@ async function tick(){
     const pe=document.getElementById("phase");
     pe.textContent=ph[0]+(d.phase==="working"?"(残り"+remain+"件)":"");
     pe.style.color=ph[1];
-    document.getElementById("meta").textContent="model: "+d.model+" / perm:"+esc(d.permMode)+" / 稼働 "+Math.floor(d.uptimeSec/60)+"分"+(d.uptimeSec%60)+"秒 / 投稿 "+d.posts+"件"+(d.lastActivitySec!=null?" / 最終活動 "+(d.lastActivitySec<60?d.lastActivitySec+"秒前":Math.floor(d.lastActivitySec/60)+"分前"):"");
+    document.getElementById("meta").textContent="model: "+d.model+" / perm:"+esc(d.permMode)+" / 稼働 "+Math.floor(d.uptimeSec/60)+"分"+(d.uptimeSec%60)+"秒 / 投稿 "+d.posts+"件 / 監査 "+(d.auditCount??0)+"件"+(d.lastActivitySec!=null?" / 最終活動 "+(d.lastActivitySec<60?d.lastActivitySec+"秒前":Math.floor(d.lastActivitySec/60)+"分前"):"");
     document.getElementById("body").innerHTML=
       "<h2>スレッド</h2><table><tr><th>状態</th><th>名前</th><th>フォルダ</th><th>進捗</th><th>メンバー</th><th>目標</th></tr>"+
       (rows(d.threads,(t)=>{const st={done:["完了","#86efac"],working:["作業中","#fbbf24"],waiting:["未着手","#a3a3a8"],idle:["—","#6e6e73"]}[t.state]||["—","#6e6e73"];const ps=t.paused?"<span class='warn'>[停止中]</span> ":"";return "<tr><td>"+ps+"<span style='color:"+st[1]+"'>"+st[0]+"</span></td><td class='mono'># "+esc(t.name)+"</td><td>"+esc(t.folder??"")+"</td><td><div class='bar'><i style='width:"+t.percent+"%'></i></div><span class='dim mono'>"+t.done+"/"+t.total+"</span></td><td>"+rows(t.members??[],(m)=>{const sc={idle:"#a3a3a8",working:"#fbbf24",done:"#86efac",error:"#fca5a5","budget-stop":"#fca5a5"}[m.status]||"#a3a3a8";return "<span class='mem1' title='"+esc(m.status)+"'><i class='mdot' style='background:"+sc+"'></i><span style='color:hsl("+hue(m.id)+" 45% 72%)'>"+esc(m.displayName)+"</span></span>";})+"</td><td class='dim'>"+esc(t.goal)+"</td></tr>";})||"<tr><td colspan='6' class='dim'>開いているスレッドはありません</td></tr>")+"</table>"+
