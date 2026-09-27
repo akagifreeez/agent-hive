@@ -4,10 +4,15 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startUi } from "../src/ui/server.js";
+import { startUi as _startUi } from "../src/ui/server.js";
 import { Bus } from "../src/engine/board.js";
 import { TaskBlackboard } from "../src/engine/tasks.js";
 import { PermissionGate } from "../src/engine/permissions.js";
+// test-hf-token-inject: UIサーバーのPOSTはCSRFトークンを要求するため、
+// テスト内のfetchは全てトークン付きへ差し替える(startUi後にtokenedFetchOn()を呼ぶ)
+import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
+tokenedFetchOn();
+
 
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* ロックは無視 */ } }
 
@@ -17,7 +22,7 @@ async function startTestUi() {
   const tasks = new TaskBlackboard(ws, bus);
   const gate = new PermissionGate({ bus, askTimeoutSec: 30, deny: [], ask: ["git push"] });
   const config = { workspace: ws, ui: { port: 0 }, model: { model: "test" }, agents: [], budget: { maxTokensPerRun: 1 }, permissions: {} };
-  const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
+  const ui = await startUiTokenized(_startUi, { config, modelFactory: () => ({}), bus, autoStart: false });
   return { ws, bus, gate, base: `http://127.0.0.1:${config.ui.port}`, close: () => { try { ui?.close?.(); } catch {} rmTree(ws); } };
 }
 

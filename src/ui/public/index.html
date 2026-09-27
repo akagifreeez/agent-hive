@@ -379,8 +379,9 @@
 
 <script>
 /* ================= 状態 ================= */
-// POST用CSRFトークン(サーバーがHTMLに埋め込む)。全POSTは hfetch 経由で X-Hive-Token を付ける
-window.HIVE_TOKEN = /*__HIVE_TOKEN__*/ null;
+// POST用CSRFトークン(サーバーがHTML配信時に下のnullを実トークンへ置換する)。
+// 全POSTは hfetch 経由で X-Hive-Token を付ける
+window.HIVE_TOKEN = "__HIVE_TOKEN__";
 function hfetch(url, opts = {}) {
   if ((opts.method ?? "GET") === "POST") {
     opts.headers = { ...(opts.headers ?? {}), "x-hive-token": window.HIVE_TOKEN ?? "" };

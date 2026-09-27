@@ -6,7 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bus } from "../src/engine/board.js";
 import { runChat } from "../src/runner.js";
-import { startUi } from "../src/ui/server.js";
+import { startUi as _startUi } from "../src/ui/server.js";
+// test-hf-token-inject: UIサーバーのPOSTはCSRFトークンを要求するため、
+// テスト内のfetchは全てトークン付きへ差し替える(startUi後にtokenedFetchOn()を呼ぶ)
+import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
+tokenedFetchOn();
+
 
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ } }
 function mktmp() {
@@ -106,7 +111,7 @@ test("API: /api/merge-feedbackはマージ記録のthreadを引き継いでonFee
   const bus = new Bus();
   const config = { workspace: ws, ui: { port: 0 }, model: { model: "m" }, agents: [] };
   const got = [];
-  const ui = await startUi({
+  const ui = await startUiTokenized(_startUi, {
     config, modelFactory: () => ({}), bus, autoStart: false,
     onFeedback: (req) => { got.push(req); return { ok: true, id: `fb-${req.taskId}-x`, thread: req.thread }; },
   });
