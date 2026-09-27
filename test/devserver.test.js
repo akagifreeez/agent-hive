@@ -48,7 +48,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   // scripts検出
   const list = await fetchJson(`${base}/api/devserver`);
   assert.equal(list.status, 200);
-  assert.deepEqual(list.body.scripts, ["serve", "build"]);
+  assert.deepEqual(list.body.scripts.map((s) => s.name), ["serve", "build"]);
 
   // 起動
   const started = await fetchJson(`${base}/api/devserver`, {
