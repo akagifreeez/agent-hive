@@ -159,6 +159,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
         mainWorkspace: config.workspace,
         board: threadBoard, tasks, bus, gate,
         spawner: manager,
+        resolveBoard,
       })),
       board: threadBoard, tasks, bus, ledger,
       budget: config.budget,
@@ -281,6 +282,13 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     return { ok: true, name, folder: folderName };
   };
 
+  // to_thread宛先の解決: スレッド名→そのBoard。__main__はメインボード。未知はnull
+  const resolveBoard = (name) => {
+    const n = String(name ?? "").trim();
+    if (!n || n === "__main__") return mainBoard;
+    return threads.get(n)?.board ?? null;
+  };
+
   // スレッドの一時停止/再開(Claude Squad手本)。__main__はリーダー自身を休ませる。
   // 停止中はワーカーの起床と自動増員を止めるのでトークンを消さない
   const setThreadPaused = ({ project, paused }) => {
@@ -318,6 +326,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       spawner: manager,
       threadOpener: openThread,
       threadCloser: closeThread,
+      resolveBoard,
     })),
     board: mainBoard, tasks, bus, ledger,
     budget: config.budget,
@@ -491,6 +500,8 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       tasks,
       bus,
       gate,
+      // シナリオ実行は単一ボードなので自分のboardのみ解決
+      resolveBoard: (name) => (!name || name === board.name) ? board : null,
     });
     const shellKind = await tools.detectShell();
     const agentWithCtx = { ...agent, scenarioName: config.scenario.name };
