@@ -627,7 +627,27 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
   }
 
   // 承認制ゲート: 禁止パターンは即拒否、要承認パターンはUI承認を待つ
+  // 監査領域(state/)保護: bash経由での監査台帳・ボードJSONL等の改ざんを拒否する。
+  // 完全な解析は不可能だが、state/ へのパス参照 + 書き込み指示子の組合せを検出して拒否し、
+  // 改ざんを高コスト化する(監査回避経路の主要穴を塞ぐ)。
+  const WRITE_INDICATORS = [">>", ">", "tee ", "cp ", "mv ", "rm ", "truncate", "dd ", "sed -i", "perl -i", "unlink"];
+  function auditTampering(command) {
+    const norm = String(command ?? "");
+    const stateRef = /(^|[\s"'`(;&|])(\.?\/)*state\//.test(norm) || /(^|[\s"'(;&|])state(["\s;&|)]|$)/.test(norm);
+    if (!stateRef) return null;
+    const hit = WRITE_INDICATORS.find((w) => norm.includes(w));
+    if (hit) return hit;
+    const cd = norm.match(/(^|[\s;&|])cd\s+(\.\/)?state/);
+    if (cd && WRITE_INDICATORS.some((w) => norm.slice(cd.index).includes(w))) return "cd state";
+    return null;
+  }
+
   async function gatedBash(command, timeoutMs) {
+    const tamper = auditTampering(command);
+    if (tamper) {
+      bus.emit("permission.denied", { agent: agent.id, command });
+      return { ok: false, text: `このコマンドは拒否されました(監査領域 state/ への書き込み操作「${tamper.trim()}」を検出)。監査台帳は改変できません。` };
+    }
     if (gate) {
       const verdict = await gate.check(command);
       if (!verdict.allowed) {
