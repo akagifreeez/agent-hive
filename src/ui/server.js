@@ -1,11 +1,7 @@
 // ローカルWebUI。依存ゼロ(node:http + SSE)。後からElectron殻で包む前提なので
 // 描画はブラウザ側に寄せ、サーバーは状態API+SSEストリームだけを持つ。
 import { createServer } from "node:http";
-<<<<<<< HEAD
 import { spawn as childSpawn } from "node:child_process";
-=======
-import { spawn } from "node:child_process";
->>>>>>> main
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -497,20 +493,17 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
-<<<<<<< HEAD
       if (url.pathname === "/api/devserver" && req.method === "GET") {
-        // scripts一覧(テストが期待する検出API)
-        return json(res, { scripts: Object.keys((() => { try { return JSON.parse(readFileSync(join(config.workspace, "package.json"), "utf8")).scripts ?? {}; } catch { return {}; } })()) });
+        // scripts一覧 + 起動中サーバー一覧
+        let scriptNames = [];
+        try { scriptNames = Object.keys(JSON.parse(readFileSync(join(config.workspace, "package.json"), "utf8")).scripts ?? {}); } catch { }
+        return json(res, { scripts: scriptNames, servers: [...devServers.entries()].map(([script, e]) => ({ script, pid: e.child.pid, port: e.port, startedAt: e.startedAt })) });
       }
-=======
-      if (url.pathname === "/api/devserver" && req.method === "GET") return json(res, { servers: [...devServers.entries()].map(([script, e]) => ({ script, pid: e.child.pid, port: e.port, startedAt: e.startedAt })) });
->>>>>>> main
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
         req.on("end", async () => {
           try {
-<<<<<<< HEAD
             const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
             if (body.action === "stop") {
               // script指定が無いstopは「現在起動中の最初のサーバー」を止める(単一運用前提)
@@ -529,15 +522,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
               started.opened = await openInBrowser(started.url);
             }
             json(res, started);
-=======
-            const { action, script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-            if (action === "stop") {
-              // script未指定なら最後に起動したサーバーを止める(単一運用の簡便さ優先)
-              const target = script ?? [...devServers.keys()].at(-1);
-              return json(res, stopDevServer(target));
-            }
-            json(res, await startDevServer(script, config.workspace));
->>>>>>> main
           } catch (err) {
             json(res, { ok: false, error: err.message }, err.status ?? 400);
           }
@@ -591,7 +575,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 // 重複起動防止(同じscriptは1プロセスのみ)、DELETEで終了。UIサーバー終了時にも全停止。
 const devServers = new Map(); // script => { child, port, startedAt }
 
-<<<<<<< HEAD
 // ダミーサーバーは起動完了時に stdout へ "PORT=<n>" を出す約束。それを拾ってURLを確定する。
 function watchServerPort(entry, child, script) {
   child.stdout?.on("data", (buf) => {
@@ -613,13 +596,10 @@ async function waitForServerUrl(entry, timeoutMs = 5000) {
   return entry.url ?? null;
 }
 
-=======
->>>>>>> main
 async function startDevServer(script, workspace) {
   if (!script || typeof script !== "string") throw new Error("scriptが空です");
   const abs = resolve(workspace, script);
   if (!abs.startsWith(resolve(workspace) + sep)) throw new Error("ワークスペース外のスクリプトは起動できません");
-<<<<<<< HEAD
   if (devServers.has(script)) {
     const prev = devServers.get(script);
     if (prev.child.exitCode === null) {
@@ -650,35 +630,13 @@ async function startDevServer(script, workspace) {
     throw new Error("サーバーが起動しませんでした(PORT出力なし)");
   }
   return { ok: true, script, pid: child.pid, port: entry.port, url };
-=======
-  if (devServers.has(script)) throw new Error(`サーバーは既に起動しています: ${script}`);
-  // 起動→スクリプトの "PORT=<n>" 出力を待つ→HTTP疎通確認→urlを返す
-  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"], detached: false });
-  const entry = { child, port: null, startedAt: Date.now() };
-  devServers.set(script, entry);
-  child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
-  const port = await new Promise((res, rej) => {
-    let buf = "";
-    const onData = (d) => {
-      buf += String(d);
-      const m = buf.match(/PORT=(\d+)/);
-      if (m) { child.stdout.off("data", onData); res(Number(m[1])); }
-    };
-    child.stdout.on("data", onData);
-    child.stderr.on("data", (d) => { buf += String(d); });
-    child.once("exit", (code) => rej(new Error(`サーバーが起動前に終了しました(code=${code})`)));
-    setTimeout(() => rej(new Error("起動がタイムアウトしました(PORT出力なし)")), 10000);
-  });
-  entry.port = port;
   // 疎通確認(起動直後は受け付け準備中のことがあるので数回リトライ)
-  const url = `http://127.0.0.1:${port}`;
-  let ok = false;
-  for (let i = 0; i < 10 && !ok; i++) {
-    try { ok = (await fetch(url)).status < 500; } catch { await new Promise((r) => setTimeout(r, 200)); }
+  let reachable = false;
+  for (let i = 0; i < 10 && !reachable; i++) {
+    try { reachable = (await fetch(url)).status < 500; } catch { await new Promise((r) => setTimeout(r, 200)); }
   }
-  if (!ok) { try { child.kill(); } catch {} throw new Error(`疎通確認に失敗しました: ${url}`); }
-  return { ok: true, script, pid: child.pid, port, url };
->>>>>>> main
+  if (!reachable) { try { child.kill(); } catch { } throw new Error(`疎通確認に失敗しました: ${url}`); }
+  return { ok: true, script, pid: child.pid, port: entry.port, url };
 }
 
 function stopDevServer(script) {
