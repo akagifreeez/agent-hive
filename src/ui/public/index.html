@@ -549,6 +549,8 @@ function renderRoomHead(state) {
   }
   const hint = $("composer-hint");
   hint.textContent = selectedThread === "__main__" ? "宛先: リーダー" : `宛先: ${selectedThread} のメンバー全員`;
+  const isPausedThread = selectedThread !== "__main__" && ((lastState?.live.threads ?? []).find((t) => t.name === selectedThread)?.paused ?? false);
+  if (isPausedThread) hint.textContent += " · ⏸ 停止中のためワーカーは起こされません";
   $("saytext").placeholder = selectedThread === "__main__" ? "リーダーへメッセージ" : `${selectedThread} のメンバーへメッセージ`;
 }
 
