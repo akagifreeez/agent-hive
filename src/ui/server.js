@@ -461,13 +461,23 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
+      if (url.pathname === "/api/devserver" && req.method === "GET") {
+        return json(res, { scripts: detectNpmScripts(config.workspace) });
+      }
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
         req.on("end", () => {
           try {
-            const { script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-            json(res, startDevServer(script, config.workspace));
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            const action = body.action ?? "start";
+            if (action === "stop") {
+              const r = stopDevServer(body.script ?? "");
+              return json(res, r, r.ok ? 200 : 400);
+            }
+            const r = startDevServer(body.script, config.workspace);
+            if (r.alreadyRunning) return json(res, { ok: false, error: "既に起動しています" }, 400);
+            return json(res, r);
           } catch (err) {
             json(res, { ok: false, error: err.message }, 400);
           }
@@ -788,4 +798,13 @@ function readAuditTail(workspace, limit) {
     } catch { /* ファイルが無い世代は無視 */ }
   }
   return lines.slice(-n).reverse();
+}
+
+export function detectNpmScripts(workspace) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd }));
+  } catch {
+    return [];
+  }
 }
