@@ -1089,6 +1089,73 @@ function renderStatusTab(body) {
   inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); saveB.click(); } };
   listB.onclick = renderList;
   if (ctxTab === "status") renderList();
+  renderDevserver(body);
+}
+
+/* ================= devserver: scriptsの起動/停止(エージェントを起こさない操作) ================= */
+async function renderDevserver(body) {
+  const h = document.createElement("div");
+  h.className = "sec";
+  h.textContent = "開発サーバー";
+  body.appendChild(h);
+  const box = document.createElement("div");
+  box.id = "devserver-box";
+  body.appendChild(box);
+  const render = async () => {
+    const st = await (await fetch("/api/devserver")).json();
+    box.innerHTML = "";
+    const row = document.createElement("div");
+    row.className = "session-row";
+    const sel = document.createElement("select");
+    sel.id = "devserver-script";
+    sel.style.cssText = "flex:1;background:var(--recess);border:1px solid var(--separator);color:var(--label);border-radius:4px;padding:5px 8px;font-size:12px;font-family:var(--font-ui);box-shadow:var(--inset-field);";
+    for (const s of st.scripts ?? []) {
+      const o = document.createElement("option");
+      o.value = s; o.textContent = s;
+      sel.appendChild(o);
+    }
+    const startB = document.createElement("button");
+    startB.className = "btn";
+    startB.textContent = "起動";
+    startB.onclick = async () => {
+      const script = sel.value;
+      const url = await askText({ title: "起動後のURL", label: "ブラウザで開く先", value: "http://localhost:3000/", ok: "起動" });
+      const r = await (await fetch("/api/devserver", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start", script, url }) })).json();
+      if (!r.ok) { toast(`エラー: ${r.error}`, "err"); return; }
+      toast(`devserver ${script} を起動しました(pid ${r.pid})`, "ok");
+      render();
+    };
+    row.append(sel, startB);
+    box.appendChild(row);
+    if (st.running) {
+      const rr = document.createElement("div");
+      rr.className = "session-row";
+      const info = document.createElement("span");
+      info.style.cssText = "font-size:11px;color:var(--sub);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+      info.textContent = `${st.running.script} (pid ${st.running.pid})`;
+      const openB = document.createElement("button");
+      openB.className = "btn";
+      openB.textContent = "ブラウザで開く";
+      openB.onclick = () => { initBrowserPane(); $("burl").value = st.running.url; $("bgo").click(); document.querySelector('.ct[data-tab=browser]').click(); };
+      const stopB = document.createElement("button");
+      stopB.className = "btn";
+      stopB.textContent = "停止";
+      stopB.onclick = async () => {
+        const r = await (await fetch("/api/devserver", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "stop" }) })).json();
+        if (!r.ok) { toast(`エラー: ${r.error}`, "err"); return; }
+        toast("devserverを停止しました", "ok");
+        render();
+      };
+      rr.append(info, openB, stopB);
+      box.appendChild(rr);
+    } else {
+      const hint = document.createElement("div");
+      hint.className = "hint";
+      hint.textContent = "起動中のサーバーはありません。";
+      box.appendChild(hint);
+    }
+  };
+  await render();
 }
 
 async function renderFilesTab(body) {
