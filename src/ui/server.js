@@ -507,7 +507,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
-<<<<<<< HEAD
       if (url.pathname === "/api/devserver" && req.method === "GET") {
         // scripts一覧 + 起動中サーバーの状態
         const running = [...devServers.entries()].map(([script, e]) => ({ script, pid: e.child.pid, startedAt: e.startedAt }));
@@ -536,8 +535,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (url.pathname === "/api/devserver" && req.method === "DELETE") {
         return json(res, stopDevServer(url.searchParams.get("script") ?? ""));
       }
-=======
->>>>>>> main
       if (url.pathname === "/markdown.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
         return res.end(readFileSync(join(PUBLIC, "markdown.js")));
@@ -570,12 +567,10 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   if (config.ui.monitorPort) {
     await startMonitor({ config, live, tasks, startedAt });
   }
-  return { close: () => server.close() };
   if (autoStart) {
     // 待ち受けを邪魔しない走行
     runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
   }
-<<<<<<< HEAD
   return { close: () => { stopAllDevServers(); server.close(); } };
 }
 
@@ -640,8 +635,6 @@ function stopDevServer(script) {
 function stopAllDevServers() {
   for (const [, entry] of devServers) { try { entry.child.kill(); } catch { /* 無視 */ } }
   devServers.clear();
-=======
->>>>>>> main
 }
 
 function json(res, obj, status = 200) {
