@@ -339,15 +339,20 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
         // 重複検知: 未着手/作業中の既存タスクと共有ファイルがあれば警告を添える(ブロックはしない)
         const l = tasks.list();
-        const overlaps = detectTaskOverlap(String(args.body ?? ""), [...l.open, ...l.claimed]);
+                // list()の返値はUI向けサマリ(bodyなし)なので、重複検知にはファイル本文を読んで渡す
+        const existing = [...l.open, ...l.claimed].map((t) => {
+          const rel = String(t.path ?? "").split("/").join("/");
+          const file = rel.startsWith("tasks/") ? join(tasks.dir, rel.slice("tasks/".length)) : null;
+          const body = file && existsSync(file) ? readFileSync(file, "utf8") : "";
+          return { id: t.id, body };
+        });
+        const overlaps = detectTaskOverlap(String(args.body ?? ""), existing.filter((t) => t.id !== id));
         const warn = (overlaps ?? [])
           .map((o) => `警告: 既存タスク ${o.taskId} が同じファイル(${o.files.join(", ")})を扱っています。重複の可能性。中止ならtasks cancel ${o.taskId}`)
           .join("\n");
         return {
           ok: true,
-          text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""})。` + (warn ? "
-
-" + warn : ""),
+text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""})。` + (warn ? "\n\n" + warn : ""),
         };
       }
       case "spawn_agent": {
