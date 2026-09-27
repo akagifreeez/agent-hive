@@ -45,8 +45,17 @@ export function isLocalOrigin(req) {
   return true;
 }
 
+// UIサーバー起動ごとのCSRFトークン。POST系APIは X-Hive-Token ヘッダ一致を要求する
+// (監査H-2: ヘッダ無しPOSTは同一マシンの任意プロセス/悪意あるページから叩けるため拒否)。
+// GETはトークン不要(読み取りのみ)。/api/exec等の危険APIは全てPOSTなので保護される。
+import { randomBytes } from "node:crypto";
+export function newUiToken() {
+  return randomBytes(24).toString("base64url");
+}
+
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
+  const uiToken = newUiToken();
   // /api/exec(開発用シェル)もエージェントと同じPermissionGateを通す(UIからの任意コマンド実行を承認制に)
   const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
@@ -192,7 +201,12 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
-    if (req.method === "POST" && !isLocalOrigin(req)) return json(res, { error: "localhost以外からのPOSTは拒否します" }, 403);
+    // POST系の二重保護: ローカル起点であること+起動時トークンの一致(監査H-2対応)。
+    // トークンを持たない旧クライアント(curl直打ち等)は GET か X-Hive-Token 付きのみ許可
+    if (req.method === "POST") {
+      if (!isLocalOrigin(req)) return json(res, { error: "localhost以外からのPOSTは拒否します" }, 403);
+      if (String(req.headers["x-hive-token"] ?? "") !== uiToken) return json(res, { error: "トークンが無効です(ページを再読み込みしてください)" }, 403);
+    }
     try {
       if (url.pathname === "/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -542,7 +556,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        return res.end(readFileSync(join(PUBLIC, "index.html")));
+        // POST用のCSRFトークンをHTMLへ埋め込む(スクリプトから window.HIVE_TOKEN で参照)
+        return res.end(readFileSync(join(PUBLIC, "index.html")).toString("utf8").replace("/*__HIVE_TOKEN__*/", JSON.stringify(uiToken)));
       }
       res.writeHead(404).end();
     } catch (err) {

@@ -379,6 +379,14 @@
 
 <script>
 /* ================= 状態 ================= */
+// POST用CSRFトークン(サーバーがHTMLに埋め込む)。全POSTは hfetch 経由で X-Hive-Token を付ける
+window.HIVE_TOKEN = /*__HIVE_TOKEN__*/ null;
+function hfetch(url, opts = {}) {
+  if ((opts.method ?? "GET") === "POST") {
+    opts.headers = { ...(opts.headers ?? {}), "x-hive-token": window.HIVE_TOKEN ?? "" };
+  }
+  return fetch(url, opts);
+}
 let selectedThread = "__main__";
 // スラッシュコマンドの定義(/helpはこの一覧から自動生成)
 const COMMANDS = {
@@ -470,7 +478,7 @@ function renderNav(threads) {
         const cur = (lastState?.live.threads ?? []).find((x) => x.name === t.id)?.folder ?? "";
         const v = await askText({ title: "フォルダを編集", label: `#${t.id} のフォルダ(空欄で未分類)`, value: cur, ok: "保存" });
         if (v === null) return;
-        const r = await (await fetch("/api/folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: t.id, folder: v }) })).json();
+        const r = await (await hfetch("/api/folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: t.id, folder: v }) })).json();
         if (r.error) toast(r.error);
         else refresh();
       };
@@ -482,7 +490,7 @@ function renderNav(threads) {
       pb.textContent = isPaused ? "再" : "停";
       pb.onclick = async (e) => {
         e.stopPropagation();
-        const r = await (await fetch("/api/pause", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: t.id, paused: !isPaused }) })).json();
+        const r = await (await hfetch("/api/pause", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: t.id, paused: !isPaused }) })).json();
         if (r.error) toast(r.error);
         else refresh();
       };
@@ -609,7 +617,7 @@ function renderStream(state) {
             btn.disabled = true;
             btn.textContent = "送信中...";
             try {
-              const r = await (await fetch("/api/merge-feedback", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: tm[1], comment }) })).json();
+              const r = await (await hfetch("/api/merge-feedback", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: tm[1], comment }) })).json();
               if (r.error) throw new Error(r.error);
               ta.value = "";
               btn.textContent = "起票: " + (r.id ?? "ok");
@@ -824,7 +832,7 @@ function renderAgentsTab(body, state) {
     wdb.textContent = "差分";
     wdb.onclick = async (e) => {
       e.stopPropagation();
-      const r = await (await fetch(`/api/wtdiff?agent=${encodeURIComponent(id)}`)).json();
+      const r = await (await hfetch(`/api/wtdiff?agent=${encodeURIComponent(id)}`)).json();
       if (r.error) { toast(r.error); return; }
       showWtdiff(id, r);
     };
@@ -924,7 +932,7 @@ function renderMemoryTab(body) {
       li.appendChild(tag);
     }
     li.onclick = async () => {
-      const r = await (await fetch("/api/file?path=" + encodeURIComponent(f))).json();
+      const r = await (await hfetch("/api/file?path=" + encodeURIComponent(f))).json();
       body.querySelector(".filepanel")?.remove();
       const panel = document.createElement("div");
       panel.className = "filepanel";
@@ -971,7 +979,7 @@ function renderAuditTab(body) {
     box.innerHTML = "";
     let rows = [];
     try {
-      const r = await (await fetch("/api/audit?limit=200")).json();
+      const r = await (await hfetch("/api/audit?limit=200")).json();
       rows = r.audit ?? [];
     } catch {}
     if (!rows.length) {
@@ -1060,7 +1068,7 @@ function renderStatusTab(body) {
   listBox.id = "session-list";
   body.appendChild(listBox);
   const renderList = async () => {
-    const r = await (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "list" }) })).json();
+    const r = await (await hfetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "list" }) })).json();
     listBox.innerHTML = "";
     const list = r.list ?? [];
     if (!list.length) {
@@ -1079,7 +1087,7 @@ function renderStatusTab(body) {
       ld.className = "btn";
       ld.textContent = "復元";
       ld.onclick = async () => {
-        const rr = await (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "load", name }) })).json();
+        const rr = await (await hfetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "load", name }) })).json();
         toast(rr.error ? `エラー: ${rr.error}` : `セッション ${name} を復元しました(反映には再起動)`, rr.error ? "err" : "ok");
       };
       lr.append(nm, ld);
@@ -1089,7 +1097,7 @@ function renderStatusTab(body) {
   saveB.onclick = async () => {
     const name = inp.value.trim();
     if (!name) { toast("セッション名を入力してください"); return; }
-    const r = await (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "save", name }) })).json();
+    const r = await (await hfetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "save", name }) })).json();
     if (r.error) { toast(`エラー: ${r.error}`); return; }
     inp.value = "";
     toast(`セッション ${name} を保存しました`, "ok");
@@ -1111,7 +1119,7 @@ async function renderDevserver(body) {
   box.id = "devserver-box";
   body.appendChild(box);
   const render = async () => {
-    const st = await (await fetch("/api/devserver")).json();
+    const st = await (await hfetch("/api/devserver")).json();
     box.innerHTML = "";
     const row = document.createElement("div");
     row.className = "session-row";
@@ -1129,7 +1137,7 @@ async function renderDevserver(body) {
     startB.onclick = async () => {
       const script = sel.value;
       const url = await askText({ title: "起動後のURL", label: "ブラウザで開く先", value: "http://localhost:3000/", ok: "起動" });
-      const r = await (await fetch("/api/devserver", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start", script, url }) })).json();
+      const r = await (await hfetch("/api/devserver", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start", script, url }) })).json();
       if (!r.ok) { toast(`エラー: ${r.error}`, "err"); return; }
       toast(`devserver ${script} を起動しました(pid ${r.pid})`, "ok");
       render();
@@ -1150,7 +1158,7 @@ async function renderDevserver(body) {
       stopB.className = "btn";
       stopB.textContent = "停止";
       stopB.onclick = async () => {
-        const r = await (await fetch("/api/devserver", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "stop" }) })).json();
+        const r = await (await hfetch("/api/devserver", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "stop" }) })).json();
         if (!r.ok) { toast(`エラー: ${r.error}`, "err"); return; }
         toast("devserverを停止しました", "ok");
         render();
@@ -1178,7 +1186,7 @@ async function renderFilesTab(body) {
   sbox.textContent = "読み込み中…";
   body.appendChild(sbox);
   try {
-    const r = await (await fetch("/api/scripts")).json();
+    const r = await (await hfetch("/api/scripts")).json();
     sbox.remove();
     const scripts = r.scripts ?? [];
     if (!scripts.length) {
@@ -1213,7 +1221,7 @@ async function renderFilesTab(body) {
 }
 
 async function showFile(body, path) {
-  const r = await (await fetch("/api/file?path=" + encodeURIComponent(path))).json();
+  const r = await (await hfetch("/api/file?path=" + encodeURIComponent(path))).json();
   body.querySelector(".filepanel")?.remove();
   body.appendChild(buildFilePanel(path, r.content ?? ""));
 }
@@ -1238,7 +1246,7 @@ function buildFilePanel(title, content) {
 }
 
 async function showTaskBody(t) {
-  const r = await (await fetch("/api/file?path=" + encodeURIComponent(t.path))).json();
+  const r = await (await hfetch("/api/file?path=" + encodeURIComponent(t.path))).json();
   ctxTab = "tasks";
   const body = $("ctx-body");
   body.querySelector(".filepanel")?.remove();
@@ -1247,7 +1255,7 @@ async function showTaskBody(t) {
 
 /* ================= アクション ================= */
 async function taskAction(payload) {
-  const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })).json();
+  const r = await (await hfetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })).json();
   if (r.error) toast(`エラー: ${r.error}`);
   refresh();
 }
@@ -1260,7 +1268,7 @@ async function createTask() {
   const acceptance = $("nt-acc")?.value.trim() ?? "";
   const body = $("nt-body").value.trim();
   if (!body) { toast("本文(何を/完了条件)を書いてください"); return; }
-  const r = await (await fetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, project, role, body, acceptance }) })).json();
+  const r = await (await hfetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, project, role, body, acceptance }) })).json();
   if (r.error) { toast(`エラー: ${r.error}`); return; }
   $("nt-id").value = "";
   if (projectInput) projectInput.value = "";
@@ -1271,12 +1279,12 @@ async function createTask() {
 }
 
 async function decide(id, approve) {
-  await fetch("/api/permission", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, approve }) });
+  await hfetch("/api/permission", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, approve }) });
   refresh();
 }
 
 function sendSayText(t) {
-  return fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: t, thread: selectedThread === "__main__" ? null : selectedThread }) });
+  return hfetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: t, thread: selectedThread === "__main__" ? null : selectedThread }) });
 }
 
 async function sendSay() {
@@ -1289,8 +1297,8 @@ async function sendSay() {
   pendingImage = null;
   if (img) {
     // 画像添付: 保存→メンバーへマルチモーダルで届く。テキストがあれば本文としても送る
-    await fetch("/api/attach", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ thread: selectedThread === "__main__" ? null : selectedThread, dataUrl: img.dataUrl, note: text }) });
-    if (text) await fetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, thread: selectedThread === "__main__" ? null : selectedThread }) });
+    await hfetch("/api/attach", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ thread: selectedThread === "__main__" ? null : selectedThread, dataUrl: img.dataUrl, note: text }) });
+    if (text) await hfetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, thread: selectedThread === "__main__" ? null : selectedThread }) });
     refresh();
     return;
   }
@@ -1321,11 +1329,11 @@ async function handleCommand(text) {
     const [op, ...rest] = arg.split(/\s+/);
     const name = rest.join("-");
     if (!op || op === "list") {
-      const r = await (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "list" }) })).json();
+      const r = await (await hfetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "list" }) })).json();
       post(r.list?.length ? "保存済みセッション:\n" + r.list.join("\n") : "保存済みセッションはありません(/session save <名前> で保存)");
     } else if (op === "save" || op === "load") {
       if (!name) { post("セッション名を指定してください"); return; }
-      const r = await (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: op, name }) })).json();
+      const r = await (await hfetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: op, name }) })).json();
       post(r.error ? `エラー: ${r.error}` : `セッション ${name} を${op === "save" ? "保存" : "復元"}しました${op === "load" ? "(反映には再起動が必要です)" : ""}`);
     }
   } else if (cmd === "tasks") {
@@ -1349,12 +1357,12 @@ async function handleCommand(text) {
     const name = sp === -1 ? rest : rest.slice(0, sp);
     const goal = sp === -1 ? "" : rest.slice(sp + 1).trim();
     if (!name) { post("スレッド名を指定してください(/thread <名前> <目標>)"); return; }
-    const r = await (await fetch("/api/thread", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: name, goal }) })).json();
+    const r = await (await hfetch("/api/thread", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: name, goal }) })).json();
     post(r.error ? `エラー: ${r.error}` : `スレッド ${name} を開きました(3ワーカー並行開始)`);
   } else if (cmd === "close") {
     const name = text.slice(("/" + cmd).length).trim();
     if (!name) { post("スレッド名を指定してください"); return; }
-    const r = await (await fetch("/api/close", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: name }) })).json();
+    const r = await (await hfetch("/api/close", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: name }) })).json();
     post(r.error ? `エラー: ${r.error}` : `スレッド ${name} を閉じました`);
   } else if (cmd === "workflow") {
     const name = args[0];
@@ -1363,7 +1371,7 @@ async function handleCommand(text) {
       post(list.length ? "実行可能なワークフロー:\n" + list.join("\n") : "ワークフローがありません(workspace/workflows/ に <名前>.mjs を置いてください)");
       return;
     }
-    const r = await (await fetch("/api/workflow", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })).json();
+    const r = await (await hfetch("/api/workflow", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })).json();
     post(r.error ? `エラー: ${r.error}` : `ワークフロー ${name} を実行開始しました`);
   } else if (cmd === "model") {
     const m = lastState?.model;
@@ -1371,23 +1379,23 @@ async function handleCommand(text) {
       const e = lastState?.live.modelEffort;
       post(`モデル: ${m?.name ?? "(不明)"}\n思考レベル: ${e ?? lastState?.live.modelEffort ?? "config値"}\nフォールバック: ${m?.fallbacks?.join(" → ") || "なし"}\n\n変更: /model <名前> / /effort <low|medium|high>`);
     } else {
-      const r = await (await fetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: args[0] }) })).json();
+      const r = await (await hfetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: args[0] }) })).json();
       if (!r.error) { uiEffort = null; uiModelName = r.model; }
       post(r.error ? `エラー: ${r.error}` : `モデルを ${r.model} に変更しました(次のラウンドから)`);
     }
   } else if (cmd === "effort") {
     const lv = (args[0] ?? "").toLowerCase();
     if (!["low", "medium", "high"].includes(lv)) { post("low / medium / high のいずれかを指定してください"); return; }
-    const r = await (await fetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ effort: lv }) })).json();
+    const r = await (await hfetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ effort: lv }) })).json();
     if (!r.error) uiEffort = r.effort;
     post(r.error ? `エラー: ${r.error}` : `思考レベルを ${r.effort} に変更しました(次のラウンドから)`);
   } else if (cmd === "perm") {
     const mode = (args[0] ?? "").toLowerCase();
     if (!["normal", "auto"].includes(mode)) { post("normal または auto を指定してください"); return; }
-    const r = await (await fetch("/api/perm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode }) })).json();
+    const r = await (await hfetch("/api/perm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode }) })).json();
     post(r.error ? `エラー: ${r.error}` : `権限モードを ${r.mode} に変更しました(${mode === "auto" ? "承認要求を自動許可" : "承認要求は都度確認"})`);
   } else if (cmd === "git") {
-    const r = await (await fetch("/api/git")).json();
+    const r = await (await hfetch("/api/git")).json();
     post(`[GIT状況]\n${r.text ?? r.error}`);
   } else if (customCommands[cmd]) {
     // configで定義したカスタムプロンプトコマンド → リーダーへ送信
@@ -1446,7 +1454,7 @@ function renderAll() {
 async function loadOlderPosts(beforeId) {
   if (beforeId == null) return;
   // threadを付けてサーバー側でそのスレッドのJSONLから直接読ませる(RAMに無い過去分も出る)
-  const r = await fetch(`/api/board?before=${beforeId}&thread=${encodeURIComponent(selectedThread)}`);
+  const r = await hfetch(`/api/board?before=${beforeId}&thread=${encodeURIComponent(selectedThread)}`);
   if (!r.ok) return;
   const data = await r.json();
   const older = (data.posts ?? []).filter((p) => (p.thread ?? "__main__") === selectedThread);
@@ -1461,7 +1469,7 @@ async function loadOlderPosts(beforeId) {
 }
 
 async function refresh() {
-  lastState = await (await fetch("/api/state")).json();
+  lastState = await (await hfetch("/api/state")).json();
   customCommands = lastState.commands ?? {};
   $("monitor-btn").style.display = lastState.monitorPort ? "" : "none";
   renderAll();
@@ -1556,16 +1564,16 @@ $("settings-save").onclick = async () => {
   const effort = $("set-effort").value;
   const model = $("set-model").value.trim();
   const perm = $("set-perm").value;
-  const re = await (await fetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ effort }) })).json();
+  const re = await (await hfetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ effort }) })).json();
   if (re.error) { toast(re.error); return; }
   uiEffort = re.effort;
   const cur = uiModelName ?? lastState?.live?.modelName ?? "";
   if (model && model !== cur) {
-    const rm = await (await fetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model }) })).json();
+    const rm = await (await hfetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model }) })).json();
     if (rm.error) { toast(rm.error); return; }
     uiModelName = rm.model;
   }
-  const rp = await (await fetch("/api/perm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: perm }) })).json();
+  const rp = await (await hfetch("/api/perm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: perm }) })).json();
   if (rp.error) { toast(rp.error); return; }
   $("settings-dlg").close();
   toast("設定を保存しました", "ok");
@@ -1634,7 +1642,7 @@ const ALL_COMMANDS = () => ({
       input.value = "";
       window.__termOut = (window.__termOut ?? "") + "$ " + cmd + "\n";
       out.textContent = window.__termOut + "実行中...";
-      const r = await (await fetch("/api/exec", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ command: cmd }) })).json();
+      const r = await (await hfetch("/api/exec", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ command: cmd }) })).json();
       window.__termOut += (r.text ?? "") + "\n";
       out.textContent = window.__termOut;
       out.scrollTop = out.scrollHeight;
