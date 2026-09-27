@@ -1,0 +1,19 @@
+[
+ {
+  "mode": "single",
+  "label": "s1",
+  "wallSec": 124,
+  "done": 0,
+  "claimedLeft": 1,
+  "tokens": {
+   "calls": 18,
+   "promptTokens": 112176,
+   "completionTokens": 6698,
+   "reasoningTokens": 5663,
+   "costUsd": 0.010061480000000001
+  },
+  "testsPass": false,
+  "endedBy": "turn-limit",
+  "workspace": "C:\\Users\\AKAGIF~1\\AppData\\Local\\Temp\\exp-single-mMAMvv"
+ }
+]
