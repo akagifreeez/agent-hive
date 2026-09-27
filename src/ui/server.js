@@ -14,6 +14,7 @@ import { runCommand } from "../engine/exec.js";
 import { PermissionGate } from "../engine/permissions.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
+import { openInBrowser } from "../engine/browser.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
 
@@ -470,9 +471,9 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         if (req.method === "GET") return json(res, handleDevserver({ method: "GET", workspace: config.workspace, uiPort: config.ui.port }));
         let body = "";
         req.on("data", (d) => (body += d));
-        req.on("end", () => {
+        req.on("end", async () => {
           try {
-            const r = handleDevserver({ method: "POST", body: JSON.parse(body || "{}"), workspace: config.workspace, uiPort: config.ui.port });
+            const r = await handleDevserver({ method: "POST", body: JSON.parse(body || "{}"), workspace: config.workspace, uiPort: config.ui.port });
             json(res, r.body ?? r, r.status ?? 200);
           } catch (err) {
             json(res, { ok: false, error: err.message }, 400);
@@ -661,7 +662,7 @@ export function detectNpmScripts(workspace) {
   }
 }
 
-export function handleDevserver({ method, body = {}, workspace, uiPort }) {
+export async function handleDevserver({ method, body = {}, workspace, uiPort }) {
   if (method === "GET") {
     const pkg = readFileSyncSafe(join(workspace, "package.json"));
     let scripts = [];
@@ -685,7 +686,10 @@ export function handleDevserver({ method, body = {}, workspace, uiPort }) {
     const child = spawn("npm", ["run", script], { cwd: workspace, shell: true, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
     const url = body.url ? String(body.url) : `http://localhost:${uiPort && uiPort !== 0 ? uiPort : 7789}/`;
     devserverProc = { pid: child.pid, script, url, child };
-    return { status: 200, body: { ok: true, pid: child.pid, script, url } };
+    // 起動成功時にOS既定ブラウザでURLを開く(body.open === false で抑止。テストからは常に抑止)
+    let opened = false;
+    if (body.open !== false) opened = await openInBrowser(url);
+    return { status: 200, body: { ok: true, pid: child.pid, script, url, opened: Boolean(opened) } };
   }
   if (action === "stop") {
     if (!devserverProc) return { status: 400, body: { ok: false, error: "起動中のdevserverはありません" } };
