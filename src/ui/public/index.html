@@ -414,7 +414,11 @@ let lastState = null;
 const BOARD_WINDOW = 200;
 let boardWindow = BOARD_WINDOW;
 const expandedMerges = new Set();
-const autoLoadedThreads = new Set(); // 自動遡読済みスレッド(1回限り。無限再描画を防ぐ)
+// スレッド別ボードキャッシュ(thread → 投稿配列)。/api/state のRAM末尾はメイン会話で
+// 埋まるため、スレッド表示はこれを使わずディスク(/api/board?thread=)から直接引く。
+// refresh()でlastStateが差し替わってもキャッシュは消えない。新着はSSE経由でpush
+const threadBoards = new Map();
+const threadBoardFetching = new Set();
 let anchorPid = null;
 const NAMES = { alpha: "アルファ", beta: "ベータ", gamma: "ガンマ", delta: "デルタ", system: "システム", you: "あなた", lead: "リーダー" };
 // ワーカー識別色: エージェントIDのハッシュから色相を安定生成する(状態はドットの色が担う)
@@ -571,12 +575,27 @@ function renderStream(state) {
   const prevTop = stream.scrollTop;
   const prevHeight = stream.scrollHeight;
   stream.innerHTML = "";
-  // 描画は末尾200件に絞る(履歴が増えても軽く)。それより前は読み込みボタンで展開
-  const posts = state.live.board.filter((p) => (p.thread ?? "__main__") === selectedThread);
-  // スレッド選択直後でRAMに投稿が無いときは、ディスクから1ページ自動遡読(1スレッド1回のみ)
-  if (!posts.length && selectedThread !== "__main__" && !autoLoadedThreads.has(selectedThread)) {
-    autoLoadedThreads.add(selectedThread);
-    queueMicrotask(() => loadOlderPosts(null));
+  // メインはRAM末尾、スレッドはディスク直引きのスレッド別キャッシュで描画する。
+  // (/api/stateのlive.boardはRAM末尾200=メイン会話中心なのでスレッド表示には使えない)
+  let posts;
+  if (selectedThread === "__main__") {
+    posts = state.live.board.filter((p) => (p.thread ?? "__main__") === "__main__");
+  } else {
+    posts = threadBoards.get(selectedThread) ?? [];
+    if (!threadBoardFetching.has(selectedThread)) {
+      threadBoardFetching.add(selectedThread);
+      queueMicrotask(async () => {
+        try {
+          const data = await (await hfetch(`/api/board?thread=${encodeURIComponent(selectedThread)}`)).json();
+          const known = new Set((threadBoards.get(selectedThread) ?? []).map((p) => p.id));
+          const fresh = (data.posts ?? []).filter((p) => !known.has(p.id));
+          if (fresh.length) threadBoards.set(selectedThread, fresh.sort((a, b) => a.id - b.id));
+        } finally {
+          threadBoardFetching.delete(selectedThread);
+          renderStream(lastState);
+        }
+      });
+    }
   }
   let shown = posts;
   if (posts.length > boardWindow) {
@@ -1464,21 +1483,51 @@ function renderAll() {
 
 // 頁送りAPIで以前の投稿を取得し、表示に前置きする(アンカーへスクロール復帰)
 async function loadOlderPosts(beforeId) {
-  // threadを付けてサーバー側でそのスレッドのJSONLから直接読ませる(RAMに無い過去分も出る)。
-  // beforeIdがnullならディスク側の末尾200(=スレッド選択直後でRAMに投稿が無いときの自動遡読)
-  const q = beforeId == null ? `thread=${encodeURIComponent(selectedThread)}` : `before=${beforeId}&thread=${encodeURIComponent(selectedThread)}`;
-  const r = await hfetch(`/api/board?${q}`);
+  // スレッドはスレッド別キャッシュ(threadBoards)の最古IDより前をディスクから取得して前方マージ。
+  // メインはRAM(lastState.live.board)に対して従来どおり前マージする
+  if (selectedThread === "__main__") {
+    if (beforeId == null) return;
+    const r = await hfetch(`/api/board?before=${beforeId}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    const older = (data.posts ?? []).filter((p) => (p.thread ?? "__main__") === "__main__");
+    if (!older.length) return;
+    const known = new Set(lastState.live.board.map((p) => p.id));
+    const fresh = older.filter((p) => !known.has(p.id));
+    if (fresh.length) lastState.live.board = [...fresh, ...lastState.live.board].sort((a, b) => a.id - b.id);
+    anchorPid = beforeId;
+    boardWindow += fresh.length || BOARD_WINDOW;
+    renderStream(lastState);
+    return;
+  }
+  const cache = threadBoards.get(selectedThread) ?? [];
+  const anchor = cache.length ? Math.min(...cache.map((p) => p.id)) : beforeId;
+  if (!cache.length && beforeId != null) {
+    // キャッシュ無しで特定ID指定は不自然なので末尾から取得し直す
+    return loadThreadTail(selectedThread);
+  }
+  const r = await hfetch(`/api/board?before=${anchor}&thread=${encodeURIComponent(selectedThread)}`);
   if (!r.ok) return;
   const data = await r.json();
-  const older = (data.posts ?? []).filter((p) => (p.thread ?? "__main__") === selectedThread);
-  if (!older.length) return;
-  // 取得した古い投稿をlastStateの先頭側へ統合し、窓を広げて再描画
-  const known = new Set(lastState.live.board.map((p) => p.id));
-  const fresh = older.filter((p) => !known.has(p.id));
-  if (fresh.length) lastState.live.board = [...fresh, ...lastState.live.board].sort((a, b) => a.id - b.id);
-  anchorPid = beforeId;
-  boardWindow += fresh.length || BOARD_WINDOW;
+  const known = new Set(cache.map((p) => p.id));
+  const fresh = (data.posts ?? []).filter((p) => !known.has(p.id));
+  if (!fresh.length) return;
+  threadBoards.set(selectedThread, [...fresh, ...cache].sort((a, b) => a.id - b.id));
   renderStream(lastState);
+}
+
+// スレッドの末尾200をディスクから取得してキャッシュへ(未取得スレッドの初期ロード)
+async function loadThreadTail(thread) {
+  if (threadBoardFetching.has(thread)) return;
+  threadBoardFetching.add(thread);
+  try {
+    const data = await (await hfetch(`/api/board?thread=${encodeURIComponent(thread)}`)).json();
+    const known = new Set((threadBoards.get(thread) ?? []).map((p) => p.id));
+    const fresh = (data.posts ?? []).filter((p) => !known.has(p.id));
+    if (fresh.length) threadBoards.set(thread, fresh.sort((a, b) => a.id - b.id));
+  } catch { /* 取得失敗は次回以降 */ } finally {
+    threadBoardFetching.delete(thread);
+  }
 }
 
 async function refresh() {
@@ -1598,6 +1647,11 @@ es.onmessage = (e) => {
   const { type, payload } = JSON.parse(e.data);
   if (type === "board") {
     const th = payload.thread ?? "__main__";
+    // スレッド別キャッシュがあれば新着をpush(開いたことのあるスレッドのみ)
+    if (threadBoards.has(th)) {
+      const arr = threadBoards.get(th);
+      if (!arr.some((p) => p.id === payload.id)) arr.push(payload);
+    }
     if (th === selectedThread) {
       refreshSoon(); // デバウンス付きで全再描画(ストリームは毎回全件から組み直す)
     } else {
