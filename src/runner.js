@@ -404,6 +404,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     },
     setPermMode: (mode) => {
       gate.setMode(mode);
+      bus.emit("perm.mode", { mode: gate.mode });
       return { ok: true, mode: gate.mode };
     },
     runWorkflow: (name) => {
