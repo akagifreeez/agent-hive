@@ -7,11 +7,13 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { join as j } from "node:path";
 
 const mode = process.argv[2] ?? "single";
 const apiKey = readFileSync("D:/working/openrouter.key", "utf8").trim();
 
 const ws = mkdtempSync(join(tmpdir(), `exp-${mode}-`));
+const mkAgent = (id) => ({ id, displayName: id, role: "impl", personaPath: j(process.cwd(), "agents", `${id}.md`) });
 const seedPkg = join(ws, "package.json");
 writeFileSync(seedPkg, JSON.stringify({ name: "exp", private: true, type: "module", scripts: { test: "node --test utils/" } }, null, 1));
 
@@ -30,12 +32,8 @@ config.workspace = ws;
 config.worktrees = { dir: `${ws}-wt` };
 config.model = { ...config.model, apiKey };
 config.agents = mode === "single"
-  ? [{ id: "alpha", displayName: "アルファ", role: "impl" }]
-  : [
-      { id: "alpha", displayName: "アルファ", role: "impl" },
-      { id: "beta", displayName: "ベータ", role: "impl" },
-      { id: "gamma", displayName: "ガンマ", role: "impl" },
-    ];
+  ? [mkAgent("alpha")]
+  : [mkAgent("alpha"), mkAgent("beta"), mkAgent("gamma")];
 config.loop = { maxTurns: 14 };
 config.runner = { timeoutSec: 600 };
 config.discovery = { intervalSec: 3600, testCommand: null }; // 発見器は無効化(実験の変数を固定)
@@ -59,6 +57,7 @@ try {
   testOk = /pass \d+/.test(testOut) && !/fail [1-9]/.test(testOut);
 } catch (e) { testOut = String(e.stdout ?? e.message); testOk = /pass \d+/.test(testOut) && !/fail [1-9]/.test(testOut); }
 
+console.log("results:", JSON.stringify(snap.results).slice(0, 600));
 const totals = snap.usage?.totals ?? { promptTokens: 0, completionTokens: 0, costUsd: 0 };
 console.log(`[${new Date().toISOString()}] 結果 mode=${mode}`);
 console.log(JSON.stringify({
