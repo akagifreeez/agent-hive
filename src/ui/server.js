@@ -79,6 +79,102 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     modelName: null,
     modelEffort: null,
   };
+  // usage予算アラート(config.chat.budgetAlertUsd): ラウンド終了ごとのusage.roundで
+  // 台帳累積コストを監視し、しきい値を初めて超えたらメインボードに1回だけ告知する。
+  // 以後は繰り返さない(告知済みフラグ)。未設定なら何もしない。
+  const budgetAlertUsd = Number(config.chat?.budgetAlertUsd ?? NaN);
+  let budgetAlerted = false; // 1回だけ告知のためのフラグ
+  const budgetState = { thresholdUsd: Number.isFinite(budgetAlertUsd) ? budgetAlertUsd : null, costUsd: 0, exceeded: false };
+  bus.on("usage.round", (p) => {
+    const cost = p?.totals?.costUsd ?? 0;
+    budgetState.costUsd = cost;
+    if (!Number.isFinite(budgetAlertUsd) || budgetAlerted || !(cost > budgetAlertUsd)) return;
+    budgetAlerted = true;
+    budgetState.exceeded = true;
+    live.board.push({ id: `budget-${Date.now()}`, from: "system", text: `[予算超過] 累積コストが設定(` + String(budgetAlertUsd) + `$)を超えました。予算超過: 累積// ローカルWebUI。依存ゼロ(node:http + SSE)。後からElectron殻で包む前提なので
+// 描画はブラウザ側に寄せ、サーバーは状態API+SSEストリームだけを持つ。
+import { createServer } from "node:http";
+import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { join, resolve, sep, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import os from "node:os";
+import { runScenario } from "../runner.js";
+import { TaskBlackboard } from "../engine/tasks.js";
+import { BoardStore } from "../engine/boardstore.js";
+import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
+import { listMemoryWithExpiry } from "../engine/memory.js";
+import { runCommand } from "../engine/exec.js";
+import { openInBrowser } from "../engine/browser.js";
+import { PermissionGate } from "../engine/permissions.js";
+import { ROOT, dataDir } from "../config.js";
+import { spawn } from "node:child_process";
+import { listWorkspaceFiles } from "../engine/tools.js";
+
+const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
+
+// エージェントごとの活動ログ(思考/発言/ツール/状態)。UIの詳細パネル用。
+// 1エージェントあたり直近LOG_LIMIT件だけ保持(長時間ランでの肥大止め)。
+export const AGENT_LOG_LIMIT = 120;
+export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
+  if (!agentState) return;
+  if (!agentState.log) agentState.log = [];
+  agentState.log.push({ ts, kind, text: String(text ?? "").slice(0, 2000) });
+  if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
+}
+
+// CSRF/DNS rebinding対策: POSTのOrigin/Hostがlocalhost系か判定する。
+// ヘッダ無し(同一オリジン由来のcurl等)は許可し、外部オリジンのみ拒否。
+export function isLocalOrigin(req) {
+  const origin = String(req.headers.origin ?? "");
+  if (origin) {
+    try {
+      const o = new URL(origin);
+      if (o.hostname !== "localhost" && o.hostname !== "127.0.0.1" && o.hostname !== "::1") return false;
+    } catch { return false; }
+  }
+  const host = String(req.headers.host ?? "");
+  if (host) {
+    const h = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+    if (h !== "localhost" && h !== "127.0.0.1" && h !== "::1") return false;
+  }
+  return true;
+}
+
+// UIサーバー起動ごとのCSRFトークン。POST系APIは X-Hive-Token ヘッダ一致を要求する
+// (監査H-2: ヘッダ無しPOSTは同一マシンの任意プロセス/悪意あるページから叩けるため拒否)。
+// GETはトークン不要(読み取りのみ)。/api/exec等の危険APIは全てPOSTなので保護される。
+import { randomBytes } from "node:crypto";
+export function newUiToken() {
+  return randomBytes(24).toString("base64url");
+}
+
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
+  const startedAt = Date.now();
+  // UIトークン。環境変数 HIVE_UI_TOKEN(CLI等の外部クライアント用)で上書きできる
+  const uiToken = process.env.HIVE_UI_TOKEN || newUiToken();
+  // /api/exec(開発用シェル)もエージェントと同じPermissionGateを通す(UIからの任意コマンド実行を承認制に)
+  const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
+  // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
+  const boardStore = new BoardStore(config.workspace);
+  const live = {
+    // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
+    // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
+    agents: {},
+    // 起動時は各ボードファイルの末尾だけ復元。全文はstate/のJSONLに残り、/api/boardで頁送り
+    board: boardStore.latest(400),
+    requests: [],
+    threads: [],
+    // マージの差分(新着順・最大20件)。UIのマージ行クリックでdiffを見せる
+    merges: [],
+    scenario: null,
+    permMode: "normal",
+    // runtimeでのモデル/思考レベル切替(/model・/effort・設定ウィンドウ)。nullはconfig値
+    modelName: null,
+    modelEffort: null,
+  };
+ + cost.toFixed(2), at: Date.now(), thread: "__main__" });
+  });
+
   const tasks = new TaskBlackboard(config.workspace, bus);
   const clients = new Set();
 
@@ -285,7 +381,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       // 総件数: チャットモードではディスクが真実。RAMのみのボード(未永続化)はRAM件数で代用
-      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length) }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, budget: budgetState, mcp: config.mcp?.servers ?? {} });
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       // ?q= があるときは全文検索モード(全スレッド横断の本文部分一致)
