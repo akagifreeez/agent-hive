@@ -1,7 +1,7 @@
 // エージェントに渡すツール一式。ファイル系はワークスペース配下に閉じ込める
 // (パス検証で workspace 外への脱出を拒否)。bashは cwd=ワークスペースで実行し、
 // 承認制ゲート(gate)を通す。
-import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, existsSync, renameSync } from "node:fs";
 import { resolve, join, dirname, sep } from "node:path";
 import { runCommand, detectShell } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
@@ -213,17 +213,26 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
   ];
 
   async function execute(name, args = {}) {
+    const t0 = Date.now();
+    let out;
+    let blocked = false;
     try {
       // beforeToolフック: 非ゼロ終了でツールをブロックできる(コードによる強制ルール)
       if (hooks?.has("beforeTool")) {
         const h = await hooks.run("beforeTool", { AGENT: agent.id, TOOL: name, ARGS: JSON.stringify(args ?? {}) });
-        if (h.blocked) return { ok: false, text: `ツール ${name} はhooksによりブロックされました:\n${h.text}` };
+        if (h.blocked) {
+          blocked = true;
+          out = { ok: false, text: `ツール ${name} はhooksによりブロックされました:\n${h.text}` };
+          return out;
+        }
       }
-      let out;
       // MCPツール(mcp__<サーバー>__<ツール>)は対応ホストへ委譲
       if (name.startsWith("mcp__")) {
         const host = mcpList.find((h) => h.handles(name));
-        if (!host) return { ok: false, text: `このMCPツールは接続されていません: ${name}` };
+        if (!host) {
+          out = { ok: false, text: `このMCPツールは接続されていません: ${name}` };
+          return out;
+        }
         out = await host.call(name, args);
       } else {
         out = await dispatch(name, args);
@@ -233,7 +242,39 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       }
       return out;
     } catch (err) {
-      return { ok: false, text: `ツールエラー: ${err.message}` };
+      out = { ok: false, text: `ツールエラー: ${err.message}` };
+      return out;
+    } finally {
+      // 監査台帳(state/audit.jsonl): 全ツール実行を1行JSONで記録する。
+      // PC操作制限の「事後検証」用で、拒否・ブロックも含めて残す(エラーでも記録を止めない)
+      writeAudit(name, args, out ?? { ok: false, text: "(応答なし)" }, Date.now() - t0, blocked);
+    }
+  }
+
+  // state/audit.jsonl への追記。巨大化したら世代交代(audit-1.jsonlへ退避)して1ファイルを小さく保つ
+  function writeAudit(tool, args, out, ms, blocked) {
+    try {
+      const dir = join(mainWorkspace ?? workspace, "state");
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, "audit.jsonl");
+      const entry = {
+        ts: new Date().toISOString(),
+        agent: agent.id,
+        tool,
+        ok: out.ok === true,
+        ms,
+        ...(blocked ? { blocked: true } : {}),
+        ...(tool === "bash" ? { cmd: String(args.command ?? "").slice(0, 200) } : {}),
+        ...(args?.path ? { path: String(args.path).slice(0, 200) } : {}),
+        brief: String(out.text ?? "").replace(/\s+/g, " ").slice(0, 150),
+      };
+      appendFileSync(file, JSON.stringify(entry) + "\n");
+      // 5MB超で1世代ローテート(監査は失わないが最新世代を軽く保つ)
+      if (existsSync(file) && statSync(file).size > 5 * 1024 * 1024) {
+        renameSync(file, join(dir, "audit-1.jsonl"));
+      }
+    } catch {
+      // 簿記の失敗でエージェントの作業を止めない
     }
   }
 
