@@ -49,7 +49,7 @@ test("監査保護: tee/cp/mv/rm による state/ への操作も拒否される
 test("監査保護: state/ を読むだけ・無関係なコマンドは許可される", async () => {
   const ws = mktmp();
   const tools = mkTools(ws);
-  const r1 = await tools.execute("bash", { command: "ls state/" });
+  const r1 = await tools.execute("bash", { command: "mkdir -p state && ls state/" });
   assert.equal(r1.ok, true, "読み取り系は拒否しない");
   const r2 = await tools.execute("bash", { command: "echo hello > out.txt" });
   assert.equal(r2.ok, true);
