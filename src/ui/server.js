@@ -11,6 +11,7 @@ import { TaskBlackboard } from "../engine/tasks.js";
 import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
+import { PermissionGate } from "../engine/permissions.js";
 import { listMemoryFiles, isMemoryExpired } from "../engine/memory.js";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
@@ -26,8 +27,28 @@ export function pushAgentLog(agentState, kind, text, ts = Date.now()) {
   if (agentState.log.length > AGENT_LOG_LIMIT) agentState.log.splice(0, agentState.log.length - AGENT_LOG_LIMIT);
 }
 
+// CSRF/DNS rebinding対策: POSTのOrigin/Hostがlocalhost系か判定する。
+// ヘッダ無し(同一オリジン由来のcurl等)は許可し、外部オリジンのみ拒否。
+export function isLocalOrigin(req) {
+  const origin = String(req.headers.origin ?? "");
+  if (origin) {
+    try {
+      const o = new URL(origin);
+      if (o.hostname !== "localhost" && o.hostname !== "127.0.0.1" && o.hostname !== "::1") return false;
+    } catch { return false; }
+  }
+  const host = String(req.headers.host ?? "");
+  if (host) {
+    const h = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+    if (h !== "localhost" && h !== "127.0.0.1" && h !== "::1") return false;
+  }
+  return true;
+}
+
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
+  // /api/exec(開発用シェル)もエージェントと同じPermissionGateを通す(UIからの任意コマンド実行を承認制に)
+  const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
   const boardStore = new BoardStore(config.workspace);
   const live = {
@@ -171,6 +192,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
+    if (req.method === "POST" && !isLocalOrigin(req)) return json(res, { error: "localhost以外からのPOSTは拒否します" }, 403);
     try {
       if (url.pathname === "/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -396,6 +418,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           try {
             const { command } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
             if (!command || typeof command !== "string") throw new Error("commandが空です");
+            const verdict = await execGate.check(command);
+            if (!verdict.allowed) { json(res, { ok: false, text: `PermissionGateが拒否: ${verdict.reason ?? "許可されませんでした"}` }, 403); return; }
             const r = await runCommand({ command, cwd: config.workspace, timeoutMs: 120000, outputLimit: 16 * 1024 });
             json(res, r);
           } catch (err) {
@@ -461,14 +485,38 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
+<<<<<<< HEAD
       if (url.pathname === "/api/devserver" && req.method === "GET") {
         return json(res, { scripts: detectNpmScripts(config.workspace) });
+=======
+<<<<<<< HEAD
+      if (url.pathname === "/api/devserver") {
+        if (req.method === "GET") return json(res, { scripts: (() => { try { return Object.keys(JSON.parse(readFileSafe(config.workspace, "package.json") || "{}").scripts ?? {}); } catch { return []; } })(), running: null });
+        if (req.method === "POST") {
+          const chunks = [];
+          req.on("data", (d) => chunks.push(d));
+          req.on("end", () => {
+            try {
+              const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+              const r = handleDevserverAction(body, config.workspace, config.ui.port);
+              json(res, r, r.status ?? (r.ok ? 200 : 400));
+            } catch (err) {
+              json(res, { ok: false, error: err.message }, 400);
+            }
+          });
+          return;
+=======
+      if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
+      if (url.pathname === "/api/devserver" && req.method === "GET") {
+        return json(res, { scripts: detectNpmScripts(config.workspace).map((s) => s.name) });
+>>>>>>> main
       }
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
         req.on("end", async () => {
           try {
+<<<<<<< HEAD
             const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
             const action = body.action ?? "start";
             if (action === "stop") {
@@ -481,6 +529,11 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
             for (let i = 0; i < 40 && !r.port; i++) await new Promise((res2) => setTimeout(res2, 50));
             r.url = r.port ? `http://127.0.0.1:${r.port}` : null;
             return json(res, r);
+=======
+            const { action, script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            if (action === "stop") return json(res, stopDevServer(script ?? ""));
+            json(res, startDevServer(script, config.workspace));
+>>>>>>> main
           } catch (err) {
             json(res, { ok: false, error: err.message }, 400);
           }
@@ -488,7 +541,12 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/devserver" && req.method === "DELETE") {
-        return json(res, stopDevServer(url.searchParams.get("script") ?? ""));
+        try {
+          return json(res, stopDevServer(url.searchParams.get("script") ?? ""));
+        } catch (err) {
+          return json(res, { ok: false, error: err.message }, 400);
+>>>>>>> main
+        }
       }
       if (url.pathname === "/markdown.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
@@ -532,19 +590,50 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 /* ============ /api/devserver: 開発用ダミーサーバーの起動/停止 ============ */
 // ワークスペース内スクリプトを子プロセスで起動し、疎通確認してpidを返す。
 // 重複起動防止(同じscriptは1プロセスのみ)、DELETEで終了。UIサーバー終了時にも全停止。
-const devServers = new Map(); // script => { child, port, startedAt }
+let devPort = null; // UIサーバーの実ポート(start応答のurl用)
+const devServers = new Map(); // script => { child, startedAt }
+
+function handleDevserverAction(body, workspace, uiPort = null) {
+  if (uiPort) devPort = uiPort;
+  const action = String(body.action ?? "");
+  if (action === "start") return startDevServer(String(body.script ?? ""), workspace);
+  if (action === "stop") return stopDevServer(String(body.script ?? ""));
+  return { ok: false, error: `不明なaction: ${action}` };
+}
 
 function startDevServer(script, workspace) {
+<<<<<<< HEAD
+  if (!script) throw new Error("scriptが空です");
+  // package.jsonのscriptsから実行コマンドを引く(直接ファイル指定はさせない)
+  let scripts = {};
+  try { scripts = JSON.parse(readFileSafe(workspace, "package.json") || "{}").scripts ?? {}; } catch { /* 不正package.json */ }
+  const command = scripts[script];
+  if (!command) throw new Error(`scriptが見つかりません: ${script}`);
+  if (devServers.has(script)) {
+    return { status: 400, ok: false, error: `すでに起動中です: ${script} (pid ${devServers.get(script).child.pid})` };
+  }
+  const child = spawn(command, { cwd: workspace, shell: true, stdio: "ignore", detached: process.platform !== "win32" });
+  const url = `http://localhost:${devPort ?? 7789}/`;
+  const entry = { child, startedAt: Date.now() };
+=======
   if (!script || typeof script !== "string") throw new Error("scriptが空です");
   const abs = resolve(workspace, script);
   if (!abs.startsWith(resolve(workspace) + sep)) throw new Error("ワークスペース外のスクリプトは起動できません");
+<<<<<<< HEAD
   if (devServers.has(script)) {
     const prev = devServers.get(script);
     return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port };
   }
   const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "ignore"], detached: false });
+=======
+  if (devServers.has(script)) throw new Error(`スクリプト ${script} は既に起動しています`);
+  // stdoutから "PORT=<n>" を拾ってURLを返す(スクリプト側はport 0でlistenして出力する規約)
+  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"], detached: false });
+>>>>>>> main
   const entry = { child, port: null, startedAt: Date.now() };
+>>>>>>> main
   devServers.set(script, entry);
+<<<<<<< HEAD
   // 起動直後にサーバーが標準出力へ "PORT=<n>" を出す運用を想定。検出できたらurlを添える
   let out = "";
   child.stdout.on("data", (d) => {
@@ -554,14 +643,43 @@ function startDevServer(script, workspace) {
   });
   child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
   return { ok: true, script, pid: child.pid, port: entry.port, url: entry.port ? `http://127.0.0.1:${entry.port}` : null };
+=======
+  entry.child.stdout.on("data", (d) => {
+    const m = String(d).match(/PORT=(\d+)/);
+    if (m) entry.port = Number(m[1]);
+  });
+  child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
+<<<<<<< HEAD
+  return { ok: true, script, pid: child.pid, url };
+>>>>>>> main
 }
 
 function stopDevServer(script) {
+  let entry = null;
+  for (const [k, v] of devServers) { if (!script || k === script) { entry = v; devServers.delete(k); break; } }
+  if (!entry) throw new Error("起動中のdevserverはありません");
+  try {
+    if (process.platform === "win32") spawn(`taskkill /PID ${entry.child.pid} /T /F`, { shell: true, stdio: "ignore" });
+    else process.kill(-entry.child.pid, "SIGTERM");
+  } catch { /* 既に終了している場合は無視 */ }
+  return { ok: true, script: script ?? "", pid: entry.child.pid };
+=======
+  return { ok: true, script, pid: child.pid, port: entry.port, url: `http://127.0.0.1:${entry.port ?? 0}` };
+}
+
+function stopDevServer(script) {
+  if (!script) {
+    // script省略時は全停止。1つも起動していなければ400にするためthrow
+    if (devServers.size === 0) throw new Error("起動中のサーバーがありません");
+    stopAllDevServers();
+    return { ok: true, stopped: "all" };
+  }
   const entry = devServers.get(script);
-  if (!entry) return { ok: false, error: "起動中のサーバーがありません" };
+  if (!entry) throw new Error("起動中のサーバーがありません");
   devServers.delete(script);
   try { entry.child.kill(); } catch { /* 既に終了している場合は無視 */ }
   return { ok: true, script, pid: entry.child.pid };
+>>>>>>> main
 }
 
 function stopAllDevServers() {
@@ -574,6 +692,18 @@ function json(res, obj, status = 200) {
   res.end(JSON.stringify(obj));
 }
 
+/* ============ /api/scripts: package.jsonのscripts検出 ============ */
+// ワークスペースのpackage.jsonからnpm scriptsを読み、UIの右パネルに一覧できる形で返す。
+// scriptsが無い/読めない場合は空配列(UIは「スクリプトなし」表示になる)。
+export function detectNpmScripts(workspace) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+    return Object.entries(pkg.scripts ?? {}).map(([name, cmd]) => ({ name, cmd }));
+  } catch {
+    return [];
+  }
+}
+
 // /api/memory用: メモリ一覧に期限切れフラグを付ける(isMemoryExpiredに委譲)
 export function listMemoryWithExpiry(workspace, now = Date.now()) {
   return listMemoryFiles(workspace).map((f) => ({ name: f, path: `memory/${f}`, expired: isMemoryExpired(workspace, f, now) }));
@@ -583,12 +713,11 @@ export function listMemoryWithExpiry(workspace, now = Date.now()) {
 export function countAuditLines(workspace) {
   try {
     const raw = readFileSync(join(workspace, "state", "audit.jsonl"), "utf8");
-    return raw.split(String.fromCharCode(10)).filter((l) => l.trim()).length;
+    return raw.split("\n").filter((l) => l.trim()).length;
   } catch {
     return 0;
   }
 }
-
 
 /* ============ /api/wtdiff: worktreeとmainの差分 ============ */
 // agent/<id>ブランチのworktreeに対する main...agent/<id> の差分を返す。
