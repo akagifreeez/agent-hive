@@ -17,7 +17,7 @@ const mgr = new SpawnManager({ mainWorkspace: ws, worktreeRoot: ws + "-wt", boar
     const last = String(messages[messages.length - 1].content ?? "");
     console.log("TURN last:", last.slice(0, 60).replace(/\n/g, " "));
     if (last.includes("finish_task を呼んで")) {
-      return { content: null, toolCalls: [{ id: "c3", name: "claim_next_task", arguments: {} }], raw: { role: "assistant", content: null, tool_calls: [] }, usage };
+      return { content: null, toolCalls: [{ id: "c3", name: "claim_next_task", arguments: { project: "nothing-here" } }], raw: { role: "assistant", content: null, tool_calls: [] }, usage };
     }
     if (last.includes("請求できるタスクはありません")) {
       return { content: "終了します", toolCalls: [], raw: { role: "assistant", content: "終了します", tool_calls: [] }, usage };
