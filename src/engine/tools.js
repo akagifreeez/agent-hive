@@ -590,6 +590,26 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     if (full !== root && !full.startsWith(root + sep)) {
       throw new Error(`ワークスペース外のパスは扱えません: ${p}`);
     }
+    // symlink経由の脱出を拒否: 実体(realpath)がワークスペース内に収まっていること。
+    // 存在しないパスは作成前提なので、最も近い存在する親を辿って検証する
+    let probe = full;
+    for (;;) {
+      try {
+        const real = realpathSync(probe);
+        if (real !== root && !real.startsWith(root + sep)) {
+          throw new Error(`ワークスペース外を指すsymlink/パスは扱えません: ${p}`);
+        }
+        break;
+      } catch (err) {
+        if (err && err.code === "ENOENT") {
+          const parent = dirname(probe);
+          if (parent === probe) break; // ルートまで辿った(全て未存在)
+          probe = parent;
+          continue;
+        }
+        throw err;
+      }
+    }
     return full;
   }
 
