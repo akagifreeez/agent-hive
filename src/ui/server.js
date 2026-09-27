@@ -710,3 +710,25 @@ function readFileSyncSafe(p) {
     return [];
   }
 }
+
+// state/audit.jsonl の末尾limit件を新しい順で読む(監査ビュー用)。壊れた行は無視
+const BS_NL = "\n";
+function readAuditTail(workspace, limit) {
+  const n = Math.max(1, Math.min(Number(limit) || 200, 1000));
+  const file = join(workspace, "state", "audit.jsonl");
+  let text = "";
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  const lines = text.split(BS_NL).filter((l) => l.trim());
+  const out = [];
+  for (let i = lines.length - 1; i >= 0 && out.length < n; i--) {
+    try {
+      const e = JSON.parse(lines[i]);
+      if (e && typeof e === "object") out.push(e);
+    } catch {}
+  }
+  return out;
+}
