@@ -145,6 +145,11 @@ export class SpawnManager {
         b.post("system", `[解放] ${agent.id} 終了により ${released.join(", ")} をopenへ戻しました。誰でも請求できます。`);
       }
     }
+    // 自己起票の未完了タスク(spawn-*管理タスク等)を掃除。退場後にopen/claimedへ残してノイズにしない
+    const cleaned = this.tasks.autoResolveCreatedBy?.(agent.id, `[掃除] 起票者(${agent.id})が退場したため自動完了にしました。`) ?? [];
+    if (cleaned.length) {
+      b.post("system", `[掃除] ${agent.id} 退場により自己起票タスク ${cleaned.join(", ")} をdoneへ移動しました。`);
+    }
     const e = this.live.get(agent.id);
     if (e) e.status = r.ok ? "done" : `ended:${r.endedBy ?? "error"}`;
     this.bus.emit("agent.exited", { agent: agent.id, ok: r.ok, endedBy: r.endedBy ?? r.error });
