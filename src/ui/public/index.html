@@ -196,7 +196,7 @@
   body.nopanel { grid-template-columns: 240px 1fr; }
   body.nopanel #ctx { display: none; }
   body.widepanel { grid-template-columns: 240px 1fr 640px; }
-  #panel-btn { position: absolute; right: 126px; top: 9px; background: var(--panel2); border: 1px solid var(--separator); color: var(--sub); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
+  #panel-btn { position: absolute; right: 188px; top: 9px; background: var(--panel2); border: 1px solid var(--separator); color: var(--sub); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
   #panel-btn:hover { color: var(--label); border-color: var(--line-strong); }
   #browserpane { display: none; flex: 1; flex-direction: column; min-height: 0; }
   .bbar { display: flex; gap: 4px; padding: 5px; border-bottom: 1px solid var(--separator); }
@@ -277,6 +277,19 @@
   #monview iframe { flex: 1; border: none; width: 100%; }
   #settings-btn { position: absolute; right: 12px; top: 9px; background: var(--panel2); border: 1px solid var(--separator); color: var(--sub); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
   #settings-btn:hover { color: var(--label); border-color: var(--line-strong); }
+  /* ボード全文検索: ヘッダ右の入力欄と、ヒット一覧のオーバーレイ */
+  #board-search-box { position: absolute; right: 126px; top: 9px; }
+  #board-search { width: 120px; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 3px 8px; font-size: 11px; font-family: var(--font-ui); box-shadow: var(--inset-field); }
+  #board-search:focus { outline: none; border-color: var(--accent); width: 200px; }
+  #board-search::placeholder { color: var(--label-tertiary); }
+  #board-search-results { display: none; position: absolute; left: 0; right: 0; top: 100%; max-height: 60vh; overflow-y: auto; background: var(--bg-elevated); border-bottom: 1px solid var(--line-strong); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); z-index: 30; padding: 6px 0; }
+  #board-search-results .bs-head { display: flex; justify-content: space-between; padding: 2px 16px 6px; font-size: 11px; color: var(--label-tertiary); }
+  #board-search-results .bs-head .bs-close { cursor: pointer; color: var(--label-secondary); }
+  #board-search-results .bs-hit { padding: 6px 16px; cursor: pointer; border-left: 2px solid transparent; }
+  #board-search-results .bs-hit:hover { background: var(--fill); border-left-color: var(--accent); }
+  #board-search-results .bs-hit .bs-meta { font-size: 11px; color: var(--label-tertiary); }
+  #board-search-results .bs-hit .bs-thread { color: var(--accent); }
+  #board-search-results .bs-hit .bs-text { font-size: 12px; color: var(--label-secondary); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   #dlg { background: var(--bg-elevated); color: var(--label); border: 1px solid var(--line-strong); border-radius: 8px; padding: 14px 16px; width: 380px; box-shadow: var(--shadow-overlay); }
   #dlg::backdrop { background: rgba(0, 0, 0, 0.5); }
   #dlg h3 { margin: 0 0 6px; font-size: 14px; }
@@ -304,11 +317,15 @@
       <div id="room-title"></div>
       <div id="room-goal"></div>
       <div id="room-members"></div>
+      <div id="board-search-box">
+        <input id="board-search" type="text" placeholder="ボードを全文検索(Enter)" autocomplete="off">
+      </div>
       <button id="panel-btn" title="右パネルの表示/非表示">パネル</button>
       <button id="monitor-btn" title="モニタ(読み取り専用ダッシュボード)">モニタ</button>
       <button id="settings-btn" title="設定">設定</button>
     </header>
     <div id="permzone"></div>
+    <div id="board-search-results"></div>
     <div id="stream"></div>
     <div id="composer">
       <div id="suggest" style="display:none"></div>
@@ -1551,6 +1568,78 @@ function refreshSoon() {
 $("nav-search").addEventListener("input", (e) => { navQuery = e.target.value; renderAll(); });
 $("nav-search").addEventListener("keydown", (e) => {
   if (e.key === "Escape") { e.target.value = ""; navQuery = ""; renderAll(); }
+});
+
+/* ================= ボード全文検索(/api/board?q=) ================= */
+// ヘッダの検索ボックスで全スレッド横断の本文検索。結果クリックでそのスレッドを開く
+let boardSearchSeq = 0;
+async function runBoardSearch() {
+  const q = $("board-search").value.trim();
+  const box = $("board-search-results");
+  if (!q) { box.style.display = "none"; box.innerHTML = ""; return; }
+  const seq = ++boardSearchSeq;
+  try {
+    const r = await hfetch(`/api/board?q=${encodeURIComponent(q)}&limit=50`);
+    const data = await r.json();
+    if (seq !== boardSearchSeq) return; // 古い応答は捨てる
+    box.innerHTML = "";
+    if (data.error) {
+      const d = document.createElement("div");
+      d.className = "bs-head";
+      d.textContent = data.error;
+      box.appendChild(d);
+    } else {
+      const head = document.createElement("div");
+      head.className = "bs-head";
+      const label = document.createElement("span");
+      label.textContent = `「${q}」のヒット: ${data.total}件${data.posts.length < data.total ? `(先頭${data.posts.length}件)` : ""}`;
+      const close = document.createElement("span");
+      close.className = "bs-close";
+      close.textContent = "閉じる ×";
+      close.onclick = () => { box.style.display = "none"; box.innerHTML = ""; };
+      head.append(label, close);
+      box.appendChild(head);
+      for (const p of data.posts) openBoardSearchResult(box, p);
+    }
+    box.style.display = "block";
+  } catch {
+    /* 通信失敗は無視(次の入力で再試行) */
+  }
+}
+// ヒット1件の行を生成。クリックでそのスレッドへ切替(既存のスレッドクリックと同じ状態遷移)
+function openBoardSearchResult(box, p) {
+  const th = p.thread ?? "__main__";
+  const d = document.createElement("div");
+  d.className = "bs-hit";
+  const meta = document.createElement("div");
+  meta.className = "bs-meta";
+  const at = p.at ? new Date(p.at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+  meta.innerHTML = `<span class="bs-thread">${escapeHtml(th === "__main__" ? "メイン" : "#" + th)}</span> · ${escapeHtml(NAMES[p.from] ?? p.from)} · ${escapeHtml(at)}`;
+  const text = document.createElement("div");
+  text.className = "bs-text";
+  text.textContent = String(p.text ?? "").replace(/\s+/g, " ").slice(0, 200);
+  d.append(meta, text);
+  d.onclick = () => {
+    selectedThread = th;
+    unread[th] = 0;
+    selectedAgent = null;
+    projectFilter = th === "__main__" ? "" : th;
+    boardWindow = BOARD_WINDOW;
+    expandedMerges.clear();
+    $("board-search-results").style.display = "none";
+    $("board-search-results").innerHTML = "";
+    renderAll();
+  };
+  box.appendChild(d);
+}
+$("board-search").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); runBoardSearch(); }
+  if (e.key === "Escape") {
+    const box = $("board-search-results");
+    box.style.display = "none";
+    box.innerHTML = "";
+    e.target.value = "";
+  }
 });
 
 /* ================= 設定ウィンドウ(エージェントを起こさない操作) ================= */
