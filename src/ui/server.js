@@ -11,6 +11,7 @@ import { TaskBlackboard } from "../engine/tasks.js";
 import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
+import { PermissionGate } from "../engine/permissions.js";
 import { listMemoryFiles, isMemoryExpired } from "../engine/memory.js";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
@@ -169,8 +170,27 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     return { ok: false, error: `不明なaction: ${action}` };
   }
 
+  // CSRF/DNS rebinding対策: POSTのOrigin/Hostがlocalhost系か判定する。
+  // ヘッダ無し(同一オリジン由来のcurl等)は許可し、外部オリジンのみ拒否。
+  function isLocalOrigin(req) {
+    const origin = String(req.headers.origin ?? "");
+    if (origin) {
+      try {
+        const o = new URL(origin);
+        if (o.hostname !== "localhost" && o.hostname !== "127.0.0.1" && o.hostname !== "::1") return false;
+      } catch { return false; }
+    }
+    const host = String(req.headers.host ?? "");
+    if (host) {
+      const h = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+      if (h !== "localhost" && h !== "127.0.0.1" && h !== "::1") return false;
+    }
+    return true;
+  }
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
+    if (req.method === "POST" && !isLocalOrigin(req)) return json(res, { error: "localhost以外からのPOSTは拒否します" }, 403);
     try {
       if (url.pathname === "/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
