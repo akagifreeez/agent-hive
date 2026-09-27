@@ -544,7 +544,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     // 待ち受けを邪魔しない走行
     runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
   }
-<<<<<<< HEAD
   return {
     close: () => {
       // 起動中のdevserverがあれば停止(UI終了時に子プロセスを残さない)
@@ -557,10 +556,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       server.close();
     },
+    token: uiToken,
   };
-=======
-  return { close: () => { if (devserverProc) { try { if (process.platform === "win32") runCommand({ command: `taskkill /PID ${devserverProc.pid} /T /F`, timeoutMs: 5000, outputLimit: 1000 }); else process.kill(-devserverProc.pid, "SIGTERM"); } catch { /* 無視 */ } } server.close(); }, token: uiToken };
->>>>>>> main
 }
 
 function json(res, obj, status = 200) {
