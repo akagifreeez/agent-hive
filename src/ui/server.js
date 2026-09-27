@@ -470,9 +470,9 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         if (req.method === "GET") return json(res, handleDevserver({ method: "GET", workspace: config.workspace, uiPort: config.ui.port }));
         let body = "";
         req.on("data", (d) => (body += d));
-        req.on("end", () => {
+        req.on("end", async () => {
           try {
-            const r = handleDevserver({ method: "POST", body: JSON.parse(body || "{}"), workspace: config.workspace, uiPort: config.ui.port });
+            const r = await handleDevserver({ method: "POST", body: JSON.parse(body || "{}"), workspace: config.workspace, uiPort: config.ui.port });
             json(res, r.body ?? r, r.status ?? 200);
           } catch (err) {
             json(res, { ok: false, error: err.message }, 400);
