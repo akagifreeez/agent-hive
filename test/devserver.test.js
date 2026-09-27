@@ -45,8 +45,8 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
   const base = `http://127.0.0.1:${config.ui.port}`;
 
-  // scripts検出
-  const list = await fetchJson(`${base}/api/devserver`);
+  // scripts検出(GET /api/scripts。/api/devserverはGETで起動中サーバー一覧を返す)
+  const list = await fetchJson(`${base}/api/scripts`);
   assert.equal(list.status, 200);
   assert.deepEqual(list.body.scripts.map((s) => s.name), ["serve", "build"]);
 
