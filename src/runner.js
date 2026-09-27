@@ -447,6 +447,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     closeThread,
     setThreadFolder,
     setThreadPaused,
+    setPermMode,
     listThreads: () => [...threads.keys()],
     manager,
     mcpHosts,
