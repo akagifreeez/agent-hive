@@ -253,6 +253,28 @@ async function cmdUsage(o) {
   console.log(`${DIM}履歴${hist.length}件。詳細は GET /api/usage${RESET}`);
 }
 
+async function cmdTaskAction(o, args, action) {
+  const id = args[0];
+  if (!id) {
+    console.error(`使い方: hive tasks ${action} <taskId>`);
+    exit(1);
+  }
+  const r = await api(o.port, "/api/tasks", { action, id });
+  console.log(`${id} を${{ cancel: "中止", release: "解放", reopen: "再open" }[action]}しました。`);
+  return r;
+}
+
+async function cmdAudit(o) {
+  const r = await api(o.port, `/api/audit?limit=${o.limit}`);
+  const audit = r.audit ?? [];
+  console.log(`${ACCENT}監査台帳 ${audit.length}件${RESET}`);
+  for (const e of audit) {
+    const at = e.at ? String(e.at).replace("T", " ").slice(0, 19) : "-";
+    console.log(`  ${DIM}${at}${RESET} ${BOLD}${e.tool ?? e.name ?? "?"}${RESET} ${DIM}${e.agent ?? ""}${RESET} ${JSON.stringify(e.args ?? e.input ?? {})}`.slice(0, 200));
+  }
+  if (!audit.length) console.log("(記録なし)");
+}
+
 async function main() {
   const { opts, rest } = parseGlobalArgs(argv.slice(2));
   const [cmd, ...args] = rest;
