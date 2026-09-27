@@ -11,7 +11,6 @@ import { TaskBlackboard } from "../engine/tasks.js";
 import { BoardStore } from "../engine/boardstore.js";
 import { listSessions, saveSession, loadSession } from "../engine/sessions.js";
 import { runCommand } from "../engine/exec.js";
-import { spawn } from "node:child_process";
 import { PermissionGate } from "../engine/permissions.js";
 import { listMemoryFiles, isMemoryExpired } from "../engine/memory.js";
 import { listWorkspaceFiles } from "../engine/tools.js";
