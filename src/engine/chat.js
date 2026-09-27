@@ -54,6 +54,8 @@ export class ChatHost {
     // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
     // これがないと全員退出後の発見器起票タスクが誰にも消化されない。
     bus.on("task.created", (p) => this.handleTaskCreated(p));
+    // 解放(退場した担当者のタスクがopenへ戻る)でも同様に起こす。
+    bus.on("task.released", (p) => this.handleTaskReleased(p));
   }
 
   // 新タスク投入時の起床: 自分のprojectのタスク、または全スレッド共通の自動仕事(fix/review/distill)のみ
@@ -62,6 +64,21 @@ export class ChatHost {
       for (const m of this.mains) {
         this.wake(m, `[システム] 新しいタスク ${taskId} が投入されました。claim_next_task で確認してください。`, 300);
       }
+    }
+  }
+
+  // 解放タスクでの起床: 退場した担当者のタスクがopenへ戻ったら同じスレッドのメンバーを起こす。
+  // task.createdだけだと「解放→誰にも起されず凍結」が起きる(r7で実際に発生)。
+  handleTaskReleased({ taskId }) {
+    if (!this.project) return;
+    let t = null;
+    try {
+      t = this.tasks.list().open.find((x) => x.id === taskId);
+    } catch {}
+    if (!t && !/^(fix-|review-|distill-)/.test(taskId)) return;
+    if (t && (t.project || "") !== this.project) return;
+    for (const m of this.mains) {
+      this.wake(m, `[システム] タスク ${taskId} がopenへ戻りました。claim_next_task で請求を検討してください。`, 300);
     }
   }
 
@@ -205,6 +222,7 @@ export class ChatHost {
           seenBoard: this.seen.get(main.id) ?? null,
           memory: this.memoryFn?.() ?? null, // 圧縮時の権威分離判定に使う
           drainInput: () => st.pending.splice(0), // ラウンド実行中の入力はターン境界で割込む(steering)
+          peekInput: () => st.pending.length > 0, // idle退場が入力を捨てないための覗き見
         });
           // 既読位置をラウンド間で保持(同じ入力の二重配信を防ぐ)
         if (typeof r.seenBoard === "number") this.seen.set(main.id, r.seenBoard);
