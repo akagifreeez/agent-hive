@@ -16,9 +16,9 @@ function mktmp() {
 }
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ } }
 
-function runCli(args, port) {
+function runCli(args, port, token = null) {
   return new Promise((resolve) => {
-    execFile(process.execPath, [CLI, "--port", String(port), ...args], { timeout: 20000, encoding: "utf8" }, (err, stdout, stderr) => {
+    execFile(process.execPath, [CLI, "--port", String(port), ...args], { timeout: 20000, encoding: "utf8", env: { ...process.env, ...(token ? { HIVE_UI_TOKEN: token } : {}) } }, (err, stdout, stderr) => {
       resolve({ code: err && err.code ? err.code : 0, stdout, stderr: stderr ?? "" });
     });
   });
@@ -29,7 +29,7 @@ test("CLI: status/board/tasksが実サーバーに対して動く", async () => 
   const bus = new Bus();
   const config = { workspace: ws, ui: { port: 0 }, model: { model: "test-model" }, agents: [] };
   const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
-  const port = config.ui.port;
+  const port = config.ui.port, token = ui.token;
   bus.emit("board", { id: 1, from: "system", text: "[テスト] 起動確認", at: Date.now(), thread: "__main__" });
 
   const st = await runCli(["status"], port);
@@ -60,17 +60,17 @@ test("CLI: sayがサーバーに届き、feedback・pauseも通る", async () =>
     onFeedback: (req) => { got.push({ kind: "fb", ...req }); return { ok: true, id: `fb-${req.taskId}-x`, thread: req.thread }; },
     onThreadPause: (req) => { got.push({ kind: "pause", ...req }); return { ok: true, name: req.project, paused: req.paused }; },
   });
-  const port = config.ui.port;
+  const port = config.ui.port, token = ui.token;
 
-  const said = await runCli(["say", "CLIから", "こんにちは"], port);
+  const said = await runCli(["say", "CLIから", "こんにちは"], port, token);
   assert.equal(said.code, 0);
   assert.match(said.stdout, /送信しました/);
 
-  const fb = await runCli(["feedback", "t9", "テストを足して"], port);
+  const fb = await runCli(["feedback", "t9", "テストを足して"], port, token);
   assert.equal(fb.code, 0);
   assert.match(fb.stdout, /fb-t9-x/);
 
-  const paused = await runCli(["pause", "demo"], port);
+  const paused = await runCli(["pause", "demo"], port, token);
   assert.equal(paused.code, 0);
   assert.match(paused.stdout, /demo を停止/);
 
@@ -94,10 +94,10 @@ test("CLI: cancel/release/reopen/auditが実サーバーに対して動く", asy
   const bus = new Bus();
   const config = { workspace: ws, ui: { port: 0 }, model: { model: "test-model" }, agents: [] };
   const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
-  const port = config.ui.port;
+  const port = config.ui.port, token = ui.token;
 
   // タスクを2件起票(1件はdoneにしておいてreopenを試す)
-  const mk = (id) => fetch(`http://127.0.0.1:${port}/api/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, body: "テスト用" }) });
+  const mk = (id) => fetch(`http://127.0.0.1:${port}/api/tasks`, { method: "POST", headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" }, body: JSON.stringify({ action: "create", id, body: "テスト用" }) });
   await (await mk("cli-t1")).json();
   await (await mk("cli-t2")).json();
 
@@ -110,27 +110,27 @@ test("CLI: cancel/release/reopen/auditが実サーバーに対して動く", asy
   ].join("\n") + "\n");
 
   // cancel: openのタスクを中止
-  const c = await runCli(["tasks", "cancel", "cli-t1"], port);
+  const c = await runCli(["tasks", "cancel", "cli-t1"], port, token);
   assert.equal(c.code, 0);
   assert.match(c.stdout, /cli-t1/);
 
   // cancel: openでないタスクはエラーで非ゼロ
-  const c2 = await runCli(["tasks", "cancel", "cli-t1"], port);
+  const c2 = await runCli(["tasks", "cancel", "cli-t1"], port, token);
   assert.notEqual(c2.code, 0);
   assert.match(c2.stderr, /中止できません/);
 
   // release: 担当のいないタスクは解放できない
-  const r = await runCli(["tasks", "release", "cli-t2"], port);
+  const r = await runCli(["tasks", "release", "cli-t2"], port, token;
   assert.notEqual(r.code, 0);
   assert.match(r.stderr, /解放できません/);
 
   // reopen: doneタスクを再open(一旦cancel済みのcli-t1はdone扱い)
-  const ro = await runCli(["tasks", "reopen", "cli-t1"], port);
+  const ro = await runCli(["tasks", "reopen", "cli-t1"], port, token;
   assert.equal(ro.code, 0);
   assert.match(ro.stdout, /cli-t1/);
 
   // audit: 新しい順に表示
-  const a = await runCli(["audit", "-n", "10"], port);
+  const a = await runCli(["audit", "-n", "10"], port, token;
   assert.equal(a.code, 0);
   const ai = a.stdout.indexOf("new");
   const ao = a.stdout.indexOf("old");
