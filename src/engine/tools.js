@@ -11,7 +11,9 @@ import { readSkill } from "./skills.js";
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
+
 export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null }) {
+
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
   const specs = [
@@ -114,8 +116,10 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "post_to_board",
+
       description: "共有ボードへ報告・指摘・質問を投稿する。他の全エージェントの目に留まる。to_threadにスレッド名を指定するとそのスレッドのボードへ直接投稿する(自分のボードには載らない)。相手のメンバーを起こしたいときは本文に@表示名を含める。",
       parameters: { type: "object", properties: { text: { type: "string" }, to_thread: { type: "string", description: "投稿先スレッド名(省略時は自分のボード)" } }, required: ["text"], additionalProperties: false },
+
     },
     {
       name: "wait_for_board",
@@ -552,6 +556,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       case "bash":
         return await gatedBash(String(args.command ?? ""), clamp(Number(args.timeout_ms) || maxBashMs, 1000, 120000));
       case "post_to_board": {
+
         const dest = String(args.to_thread ?? "").trim();
         if (dest) {
           // crosstalk: 指定スレッドのボードへ直接投稿(自分のボードには載せない)。不在ならエラー
@@ -562,6 +567,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         }
         const post = board.post(agent.id, String(args.text ?? ""));
         return { ok: true, text: `ボード#${post.id}へ投稿しました。` };
+
       }
       case "wait_for_board": {
         const sec = clamp(Number(args.timeout_sec) || 60, 5, 180);
