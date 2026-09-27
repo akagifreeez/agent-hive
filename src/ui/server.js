@@ -570,7 +570,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 // 重複起動防止(同じscriptは1プロセスのみ)、DELETEで終了。UIサーバー終了時にも全停止。
 const devServers = new Map(); // script => { child, port, startedAt }
 
-<<<<<<< HEAD
 // ダミーサーバーは起動完了時に stdout へ "PORT=<n>" を出す約束。それを拾ってURLを確定する。
 function watchServerPort(entry, child, script) {
   child.stdout?.on("data", (buf) => {
@@ -592,13 +591,10 @@ async function waitForServerUrl(entry, timeoutMs = 5000) {
   return entry.url ?? null;
 }
 
-=======
->>>>>>> main
 async function startDevServer(script, workspace) {
   if (!script || typeof script !== "string") throw new Error("scriptが空です");
   const abs = resolve(workspace, script);
   if (!abs.startsWith(resolve(workspace) + sep)) throw new Error("ワークスペース外のスクリプトは起動できません");
-<<<<<<< HEAD
   if (devServers.has(script)) {
     const prev = devServers.get(script);
     if (prev.child.exitCode === null) {
@@ -617,7 +613,7 @@ async function startDevServer(script, workspace) {
   if (!cmd || typeof cmd !== "string") throw new Error(`scripts[${script}] が見つかりません`);
   const parts = cmd.split(/\s+/);
   const bin = parts[0] === "node" ? process.execPath : parts[0];
-  const child = childSpawn(bin, parts.slice(1), { cwd: workspace, detached: false });
+  const child = spawn(bin, parts.slice(1), { cwd: workspace, detached: false });
   const entry = { child, port: null, url: undefined, startedAt: Date.now() };
   devServers.set(script, entry);
   child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
@@ -629,35 +625,6 @@ async function startDevServer(script, workspace) {
     throw new Error("サーバーが起動しませんでした(PORT出力なし)");
   }
   return { ok: true, script, pid: child.pid, port: entry.port, url };
-=======
-  if (devServers.has(script)) throw new Error(`サーバーは既に起動しています: ${script}`);
-  // 起動→スクリプトの "PORT=<n>" 出力を待つ→HTTP疎通確認→urlを返す
-  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"], detached: false });
-  const entry = { child, port: null, startedAt: Date.now() };
-  devServers.set(script, entry);
-  child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
-  const port = await new Promise((res, rej) => {
-    let buf = "";
-    const onData = (d) => {
-      buf += String(d);
-      const m = buf.match(/PORT=(\d+)/);
-      if (m) { child.stdout.off("data", onData); res(Number(m[1])); }
-    };
-    child.stdout.on("data", onData);
-    child.stderr.on("data", (d) => { buf += String(d); });
-    child.once("exit", (code) => rej(new Error(`サーバーが起動前に終了しました(code=${code})`)));
-    setTimeout(() => rej(new Error("起動がタイムアウトしました(PORT出力なし)")), 10000);
-  });
-  entry.port = port;
-  // 疎通確認(起動直後は受け付け準備中のことがあるので数回リトライ)
-  const url = `http://127.0.0.1:${port}`;
-  let ok = false;
-  for (let i = 0; i < 10 && !ok; i++) {
-    try { ok = (await fetch(url)).status < 500; } catch { await new Promise((r) => setTimeout(r, 200)); }
-  }
-  if (!ok) { try { child.kill(); } catch {} throw new Error(`疎通確認に失敗しました: ${url}`); }
-  return { ok: true, script, pid: child.pid, port, url };
->>>>>>> main
 }
 
 function stopDevServer(script) {
