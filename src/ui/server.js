@@ -486,13 +486,20 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       }
       if (url.pathname === "/api/file") return json(res, { content: readFileSafe(config.workspace, url.searchParams.get("path") ?? "") });
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
+      if (url.pathname === "/api/devserver" && req.method === "GET") {
+        // scripts一覧 + 起動中サーバーの状態
+        const running = [...devServers.entries()].map(([script, e]) => ({ script, pid: e.child.pid, startedAt: e.startedAt }));
+        return json(res, { scripts: detectNpmScripts(config.workspace).map((s) => s.name), running });
+      }
       if (url.pathname === "/api/devserver" && req.method === "POST") {
         const chunks = [];
         req.on("data", (d) => chunks.push(d));
         req.on("end", () => {
           try {
-            const { script } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-            json(res, startDevServer(script, config.workspace));
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            const action = body.action ?? "start";
+            if (action === "stop") return json(res, stopDevServer(body.script ?? ""));
+            json(res, startDevServer(body.script, config.workspace));
           } catch (err) {
             json(res, { ok: false, error: err.message }, 400);
           }
@@ -554,9 +561,17 @@ function startDevServer(script, workspace) {
     const prev = devServers.get(script);
     return { ok: true, alreadyRunning: true, script, pid: prev.child.pid, port: prev.port };
   }
-  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: "ignore", detached: false });
+  const child = spawn(process.execPath, [abs], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"] });
   const entry = { child, port: null, startedAt: Date.now() };
   devServers.set(script, entry);
+  // スクリプトが「PORT=<番号>」をstdoutへ出したら拾って疎通用URLを保持する
+  let buf = "";
+  child.stdout.on("data", (d) => {
+    buf += String(d);
+    const m = buf.match(/PORT=(\d+)/);
+    if (m && entry.port === null) entry.port = Number(m[1]);
+  });
+  child.stderr.on("data", () => {});
   child.on("exit", () => { if (devServers.get(script) === entry) devServers.delete(script); });
   return { ok: true, script, pid: child.pid };
 }
