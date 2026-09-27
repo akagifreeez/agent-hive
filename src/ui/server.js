@@ -710,3 +710,21 @@ function readFileSyncSafe(p) {
     return [];
   }
 }
+
+// /api/audit: state/audit.jsonl(+1世代前 audit-1.jsonl)の末尾limit件を新着順で返す。
+// 台帳はtools.jsが書く真実で、ここは読み取り専用。壊れた行は無視する(簿記の失敗で止めない)
+function readAuditTail(workspace, limit) {
+  const dir = join(workspace, "state");
+  const lines = [];
+  for (const name of ["audit-1.jsonl", "audit.jsonl"]) {
+    try {
+      const text = readFileSync(join(dir, name), "utf8");
+      for (const l of text.split("\n")) {
+        const s = l.trim();
+        if (!s) continue;
+        try { lines.push(JSON.parse(s)); } catch { /* 壊れた行は無視 */ }
+      }
+    } catch { /* ファイルが無い世代は無視 */ }
+  }
+  return lines.slice(-Math.max(1, Math.min(limit, 1000))).reverse();
+}
