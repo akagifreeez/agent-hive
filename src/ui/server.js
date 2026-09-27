@@ -91,7 +91,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     if (!Number.isFinite(budgetAlertUsd) || budgetAlerted || !(cost > budgetAlertUsd)) return;
     budgetAlerted = true;
     budgetState.exceeded = true;
-    live.board.push({ id: `budget-${Date.now()}`, from: "system", text: `[予算超過] 累積コストが設定(${budgetAlertUsd}$)を超えました。予算超過: 累積 ${cost.toFixed(2)}。しきい値監視を停止します。`, at: Date.now(), thread: "__main__" }); + cost.toFixed(2), at: Date.now(), thread: "__main__" });
+    live.board.push({ id: `budget-${Date.now()}`, from: "system", text: `[予算超過] 累積コストが設定(${budgetAlertUsd}$)を超えました。予算超過: 累積 ${cost.toFixed(2)}。しきい値監視を停止します。`, at: Date.now(), thread: "__main__" });
   });
 
   const tasks = new TaskBlackboard(config.workspace, bus);
