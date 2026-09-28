@@ -1,138 +1,142 @@
 {
- "model": {
-  "baseUrl": "https://api.z.ai/api/coding/paas/v4",
-  "apiKeyEnv": "ZAI_API_KEY",
-  "apiKeyFile": "../../zai.key",
-  "model": "glm-5.3-flash",
-  "temperature": 0.7,
-  "maxTokens": 4000,
-  "timeoutMs": 180000,
-  "contextWindow": 200000,
-  "reasoningEffort": "low"
- },
- "budget": {
-  "maxTokensPerRun": 2000000
- },
- "compact": {
-  "thresholdPercent": 90
- },
- "workspace": "workspace",
- "worktrees": {
-  "dir": "worktrees"
- },
- "hierarchy": {
-  "maxDepth": 2,
-  "maxConcurrent": 12
- },
- "chat": {
-  "lead": "lead",
-  "workers": [
-   "alpha",
-   "beta",
-   "gamma"
+  "model": {
+    "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+    "apiKeyEnv": "ZAI_API_KEY",
+    "apiKeyFile": "../../zai.key",
+    "model": "glm-5.3-flash",
+    "temperature": 0.7,
+    "maxTokens": 4000,
+    "timeoutMs": 180000,
+    "contextWindow": 200000,
+    "reasoningEffort": "low"
+  },
+  "budget": {
+    "maxTokensPerRun": 2000000
+  },
+  "compact": {
+    "thresholdPercent": 90
+  },
+  "workspace": "workspace",
+  "worktrees": {
+    "dir": "worktrees"
+  },
+  "hierarchy": {
+    "maxDepth": 2,
+    "maxConcurrent": 12
+  },
+  "chat": {
+    "lead": "lead",
+    "workers": [
+      "alpha",
+      "beta",
+      "gamma"
+    ],
+    "mains": [
+      "alpha",
+      "beta",
+      "gamma"
+    ],
+    "maxTurnsPerRound": 12,
+    "autoContinueRounds": 3,
+    "idleClaimWaitSec": 45,
+    "autoscale": true,
+    "autoscaleIntervalSec": 30,
+    "maxWorkersPerThread": 4
+  },
+  "agents": [
+    {
+      "id": "alpha",
+      "displayName": "アルファ",
+      "role": "impl",
+      "persona": "agents/alpha.md"
+    },
+    {
+      "id": "delta",
+      "displayName": "デルタ",
+      "role": "impl",
+      "persona": "agents/delta.md"
+    },
+    {
+      "id": "beta",
+      "displayName": "ベータ",
+      "role": "review",
+      "persona": "agents/beta.md"
+    },
+    {
+      "id": "gamma",
+      "displayName": "ガンマ",
+      "role": "lead",
+      "persona": "agents/gamma.md"
+    }
   ],
-  "mains": [
-   "alpha",
-   "beta",
-   "gamma"
-  ],
-  "maxTurnsPerRound": 12,
-  "autoContinueRounds": 3,
-  "idleClaimWaitSec": 45,
-  "autoscale": true,
-  "autoscaleIntervalSec": 30,
-  "maxWorkersPerThread": 4
- },
- "agents": [
-  {
-   "id": "alpha",
-   "displayName": "アルファ",
-   "role": "impl",
-   "persona": "agents/alpha.md"
+  "loop": {
+    "maxTurns": 40
   },
-  {
-   "id": "delta",
-   "displayName": "デルタ",
-   "role": "impl",
-   "persona": "agents/delta.md"
+  "runner": {
+    "timeoutSec": 900
   },
-  {
-   "id": "beta",
-   "displayName": "ベータ",
-   "role": "review",
-   "persona": "agents/beta.md"
+  "discovery": {
+    "intervalSec": 120,
+    "testCommand": "npm test"
   },
-  {
-   "id": "gamma",
-   "displayName": "ガンマ",
-   "role": "lead",
-   "persona": "agents/gamma.md"
+  "permissions": {
+    "askTimeoutSec": 120,
+    "deny": [
+      "rm -rf /",
+      "rm -rf ~",
+      "mkfs",
+      "shutdown",
+      "format ",
+      "del /",
+      ":(){:|:&};:",
+      "curl --upload",
+      "curl -T "
+    ],
+    "ask": [
+      "rm -rf",
+      "git reset --hard",
+      "git clean",
+      "git push",
+      "npm publish",
+      "curl "
+    ]
+  },
+  "ui": {
+    "port": 7789
+  },
+  "scenario": {
+    "name": "stringutil",
+    "seedFiles": [
+      {
+        "path": "package.json",
+        "content": "{ \"name\": \"hive-workspace\", \"private\": true, \"type\": \"module\", \"scripts\": { \"test\": \"node --test tests/*.test.mjs\" } }\n"
+      },
+      {
+        "path": "tests/upper.test.mjs",
+        "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { toUpperSnake } from \"../src/upper.js\";\n\ntest(\"toUpperSnake: 空文字は空文字\", () => {\n  assert.equal(toUpperSnake(\"\"), \"\");\n});\n\ntest(\"toUpperSnake: スペース区切りは_で繋ぐ\", () => {\n  assert.equal(toUpperSnake(\"hello world\"), \"HELLO_WORLD\");\n});\n\ntest(\"toUpperSnake: ハイフンとキャメルも分割する\", () => {\n  assert.equal(toUpperSnake(\"foo-barBaz\"), \"FOO_BAR_BAZ\");\n});\n\ntest(\"toUpperSnake: 連続区切りは潰す\", () => {\n  assert.equal(toUpperSnake(\"a--b  c\"), \"A_B_C\");\n});\n"
+      },
+      {
+        "path": "tests/pad.test.mjs",
+        "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { padCenter } from \"../src/pad.js\";\n\ntest(\"padCenter: 中央寄せ(偶数余り)\", () => {\n  assert.equal(padCenter(\"ab\", 6), \"  ab  \");\n});\n\ntest(\"padCenter: 長さ超過ならそのまま\", () => {\n  assert.equal(padCenter(\"abcdef\", 3), \"abcdef\");\n});\n\ntest(\"padCenter: 奇数余りは左側が少ない\", () => {\n  assert.equal(padCenter(\"a\", 4), \" a  \");\n});\n"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "impl-upper",
+        "role": "impl",
+        "body": "src/upper.js を実装する。仕様は tests/upper.test.mjs が決める(テストが仕様書)。\n- ESM。`node --test tests/upper.test.mjs` を通すこと。\n- 実行結果をボードへ報告し、finish_task(自動でmainへマージされる)。"
+      },
+      {
+        "id": "impl-pad",
+        "role": "impl",
+        "body": "src/pad.js を実装する。仕様は tests/pad.test.mjs が決める(テストが仕様書)。\n- ESM。`node --test tests/pad.test.mjs` を通すこと。\n- 実行結果をボードへ報告し、finish_task(自動でmainへマージされる)。"
+      },
+      {
+        "id": "summarize-stringutil",
+        "role": "lead",
+        "body": "両implタスクのマージとレビュー状況を wait_for_board で待つ。\n- 自分の作業ディレクトリで `git merge main` してから `node --test tests/*.test.mjs` を実行し、全体が通ることを確認。\n- 全体まとめ(何が作られたか/テスト・レビュー結果/残課題)をボードへ投稿し、finish_task。"
+      }
+    ]
   }
- ],
- "loop": {
-  "maxTurns": 40
- },
- "runner": {
-  "timeoutSec": 900
- },
- "discovery": {
-  "intervalSec": 120,
-  "testCommand": "npm test"
- },
- "permissions": {
-  "askTimeoutSec": 120,
-  "deny": [
-   "rm -rf /",
-   "rm -rf ~",
-   "mkfs",
-   "shutdown",
-   "format ",
-   "del /",
-   ":(){:|:&};:"
-  ],
-  "ask": [
-   "rm -rf",
-   "git reset --hard",
-   "git clean",
-   "git push",
-   "npm publish"
-  ]
- },
- "ui": {
-  "port": 7789
- },
- "scenario": {
-  "name": "stringutil",
-  "seedFiles": [
-   {
-    "path": "package.json",
-    "content": "{ \"name\": \"hive-workspace\", \"private\": true, \"type\": \"module\", \"scripts\": { \"test\": \"node --test tests/*.test.mjs\" } }\n"
-   },
-   {
-    "path": "tests/upper.test.mjs",
-    "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { toUpperSnake } from \"../src/upper.js\";\n\ntest(\"toUpperSnake: 空文字は空文字\", () => {\n  assert.equal(toUpperSnake(\"\"), \"\");\n});\n\ntest(\"toUpperSnake: スペース区切りは_で繋ぐ\", () => {\n  assert.equal(toUpperSnake(\"hello world\"), \"HELLO_WORLD\");\n});\n\ntest(\"toUpperSnake: ハイフンとキャメルも分割する\", () => {\n  assert.equal(toUpperSnake(\"foo-barBaz\"), \"FOO_BAR_BAZ\");\n});\n\ntest(\"toUpperSnake: 連続区切りは潰す\", () => {\n  assert.equal(toUpperSnake(\"a--b  c\"), \"A_B_C\");\n});\n"
-   },
-   {
-    "path": "tests/pad.test.mjs",
-    "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { padCenter } from \"../src/pad.js\";\n\ntest(\"padCenter: 中央寄せ(偶数余り)\", () => {\n  assert.equal(padCenter(\"ab\", 6), \"  ab  \");\n});\n\ntest(\"padCenter: 長さ超過ならそのまま\", () => {\n  assert.equal(padCenter(\"abcdef\", 3), \"abcdef\");\n});\n\ntest(\"padCenter: 奇数余りは左側が少ない\", () => {\n  assert.equal(padCenter(\"a\", 4), \" a  \");\n});\n"
-   }
-  ],
-  "tasks": [
-   {
-    "id": "impl-upper",
-    "role": "impl",
-    "body": "src/upper.js を実装する。仕様は tests/upper.test.mjs が決める(テストが仕様書)。\n- ESM。`node --test tests/upper.test.mjs` を通すこと。\n- 実行結果をボードへ報告し、finish_task(自動でmainへマージされる)。"
-   },
-   {
-    "id": "impl-pad",
-    "role": "impl",
-    "body": "src/pad.js を実装する。仕様は tests/pad.test.mjs が決める(テストが仕様書)。\n- ESM。`node --test tests/pad.test.mjs` を通すこと。\n- 実行結果をボードへ報告し、finish_task(自動でmainへマージされる)。"
-   },
-   {
-    "id": "summarize-stringutil",
-    "role": "lead",
-    "body": "両implタスクのマージとレビュー状況を wait_for_board で待つ。\n- 自分の作業ディレクトリで `git merge main` してから `node --test tests/*.test.mjs` を実行し、全体が通ることを確認。\n- 全体まとめ(何が作られたか/テスト・レビュー結果/残課題)をボードへ投稿し、finish_task。"
-   }
-  ]
- }
+
 }
