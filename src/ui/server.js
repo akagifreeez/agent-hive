@@ -79,6 +79,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     modelName: null,
     modelEffort: null,
   };
+
   // usage予算アラート(config.chat.budgetAlertUsd): ラウンド終了ごとのusage.roundで
   // 台帳累積コストを監視し、しきい値を初めて超えたらメインボードに1回だけ告知する。
   // 以後は繰り返さない(告知済みフラグ)。未設定なら何もしない。
@@ -87,14 +88,13 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   const budgetState = { thresholdUsd: Number.isFinite(budgetAlertUsd) ? budgetAlertUsd : null, costUsd: 0, exceeded: false };
   bus.on("usage.round", (p) => {
     const cost = p?.totals?.costUsd ?? 0;
-    if (budgetState.thresholdUsd == null) return; // 未設定時は監視・配布もしない
+    if (budgetState.thresholdUsd == null) return; // 未設定なら監視自体をしない(costも配らない)
     budgetState.costUsd = cost;
     if (!Number.isFinite(budgetAlertUsd) || budgetAlerted || !(cost > budgetAlertUsd)) return;
     budgetAlerted = true;
     budgetState.exceeded = true;
-    live.board.push({ id: `budget-${Date.now()}`, from: "system", text: `[予算超過] 累積コストが設定(${budgetAlertUsd}$)を超えました。予算超過: 累積$${cost.toFixed(2)}。しきい値監視を停止します。`, at: Date.now(), thread: "__main__" });
+    live.board.push({ id: "budget-" + Date.now(), from: "system", text: "[予算超過] 累積コストが設定(" + String(budgetAlertUsd) + "$)を超えました。予算超過: 累積$" + cost.toFixed(2) });
   });
-
   const tasks = new TaskBlackboard(config.workspace, bus);
   const clients = new Set();
 
@@ -301,7 +301,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       // 総件数: チャットモードではディスクが真実。RAMのみのボード(未永続化)はRAM件数で代用
-      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length), budget: budgetState }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, mcp: config.mcp?.servers ?? {} });
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length), budget: budgetState }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, budget: budgetState, mcp: config.mcp?.servers ?? {} });
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       // ?q= があるときは全文検索モード(全スレッド横断の本文部分一致)
