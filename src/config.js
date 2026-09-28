@@ -7,7 +7,7 @@ import { dirname } from "node:path";
  * 動作設定の契約。hive.config.json(同梱物)に hive.local.json(書き込み可能側の上書き)を
  * 統合し、パスを絶対解決した実行時の形。loadConfig()が返す。
  * @typedef {Object} HiveConfig
- * @property {{baseUrl: string, apiKeyEnv?: string, apiKeyFile?: string, apiKey: string|null, model: string, fallbackModels?: string[], temperature?: number, maxTokens?: number, timeoutMs?: number, contextWindow?: number, reasoningEffort?: string|null}} model OpenAI互換エンドポイントへの接続設定(apiKeyはenv/鍵ファイルから解決した実値)
+ * @property {{baseUrl: string, apiKeyEnv?: string, apiKeyFile?: string, apiKey: string|null, model: string, fallbackModels?: string[], temperature?: number, maxTokens?: number, timeoutMs?: number, contextWindow?: number, reasoningEffort?: string|null, webSearch?: boolean|object|null}} model OpenAI互換エンドポイントへの接続設定(apiKeyはenv/鍵ファイルから解決した実値)
  * @property {string} workspace ワークスペースの絶対パス(開発時はリポジトリ直下・梱包時はuserData配下)
  * @property {{dir: string}} worktrees エージェント作業用worktreeのルート
  * @property {Array<{id: string, displayName: string, role: string, persona?: string, personaPath?: string}>} agents 参加エージェントの定義
