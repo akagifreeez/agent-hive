@@ -3,7 +3,6 @@
 // サーバーが起動しなくてもhive全体は止めない(失敗はbusへ通知してスキップ)。
 import { spawn } from "node:child_process";
 
-<<<<<<< HEAD
 /**
  * @typedef {Object} McpHostInstance
  * @property {string} name サーバー名(ツール名の接頭辞 mcp__<name>__ に使う)
@@ -34,9 +33,7 @@ export function mcpServersInfo(hosts) {
   }));
 }
 
-=======
 
->>>>>>> main
 export class McpHost {
   constructor({ name, command, args = [], env = {}, bus = null, timeoutMs = 60000 }) {
     /** @type {string} */
