@@ -33,8 +33,6 @@ export function mcpServersInfo(hosts) {
   }));
 }
 
-<<<<<<< HEAD
-=======
 /**
  * @typedef {Object} McpHostInstance
  * @property {string} name サーバー名(ツール名の接頭辞 mcp__<name>__ に使う)
