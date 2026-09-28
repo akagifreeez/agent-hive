@@ -7,7 +7,7 @@
 export const KEEP_RECENT_TOOL_RESULTS = 5;
 export const MIN_TOKEN_SAVINGS = 256;
 export const MICROCOMPACT_THRESHOLD_RATIO = 0.9;
-export const MICROCOMPACT_PLACEHOLDER = "[古いツール結果の内容は削除済み]";
+export const MICROCOMPACT_PLACEHOLDER = "[Older tool result content removed]";
 export const AUTOCOMPACT_OUTPUT_RESERVE_TOKENS = 21000;
 export const AUTOCOMPACT_THRESHOLD_PERCENT = 90; // ZCode既定は100だが、hiveはpreflight再試行を持たないため安全側
 export const AUTOCOMPACT_FAILURE_LIMIT = 3;
@@ -66,18 +66,20 @@ export function shouldAutocompact({ providerPromptTokens = 0, estimatedTokens = 
 }
 
 // 要約プロンプト(ZCode compact/prompt.tsの構造をhive用に簡略化)。
-// ツールを禁止し、テキストのみで要約させる。
-export const COMPACT_SYSTEM_PROMPT = `あなたは会話の要約器です。ツールは一切使わず、テキストのみで応答してください。
-以下の会話(マルチエージェント環境で働く1エージェントの履歴)を、作業を中断なく継続できる精度で要約してください。
+// ツールを禁止し、テキストのみで要約させる。プロンプト自体は英語(要約精度・トークン効率)。
+// 要約の出力言語は日本語を明示指定(エージェントの作業言語が日本語のため)。
+export const COMPACT_SYSTEM_PROMPT = `You are a conversation summarizer. Do not use any tools; respond with text only.
+Summarize the following conversation (the history of one agent working in a multi-agent environment) with enough precision that the work can continue without interruption.
 
-必ず含める節:
-1. 現在のタスク: 請求中/直近のタスクidと、その完了条件
-2. 実施した作業: 作成・修正したファイル名と、その内容の要点(重要なコードの要素は関数名レベルで)
-3. エラーと対処: 起きた問題と解決方法
-4. ボード上の重要情報: 他エージェントからの指摘・合意事項
-5. 次にやること: 未完了の残作業
+You MUST include these sections:
+1. Current task: the claimed/most recent task id and its completion criteria
+2. Work done: file names created or modified, and the essence of each change (important code elements at function-name level)
+3. Errors and fixes: problems encountered and how they were resolved
+4. Key information from the board: feedback, decisions, and agreements from other agents
+5. Next steps: remaining work not yet completed
 
-出力は上記の箇条書き形式のみ。前置き・感想は不要。`;
+Output only these bullet sections. No preamble, no commentary.
+Write the summary in Japanese.`;
 
 // タスク文脈を渡すと読み取り時キュレーション(JIT memory, arXiv:2609.27334)に切り替える:
 // 圧縮の瞬間には遂行中タスクが判明しているので、「何を残すか」を汎用に決めず
@@ -85,20 +87,20 @@ export const COMPACT_SYSTEM_PROMPT = `あなたは会話の要約器です。ツ
 export function buildCompactRequest(messages, { taskContext = null, hasMemory = false } = {}) {
   let system = taskContext
     ? `${COMPACT_SYSTEM_PROMPT}
-読み取り時キュレーション: この要約は、下記の遂行中タスクが判明した状態で読まれます。
---- 遂行中のタスク ---
+Read-time curation: this summary will be read while the following task is in progress.
+--- Current task ---
 ${taskContext}
---- ここまで ---
-上記の遂行に不要な細部(無関係な探索・失敗した試行の詳細)は短くしてよい。逆に遂行に必要な要素(対象ファイル・制約・決定事項・現在の進捗)は必ず残すこと。`
+--- End of task ---
+You may shorten details irrelevant to this task (unrelated exploration, details of failed attempts). Conversely, you MUST keep anything the task depends on (target files, constraints, decisions, current progress).`
     : COMPACT_SYSTEM_PROMPT;
   // 権威分離(hermes-agentの規律): 永続記憶はシステムプロンプトに常に生きたまま注入されるので、
   // 要約に複製すると二重管理になり、食い違い時にどちらが正か分からなくなる。
   if (hasMemory) {
-    system += `\n権威分離: workspace/memory/ の永続記憶はシステムプロンプトに常に注入されるため、要約に複製しないこと。要約は記憶に無い、この会話固有の経過・進捗・決定に集中せよ。`;
+    system += `\nAuthority separation: the persistent memory in workspace/memory/ is always injected via the system prompt. Do NOT duplicate it into the summary. Focus the summary on conversation-specific progress, decisions, and events that are not already in memory.`;
   }
   return [
     { role: "system", content: system },
-    { role: "user", content: "以下の会話履歴を要約してください:\n\n" + messages.map((m) => `${m.role}: ${typeof m.content === "string" ? m.content.slice(0, 4000) : ""}`).join("\n---\n") },
+    { role: "user", content: "Summarize the following conversation history:\n\n" + messages.map((m) => `${m.role}: ${typeof m.content === "string" ? m.content.slice(0, 4000) : ""}`).join("\n---\n") },
   ];
 }
 
@@ -108,7 +110,7 @@ export function applyCompaction(messages, summaryText, keepRecent = 4) {
   const tail = messages.slice(-keepRecent);
   const compacted = [
     ...(system ? [system] : []),
-    { role: "user", content: `[セッション要約(自動圧縮)]\n${summaryText}\n\n上記の続きとして作業を継続してください。` },
+    { role: "user", content: `[Session summary (auto-compacted)]\n${summaryText}\n\nContinue the work from the state described above.` },
     ...tail,
   ];
   return compacted;
