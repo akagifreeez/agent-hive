@@ -19,6 +19,8 @@
 - **stash popの競合解消はCRLFに注意**(2026-09 search-alert-r7): git stash push → merge main → stash pop で競合ブロックが残る。マーカー行(<<<<<<< Updated upstream 等)は行末にCRが付くため等値比較はCRをstripしてから。解消は main側/自分側のどちらを採るか明示して1ブロックずつ。
 - 実験・デバッグ用スクリプト(tmp-*.mjs、exp-*、t_main等)をリポジトリ直下に置かない。特に鍵ファイルへのハードコード参照は機微情報の漏出リスク。作業終了時に削除する習慣(2026-09 cleanup-exp-files、search-alert-r7で残骸多数を確認)。旧記載の「t_main残存(未対応)」はcleanup-exp-filesで解決済み。
 
+- MCP設定ウィンドウ(/api/mcp・mcpAdd)のテスト(test/mcp-settings.test.js)は実物のstdioサーバーを起動するため遅い(私の環境で約100秒タイムアウトを確認、2026-09 merge-queue-r6-beta)。bashコマンドのタイムアウト上限(120秒)に達するため、テスト単体実行はtimeout併用か、対象を絞って実行すること。
+
 # 将来への引き継ぎ
 
 - 監査docs(docs/audit-*.md)に実効性指摘S1〜S8あり。読み取り系state/ガード・bash迂回・web_fetchのURL未記録などは未対応。
