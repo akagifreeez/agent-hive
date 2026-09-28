@@ -102,7 +102,6 @@ export class PermissionGate {
     if (hitConfirm) {
       const verdict2 = await this.requestApproval(command, hitConfirm);
       if (verdict2 === "approve") {
-        this.bus?.emit("permission.resolved", { id: -2, command, verdict: "confirm-approve" });
         return { allowed: true };
       }
       return { allowed: false, reason: verdict2 === "timeout" ? `承認が${this.askTimeoutMs / 1000}秒以内に得られなかった` : "人が拒否した" };
@@ -117,7 +116,6 @@ export class PermissionGate {
 
     const verdict = await this.requestApproval(command, hitAsk);
     if (verdict === "approve") {
-      this.bus.emit("permission.resolved", { id: -2, command, verdict });
       return { allowed: true };
     }
     return { allowed: false, reason: verdict === "timeout" ? `承認が${this.askTimeoutMs / 1000}秒以内に得られなかった` : "人が拒否した" };
@@ -140,7 +138,9 @@ export class PermissionGate {
       const off = this.bus.on("permission.verdict", (p) => {
         if (p.id !== id) return;
         cleanup();
-        resolve(p.approve ? "approve" : "deny");
+        const v = p.approve ? "approve" : "deny";
+        if (v === "approve") this.bus.emit("permission.resolved", { id, command, verdict: v });
+        resolve(v);
       });
       function cleanup() {
         clearTimeout(timer);
