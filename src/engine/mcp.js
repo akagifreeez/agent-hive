@@ -5,13 +5,19 @@ import { spawn } from "node:child_process";
 
 export class McpHost {
   constructor({ name, command, args = [], env = {}, bus = null, timeoutMs = 60000 }) {
+    /** @type {string} */
     this.name = String(name);
+    /** @type {string} */
     this.command = command;
+    /** @type {string[]} */
     this.args = args;
+    /** @type {Record<string,string>} */
     this.env = env;
     this.bus = bus;
     this.timeoutMs = timeoutMs;
+    /** @type {import("node:child_process").ChildProcess|null} */
     this.child = null;
+    /** @type {Array<{name:string,description?:string,inputSchema?:object}>} */
     this.tools = [];
     this.nextId = 1;
     this.pending = new Map(); // id => {resolve, reject, timer}
