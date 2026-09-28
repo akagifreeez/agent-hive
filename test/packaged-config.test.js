@@ -29,3 +29,19 @@ test("HIVE_DATA: workspace/worktrees/ローカル上書きがuserData基準に�
     try { rmSync(userData, { recursive: true, force: true }); } catch { /* ロックは無視 */ }
   }
 });
+
+test("HIVE_UI_PORT: ui.portを環境変数で上書きできる(梱包SMOKEの衝突避け)", async () => {
+  const prevData = process.env.HIVE_DATA;
+  const prevPort = process.env.HIVE_UI_PORT;
+  process.env.HIVE_DATA = resolve(mkdtempSync(join(tmpdir(), "hive-port-")));
+  process.env.HIVE_UI_PORT = "7802";
+  try {
+    const { loadConfig } = await import("../src/config.js");
+    assert.equal(loadConfig().ui.port, 7802);
+    delete process.env.HIVE_UI_PORT;
+    assert.equal(loadConfig().ui.port, 7789, "無指定時は既定値に戻る");
+  } finally {
+    if (prevData === undefined) delete process.env.HIVE_DATA; else process.env.HIVE_DATA = prevData;
+    if (prevPort === undefined) delete process.env.HIVE_UI_PORT; else process.env.HIVE_UI_PORT = prevPort;
+  }
+});

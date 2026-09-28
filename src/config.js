@@ -28,8 +28,7 @@ export function loadConfig(configPath) {
     agents: (raw.agents ?? []).map((a) => ({ ...a, personaPath: resolve(ROOT, a.persona ?? `agents/${a.id}.md`) })),
     loop: { maxTurns: 30, ...(raw.loop ?? {}) },
     runner: { timeoutSec: 480, ...(raw.runner ?? {}) },
-    ui: { port: 7789, monitorPort: 7791, monitorHost: "0.0.0.0", ...(raw.ui ?? {}) },
-    discovery: { intervalSec: 30, testCommand: null, ...(raw.discovery ?? {}) },
+    ui: { port: 7789, monitorPort: 7791, monitorHost: "0.0.0.0", ...(raw.ui ?? {}) },    discovery: { intervalSec: 30, testCommand: null, ...(raw.discovery ?? {}) },
     permissions: {
       askTimeoutSec: 120,
       ...(raw.permissions ?? {}),
@@ -44,6 +43,8 @@ export function loadConfig(configPath) {
     scenario: { seedFiles: [], ...raw.scenario },
   };
   cfg.model.apiKey = resolveApiKey(cfg.model);
+  // ポートの環境変数上書き(開発サーバーと並行して梱包アプリ/SMOKEを動かすときの衝突避け)
+  if (process.env.HIVE_UI_PORT) cfg.ui.port = Number(process.env.HIVE_UI_PORT) || cfg.ui.port;
   return cfg;
 }
 
