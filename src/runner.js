@@ -398,7 +398,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       writeLocalServers({ ...(local.mcp?.servers ?? {}), [id]: { command: String(command).trim(), args: args ?? [], env: env ?? {} } });
       return { ok: true, tools: r.tools };
     },
-    mcpRemove: ({ name } = {}) => {
+    mcpRemove: (/** @type {{name?: string}} */ { name } = {}) => {
       const id = String(name ?? "");
       const idx = mcpHosts.findIndex((h) => h.name === id);
       if (idx < 0) return { error: `サーバー ${id} は接続されていません` };
