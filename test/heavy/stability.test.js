@@ -5,10 +5,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Board, Bus } from "../src/engine/board.js";
-import { TaskBlackboard } from "../src/engine/tasks.js";
-import { createTools } from "../src/engine/tools.js";
-import { runAgentLoop, MAX_CONSECUTIVE_RAPID_REFILLS } from "../src/engine/loop.js";
+import { Board, Bus } from "../../src/engine/board.js";
+import { TaskBlackboard } from "../../src/engine/tasks.js";
+import { createTools } from "../../src/engine/tools.js";
+import { runAgentLoop, MAX_CONSECUTIVE_RAPID_REFILLS } from "../../src/engine/loop.js";
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-stab-"));
@@ -17,7 +17,7 @@ function rmTree(p) {
   try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ }
 }
 
-const PERSONA = join(dirname(fileURLToPath(import.meta.url)), "..", "agents", "alpha.md");
+const PERSONA = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents", "alpha.md");
 const AGENT = { id: "alpha", displayName: "アルファ", role: "impl", personaPath: PERSONA };
 function makeEnv(ws) {
   const bus = new Bus();

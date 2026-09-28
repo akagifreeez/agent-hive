@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setupWorktrees, mergeAgentWork, withMergeLock } from "../src/engine/worktree.js";
-import { ensureGitRepo } from "../src/engine/discover.js";
-import { runCommand } from "../src/engine/exec.js";
+import { setupWorktrees, mergeAgentWork, withMergeLock } from "../../src/engine/worktree.js";
+import { ensureGitRepo } from "../../src/engine/discover.js";
+import { runCommand } from "../../src/engine/exec.js";
 
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ } }
 function makeWorkspace() {
