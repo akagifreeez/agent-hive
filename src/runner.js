@@ -381,17 +381,9 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
 
   bus.emit("scenario.started", { name: `chat:${config.scenario.name}`, tasks: [] });
   return {
-<<<<<<< HEAD
-    mcpList: () => mcpHosts.map((h) => ({
-      name: h.name, command: h.command, args: h.args, envKeys: Object.keys(h.env ?? {}),
-      tools: h.tools.map((t) => t.name), started: Boolean(h.child),
-    })),
-    mcpAdd: async (/** @type {{name?: string, command?: string, args?: string[], env?: Record<string,string>}} */ { name, command, args, env } = {}) => {
-=======
     mcpList: () => mcpServersInfo(mcpHosts),
     /** @param {{name?: string, command?: string, args?: string[], env?: Object.<string,string>}} o */
     mcpAdd: async ({ name, command, args, env } = {}) => {
->>>>>>> main
       const id = String(name ?? "").trim();
       if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id)) return { error: "サーバー名は英小文字数字と_-で32字以内" };
       if (!String(command ?? "").trim()) return { error: "commandが空です" };
@@ -404,12 +396,8 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       writeLocalServers({ ...(local.mcp?.servers ?? {}), [id]: { command: String(command).trim(), args: args ?? [], env: env ?? {} } });
       return { ok: true, tools: r.tools };
     },
-<<<<<<< HEAD
-    mcpRemove: (/** @type {{name?: string}} */ { name } = {}) => {
-=======
     /** @param {{name?: string}} o */
     mcpRemove: ({ name } = {}) => {
->>>>>>> main
       const id = String(name ?? "");
       const idx = mcpHosts.findIndex((h) => h.name === id);
       if (idx < 0) return { error: `サーバー ${id} は接続されていません` };
@@ -629,4 +617,4 @@ function withOverallTimeout(runs, timeoutMs) {
       resolve(r);
     });
   });
-}
+}
