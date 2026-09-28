@@ -67,7 +67,7 @@ test("v6.1: 再起動してもボード投稿・スレッド・会話メモリ�
     discovery: {},
     permissions: {},
     scenario: { name: "test" },
-    chat: { lead: "lead", workers: ["alpha", "beta", "gamma"], maxTurnsPerRound: 8, staggerMs: 5 },
+    chat: { lead: "lead", workers: ["alpha", "beta", "gamma"], maxTurnsPerRound: 8, staggerMs: 5, autoscale: false },
     agents: [
       { id: "alpha", displayName: "アルファ", role: "impl" },
       { id: "beta", displayName: "ベータ", role: "review" },
