@@ -78,6 +78,7 @@ export function statSummary(statText) {
  * @property {string} [patch] 差分本文(上限付き)
  * @property {string} [summary]
  * @property {boolean} [autoMerged] 競合からの自動再マージで成功した
+ * @property {boolean} [marker] 競合マーカーガードに拒否された
  */
 /**
  * @param {Object} o
@@ -91,12 +92,39 @@ export function statSummary(statText) {
 export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exec = runCommand }) {
   const branch = `agent/${agent.id}`;
   return queueMerge(async () => {
+    // 0) 競合マーカーガード: マーカー入りのmainをマージするとmain全体が構文破損する。
+    //    main側に既にマーカーがある場合はマージ自体を中止する(r7で実際に発生)
+    const mainMarkers = await exec({
+      command: `git grep -l -E "^(<{7}|>{7})" -- . ":(exclude)worktrees/**" ":(exclude)state/**" ":(exclude)dist/**" ":(exclude)node_modules/**"`,
+      cwd: mainWorkspace,
+      outputLimit: 2000,
+    });
+    if (mainMarkers.ok && mainMarkers.text.trim()) {
+      const files = mainMarkers.text.trim().split("\n").map((f) => f.trim()).join(", ");
+      return { ok: false, marker: true, text: `mainに競合マーカーが残っています(${files})。マージを中止しました。先にmain側のマーカーを解消してください。` };
+    }
     // 1) worktree側の未コミット変更を確定(変更がなければno-op)
     await exec({
       command: `git add -A && (git diff --cached --quiet || git -c user.name=${agent.id} -c user.email=${agent.id}@hive.local commit -m 'wip: ${taskId}')`,
       cwd: worktreePath,
       outputLimit: 2000,
     });
+    // 1.5) ブランチ側ガード: このマージで運ばれるファイルにマーカーが入っていれば拒否し、
+    //      作業者へ返送する(マーカー入りの確定をmainに作らない)
+    const dirty = await exec({ command: `git diff --name-only main...agent/${agent.id}`, cwd: mainWorkspace, outputLimit: 4000 });
+    const changed = dirty.ok ? dirty.text.split("\n").map((f) => f.trim()).filter(Boolean) : [];
+    if (changed.length) {
+      const q = changed.map((f) => `"${f}"`).join(" ");
+      const wtMarkers = await exec({
+        command: `git grep -l -E "^(<{7}|>{7})" agent/${agent.id} -- ${q}`,
+        cwd: mainWorkspace,
+        outputLimit: 2000,
+      });
+      if (wtMarkers.ok && wtMarkers.text.trim()) {
+        const files = wtMarkers.text.trim().split("\n").map((f) => f.replace(/^[^:]+:/, "").trim()).join(", ");
+        return { ok: false, marker: true, text: `worktree側の変更に競合マーカーが含まれています(${files})。マージを中止しました。worktree内でマーカーを削除してコミットしてから再度 finish_task してください。` };
+      }
+    }
     // 2) mainのマージ前位置を控える(マージ後のdiffはここからの差分)
     const pre = await exec({ command: "git rev-parse main", cwd: mainWorkspace, outputLimit: 200 });
     const preSha = pre.ok ? (pre.text.split("\n")[1] ?? "").trim() : "";
