@@ -17,6 +17,9 @@
 を含む置換はedit_fileで生改行を書かず、nodeスクリプト(s.replace(bad,good))で置換するのが安全。修復後は必ず構文確認(import実行)してからnpm test。edit_fileとperlが連続失敗する際はgit改行正規化(CRLF/LF)との干渉を疑うこと(2026-09 fix-test-failuresで確認)。
 - **nodeパッチスクリプト自体が破壊源になる**(2026-09 search-alert-r7で実害): 対象ファイルへ埋め込むコードをパッチスクリプトのテンプレートリテラルで書くと、実行時にその中の ドル波括弧 が展開され壊れた文字列が書き込まれる。対策: パッチスクリプト内ではバッククォートとドル波括弧を一切書かず、行配列+文字列連結(断片はJSON.stringifyで安全化)で組み立てる。破損したら手修復で二重化させず git checkout main -- <file> で原本へ戻してやり直すのが最短。
 - **stash popの競合解消はCRLFに注意**(2026-09 search-alert-r7): git stash push → merge main → stash pop で競合ブロックが残る。マーカー行(<<<<<<< Updated upstream 等)は行末にCRが付くため等値比較はCRをstripしてから。解消は main側/自分側のどちらを採るか明示して1ブロックずつ。
+- **競合解消は「採用側を明示」してから検証。未解決マーカーをレビュー/マージに流さない**(2026-09 search-alert-r7-late): 競合ブロックの解消は (1)nodeスクリプトでマーカー行を行頭完全一致(CR strip)で検出 (2)HEAD/mainどちらを採るか明示して splice (3)node --check 全改変ファイル+grep でマーカー残存0を確認、が定型。採用側を決めずに「空行差分だから」と安易に削ると残骸マーカー(>>>>>>> main 等)が構文エラーとして後で発覚する。競合が複数ファイルに及ぶ場合は発見器(fix-merge-markers-*)が起票するので、先行者はボードで「実質作業完了」を宣言して重複を防ぐ。
+- **競合を含むままコミットすると構文が壊れた状態がgit履歴に残る**(実害): wipコミットで競合ファイルを置いたままpushしない。解消済み版だけをコミットする。なお作業中の段階コミット(wip: chat-round)自体は有効—ラウンド中断・モデルエラーでworktreeが失われてもmainへ自動マージされるセーフネットになる(本ラウンドで二重化修復がwipコミット経由で救われた)。
+- **マージ過程で関数/typedefが二重化することがある**(2026-09 search-alert-r7-late): mcp.jsで mcpServersInfo が2個・typedefが2個になり SyntaxError 25ファイル連鎖(全テストが構文エラーで落ちる)。二重化は grep -c "export function <名前>" で検出。解消は1個目を残して2個目のコメントブロック(/**)から関数終了までを削除し、typecheckで確認。
 - 実験・デバッグ用スクリプト(tmp-*.mjs、exp-*、t_main等)をリポジトリ直下に置かない。特に鍵ファイルへのハードコード参照は機微情報の漏出リスク。作業終了時に削除する習慣(2026-09 cleanup-exp-files、search-alert-r7で残骸多数を確認)。旧記載の「t_main残存(未対応)」はcleanup-exp-filesで解決済み。
 
 - MCP設定ウィンドウ(/api/mcp・mcpAdd)のテスト(test/mcp-settings.test.js)は実物のstdioサーバーを起動するため遅い(私の環境で約100秒タイムアウトを確認、2026-09 merge-queue-r6-beta)。bashコマンドのタイムアウト上限(120秒)に達するため、テスト単体実行はtimeout併用か、対象を絞って実行すること。
