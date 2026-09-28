@@ -168,6 +168,11 @@
   #attachbtn:hover { background: var(--fill-strong); color: var(--label); }
   #attachbtn:active { transform: translateY(1px); }
   #composer .hint { font-size: 11px; color: var(--label-tertiary); margin-top: 5px; }
+  #composer .composer-opts { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  #composer .composer-opts .lbl { font-size: 11px; color: var(--label-tertiary); flex-shrink: 0; }
+  #composer .composer-opts input { flex: 0 1 300px; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 3px 8px; font-size: 11px; font-family: var(--font-ui); box-shadow: var(--inset-field); }
+  #composer .composer-opts input:focus { outline: none; border-color: var(--accent); }
+  #composer .composer-opts select { background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 3px 6px; font-size: 11px; font-family: var(--font-ui); }
 
   /* ============ 右: 状況パネル ============ */
   #ctx { background: var(--bg-elevated); border-left: 1px solid var(--separator); display: flex; flex-direction: column; min-height: 0; }
@@ -329,6 +334,14 @@
     <div id="stream"></div>
     <div id="composer">
       <div id="suggest" style="display:none"></div>
+      <div class="composer-opts">
+        <span class="lbl">モデル</span>
+        <input id="composer-model" spellcheck="false" title="空欄なら設定どおり。変更してEnterで反映(次のラウンドから)">
+        <span class="lbl">思考</span>
+        <select id="composer-effort" title="思考レベル(次のラウンドから)">
+          <option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+        </select>
+      </div>
       <div class="row">
         <input id="saytext" placeholder="メッセージ">
         <button id="attachbtn" title="画像を添付">+</button>
@@ -371,14 +384,9 @@
 
   <dialog id="settings-dlg">
     <h3>設定</h3>
-    <div class="set-row"><label>思考レベル</label>
-      <select id="set-effort"><option value="low">low(速い・安い)</option><option value="medium">medium</option><option value="high">high(じっくり)</option></select>
-    </div>
-    <div class="set-row"><label>モデル</label><input id="set-model" spellcheck="false"></div>
-    <div class="set-row"><label>フォールバック</label><input id="set-fallback" placeholder="カンマ区切り" disabled></div>
-    <div class="set-row"><label>権限モード</label>
-      <select id="set-perm"><option value="normal">normal(要承認)</option><option value="auto">自動許可(auto)</option></select>
-    </div>
+      <div class="set-row"><label>権限モード</label>
+        <select id="set-perm"><option value="normal">normal(要承認)</option><option value="auto">auto(自動許可)</option></select>
+      </div>
     <div class="set-row"><label>APIキー</label><input id="set-key" type="password" autocomplete="off" spellcheck="false"></div>
     <div class="set-row"><label>MCPサーバー</label><span class="mono" id="set-mcp" style="font-size:11px;color:var(--sub)"></span></div>
     <div class="set-row"><label>メモリ</label><span class="mono" id="set-mem" style="font-size:11px;color:var(--sub)"></span></div>
@@ -1557,8 +1565,41 @@ async function refresh() {
   lastState = await (await hfetch("/api/state")).json();
   customCommands = lastState.commands ?? {};
   $("monitor-btn").style.display = lastState.monitorPort ? "" : "none";
+  syncComposerModelOpts();
   renderAll();
 }
+
+// 入力欄のモデル/思考レベル操作部(設定ウィンドウから移設)。実行中ランタイムの現在値を映す
+function syncComposerModelOpts() {
+  const liveModel = lastState?.live?.modelName ?? lastState?.model?.name ?? "";
+  const liveEffort = lastState?.live?.modelEffort ?? "low";
+  const cm = $("composer-model");
+  cm.placeholder = `モデル: ${uiModelName ?? liveModel}${uiModelName ? "" : "(設定どおり)"}`;
+  if (document.activeElement !== cm) cm.value = uiModelName ?? "";
+  $("composer-effort").value = uiEffort ?? liveEffort ?? "low";
+}
+async function applyComposerModelChange({ model, effort } = {}) {
+  if (model != null) {
+    const cur = uiModelName ?? lastState?.live?.modelName ?? "";
+    if (model && model !== cur) {
+      const rm = await (await hfetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model }) })).json();
+      if (rm.error) { toast(`モデル: ${rm.error}`); return; }
+      uiModelName = rm.model;
+      toast(`モデルを ${rm.model} に変更しました(次のラウンドから)`, "ok");
+    }
+  }
+  if (effort != null) {
+    const re = await (await hfetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ effort }) })).json();
+    if (re.error) { toast(`思考レベル: ${re.error}`); return; }
+    uiEffort = re.effort;
+    toast(`思考レベルを ${re.effort} に変更しました(次のラウンドから)`, "ok");
+  }
+  syncComposerModelOpts();
+}
+$("composer-effort").onchange = () => applyComposerModelChange({ effort: $("composer-effort").value });
+$("composer-model").onchange = async () => {
+  await applyComposerModelChange({ model: $("composer-model").value.trim() });
+};
 
 let refreshQueued = false;
 function refreshSoon() {
@@ -1648,12 +1689,6 @@ $("board-search").addEventListener("keydown", (e) => {
 /* ================= 設定ウィンドウ(エージェントを起こさない操作) ================= */
 function openSettings() {
   // 現在値: UIから変更済みならその値、未変更ならサーバーが配る実値(live)/config値
-  const liveModel = lastState?.live?.modelName ?? null;
-  const liveEffort = lastState?.live?.modelEffort ?? null;
-  $("set-effort").value = uiEffort ?? liveEffort ?? "low";
-  $("set-model").value = uiModelName ?? "";
-  $("set-model").placeholder = liveModel ?? lastState?.model?.name ?? "";
-  $("set-fallback").value = (lastState?.model?.fallbacks ?? []).join(",");
   $("set-perm").value = lastState?.live?.permMode ?? "normal";
   // APIキーは生の値を見せない(状態だけplaceholderに)。入力があれば保存時に書き換える
   const ak = lastState?.apiKey ?? {};
@@ -1722,8 +1757,6 @@ function initBrowserPane() {
 $("settings-cancel").onclick = () => $("settings-dlg").close();
 $("settings-dlg").addEventListener("click", (e) => { if (e.target === $("settings-dlg")) $("settings-dlg").close(); });
 $("settings-save").onclick = async () => {
-  const effort = $("set-effort").value;
-  const model = $("set-model").value.trim();
   const perm = $("set-perm").value;
   // APIキー(入力があったときだけ書き換え。生の値は表示しない)
   const newKey = $("set-key").value.trim();
@@ -1732,15 +1765,6 @@ $("settings-save").onclick = async () => {
     if (rk.error) { toast(`APIキー: ${rk.error}`); return; }
     if (rk.viaEnv) toast("環境変数が優先されるため、そちらの更新も行ってください", "ok");
     $("set-key").value = "";
-  }
-  const re = await (await hfetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ effort }) })).json();
-  if (re.error) { toast(re.error); return; }
-  uiEffort = re.effort;
-  const cur = uiModelName ?? lastState?.live?.modelName ?? "";
-  if (model && model !== cur) {
-    const rm = await (await hfetch("/api/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model }) })).json();
-    if (rm.error) { toast(rm.error); return; }
-    uiModelName = rm.model;
   }
   const rp = await (await hfetch("/api/perm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: perm }) })).json();
   if (rp.error) { toast(rp.error); return; }
