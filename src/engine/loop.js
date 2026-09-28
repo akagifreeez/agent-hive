@@ -194,6 +194,13 @@ export async function runAgentLoop({
     }
     runTokens += (res.usage?.promptTokens ?? 0) + (res.usage?.completionTokens ?? 0);
     lastPromptTokens = res.usage?.promptTokens ?? 0;
+    // サーバー側web_searchが走ったら活動ログへ(ZCodeの検索表示相当)
+    if (res.searches?.length) {
+      bus.emit("agent.search", {
+        agent: agent.id, turn, count: res.searches.length,
+        titles: res.searches.map((s) => s.title ?? "").filter(Boolean).slice(0, 3),
+      });
+    }
     bus.emit("agent.turn", { agent: agent.id, turn, content: res.content ?? "", reasoning: res.reasoning ?? "" });
 
     if (res.toolCalls.length > 0) {

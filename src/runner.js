@@ -29,6 +29,7 @@ export function createModelFactory(config) {
       ...config.model,
       model: model ?? config.model.model,
       reasoningEffort: effort ?? agent.reasoningEffort ?? config.model.reasoningEffort,
+      webSearch: agent.webSearch ?? config.model.webSearch,
     });
     const primary = agent.model ? mk(agent.model) : mk();
     // フォールバック列(config.model.fallbackModels)があれば、終端エラー時に順に試す(ZCode model-selection流)
@@ -549,6 +550,7 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
           ...config.model,
           model: agent.model ?? config.model.model,
           reasoningEffort: agent.reasoningEffort ?? config.model.reasoningEffort,
+          webSearch: agent.webSearch ?? config.model.webSearch,
         });
     const tools = createTools({
       agent,

@@ -9,9 +9,11 @@
  */
 export class OpenAIModel {
   /**
-   * @param {{baseUrl: string, apiKey: string, model?: string, temperature?: number, maxTokens?: number, timeoutMs?: number, reasoningEffort?: string|null}} cfg
+   * @param {{baseUrl: string, apiKey: string, model?: string, temperature?: number, maxTokens?: number, timeoutMs?: number, reasoningEffort?: string|null, webSearch?: boolean|object|null}} cfg
+   *   webSearch: サーバー側web_searchツール(Z.AI固有。functionツールと併存可)。
+   *   true=既定パラメータ(search-prime)、オブジェクト=web_search引数へそのまま展開、null/falsy=無効。
    */
-  constructor({ baseUrl, apiKey, model, temperature = 0.7, maxTokens = 2000, timeoutMs = 120000, reasoningEffort = null }) {
+  constructor({ baseUrl, apiKey, model, temperature = 0.7, maxTokens = 2000, timeoutMs = 120000, reasoningEffort = null, webSearch = null }) {
     if (!apiKey) throw new Error("APIキーが未設定です(環境変数か apiKeyFile を設定してください)");
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
@@ -20,6 +22,7 @@ export class OpenAIModel {
     this.maxTokens = maxTokens;
     this.timeoutMs = timeoutMs;
     this.reasoningEffort = reasoningEffort;
+    this.webSearch = webSearch;
   }
 
   async chat({ messages, tools, onDelta = null }) {
@@ -32,10 +35,22 @@ export class OpenAIModel {
     if (this.reasoningEffort) {
       body.reasoning = { effort: this.reasoningEffort };
     }
+    // サーバー側web_search(Z.AI): モデルが検索を判断し、結果がコンテキストへ注入される。
+    // 出典はレスポンス(非ストリーム=トップレベル、ストリーム=usageチャンク)の web_search に返る。
+    const bodyTools = [];
+    if (this.webSearch) {
+      bodyTools.push({
+        type: "web_search",
+        web_search: this.webSearch === true
+          ? { enable: true, search_engine: "search-prime", search_result: true }
+          : { enable: true, ...this.webSearch },
+      });
+    }
     if (tools?.length) {
-      body.tools = tools.map((t) => ({ type: "function", function: t }));
+      bodyTools.push(...tools.map((t) => ({ type: "function", function: t })));
       body.tool_choice = "auto";
     }
+    if (bodyTools.length) body.tools = bodyTools;
     // onDeltaが渡されたらストリーミングで受け、断片をその都度コールバックする(ライブ表示用)
     const useStream = typeof onDelta === "function";
     if (useStream) body.stream = true;
@@ -73,7 +88,7 @@ export class OpenAIModel {
         }
         throw new Error(translateHttpError(res.status, bodyText));
       }
-      let msg, usage;
+      let msg, usage, searches = null;
       if (useStream) {
         let parsed;
         try {
@@ -88,10 +103,12 @@ export class OpenAIModel {
         }
         msg = { content: parsed.content || null, tool_calls: parsed.rawToolCalls, reasoning: parsed.reasoning ?? undefined };
         usage = parsed.usage;
+        searches = parsed.webSearch;
       } else {
         const data = await res.json().catch(() => null);
         msg = data?.choices?.[0]?.message;
         usage = data?.usage;
+        searches = data?.web_search ?? null;
         if (!msg) throw new Error(`応答の形式が不正です: ${JSON.stringify(data).slice(0, 300)}`);
       }
       // 空応答(テキストもツールもusageも無い)はZCodeと同様1回だけリトライ
@@ -111,6 +128,7 @@ export class OpenAIModel {
         })),
         raw: msg,
         usage: extractUsage(usage),
+        searches, // web_search実行結果の出典一覧([{title,link,refer,...}]、未実行時はnull)
       };
     }
   }
@@ -128,6 +146,7 @@ async function consumeStream(res, onDelta) {
   let content = "";
   let reasoning = "";
   let usage = null;
+  let webSearchResults = null;
   const toolAcc = new Map(); // index => {id, name, args}
   for (;;) {
     const { done, value } = await readChunkWithIdleTimeout(reader);
@@ -147,6 +166,7 @@ async function consumeStream(res, onDelta) {
         continue;
       }
       if (chunk.usage) usage = chunk.usage;
+      if (chunk.web_search) webSearchResults = chunk.web_search; // 最終usageチャンクに付いてくる(Z.AI)
       const d = chunk.choices?.[0]?.delta ?? {};
       if (d.reasoning) {
         reasoning += d.reasoning;
@@ -174,6 +194,7 @@ async function consumeStream(res, onDelta) {
     content,
     reasoning: reasoning || null,
     usage,
+    webSearch: webSearchResults,
     rawToolCalls: toolCalls.map((t) => ({ id: t.id, type: "function", function: { name: t.name, arguments: JSON.stringify(t.arguments) } })),
   };
 }

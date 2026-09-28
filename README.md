@@ -59,7 +59,7 @@ npm start              # ブラウザUIのみ(http://localhost:7789)
 
 ### 設定
 
-- `hive.config.json`: モデル接続(baseUrl/apiKeyEnv/apiKeyFile)/エージェント定義/チャット運用(自動増員・claim待ち・予算)など
+- `hive.config.json`: モデル接続(baseUrl/apiKeyEnv/apiKeyFile/webSearch)/エージェント定義/チャット運用(自動増員・claim待ち・予算)など。`model.webSearch: true` でZ.AIのサーバー側web検索を有効化(GLM Coding Planで使える内蔵ツール。検索結果の注入ぶんpromptトークンが増えるため、`agents[].webSearch` でエージェント別に上書き可)
 - `hive.local.json`: ワークスペース位置などのローカル上書き(git除外対象)
 - ポート: UI=7789 / モニタ=7791。`HIVE_UI_PORT` / `HIVE_MONITOR_PORT` 環境変数で変更
 - ワークスペース: 既定はリポジトリ直下。梱包実行時はuserData配下(`HIVE_DATA`で上書き)
