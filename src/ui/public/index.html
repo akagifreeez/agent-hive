@@ -520,7 +520,14 @@ function renderNav(threads) {
       projectFilter = t.id === "__main__" ? "" : t.id;
       boardWindow = BOARD_WINDOW;
       expandedMerges.clear();
-      renderAll();
+      renderNav(lastState.live.threads); // アクティブ表示は即時で反映
+      if (selectedThread === "__main__" || threadBoards.has(selectedThread)) {
+        renderAll();
+      } else {
+        // 未取得スレッド: 空のストリームを出してから差し替えるとちらつくので、
+        // 末尾データの到着後に一度だけ描画する
+        loadThreadTail(selectedThread).then(() => renderAll());
+      }
     };
     if (t.id !== "__main__" && t.name) {
       const fb = document.createElement("button");
@@ -621,7 +628,9 @@ function renderStream(state) {
   const nearBottom = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 120;
   const prevTop = stream.scrollTop;
   const prevHeight = stream.scrollHeight;
-  stream.innerHTML = "";
+  // 組み立てはFragmentで行い最後に一括置換する(innerHTML=""からの逐次appendだと
+  // DOMが空の時間が露出し、スレッド切替や高頻度再描画でちらつく)
+  const frag = document.createDocumentFragment();
   // メインはRAM末尾、スレッドはディスク直引きのスレッド別キャッシュで描画する。
   // (/api/stateのlive.boardはRAM末尾200=メイン会話中心なのでスレッド表示には使えない)
   let posts;
@@ -629,14 +638,15 @@ function renderStream(state) {
     posts = state.live.board.filter((p) => (p.thread ?? "__main__") === "__main__");
   } else {
     posts = threadBoards.get(selectedThread) ?? [];
-    if (!threadBoardFetching.has(selectedThread)) {
+    if (!threadBoards.has(selectedThread) && !threadBoardFetching.has(selectedThread)) {
       threadBoardFetching.add(selectedThread);
       queueMicrotask(async () => {
         try {
           const data = await (await hfetch(`/api/board?thread=${encodeURIComponent(selectedThread)}`)).json();
           const known = new Set((threadBoards.get(selectedThread) ?? []).map((p) => p.id));
           const fresh = (data.posts ?? []).filter((p) => !known.has(p.id));
-          if (fresh.length) threadBoards.set(selectedThread, fresh.sort((a, b) => a.id - b.id));
+          // 空スレッドでも[]を載せてhas=trueにする(描画のたびに再fetchする連鎖を止める)
+          threadBoards.set(selectedThread, [...fresh, ...(threadBoards.get(selectedThread) ?? [])].sort((a, b) => a.id - b.id));
         } finally {
           threadBoardFetching.delete(selectedThread);
           renderStream(lastState);
@@ -651,7 +661,7 @@ function renderStream(state) {
     more.className = "loadmore";
     more.textContent = `以前の投稿を読み込む(${Math.max(0, ((state.live.boardTotal ?? posts.length) - (state.live.board?.length ?? posts.length)) + (posts.length - boardWindow))}件)`;
     more.onclick = () => loadOlderPosts(shown[0]?.id ?? null);
-    stream.appendChild(more);
+    frag.appendChild(more);
   }
   for (const p of shown) {
     if (p.from === "system") {
@@ -670,12 +680,12 @@ function renderStream(state) {
           else expandedMerges.add(tm[1]);
           renderStream(lastState);
         };
-        stream.appendChild(d);
+        frag.appendChild(d);
         if (expandedMerges.has(tm[1])) {
           const pre = document.createElement("pre");
           pre.className = "mergediff";
           pre.textContent = (rec.stat ? rec.stat + "\n" : "") + (rec.patch ?? "");
-          stream.appendChild(pre);
+          frag.appendChild(pre);
           // 差分への修正依頼: 送信でタスク起票+該当スレッドへ通知(レビュー→再実行のループ)
           const fb = document.createElement("div");
           fb.className = "mfb";
@@ -701,11 +711,11 @@ function renderStream(state) {
             }
           };
           fb.append(ta, btn);
-          stream.appendChild(fb);
+          frag.appendChild(fb);
         }
         continue;
       }
-      stream.appendChild(d);
+      frag.appendChild(d);
       continue;
     }
     const mine = p.from === "you";
@@ -719,7 +729,7 @@ function renderStream(state) {
     const body = document.createElement("div");
     body.innerHTML = renderMarkdown(p.text);
     d.append(who, body);
-    stream.appendChild(d);
+    frag.appendChild(d);
   }
   // スラッシュコマンドの応答(ローカル)。board再描画の最後に足す
   for (const e of ephemeral) {
@@ -731,8 +741,10 @@ function renderStream(state) {
     const body = document.createElement("div");
     body.textContent = e.text;
     d.append(who, body);
-    stream.appendChild(d);
+    frag.appendChild(d);
   }
+  // 一括置換はここで1回だけ(fragは中身を移すと空になるので二重呼びは禁止)
+  stream.replaceChildren(frag);
   if (anchorPid !== null) {
     // 読み込み展開後は、展開前に見ていた先頭メッセージへスクロールを戻す
     const el = stream.querySelector(`[data-pid="${anchorPid}"]`);
@@ -1574,7 +1586,8 @@ async function loadThreadTail(thread) {
     const data = await (await hfetch(`/api/board?thread=${encodeURIComponent(thread)}`)).json();
     const known = new Set((threadBoards.get(thread) ?? []).map((p) => p.id));
     const fresh = (data.posts ?? []).filter((p) => !known.has(p.id));
-    if (fresh.length) threadBoards.set(thread, fresh.sort((a, b) => a.id - b.id));
+    // 空スレッドでも[]を入れてhas=trueにする(開くたびに再fetchしてちらつく連鎖を止める)
+    threadBoards.set(thread, [...fresh, ...(threadBoards.get(thread) ?? [])].sort((a, b) => a.id - b.id));
   } catch { /* 取得失敗は次回以降 */ } finally {
     threadBoardFetching.delete(thread);
   }
