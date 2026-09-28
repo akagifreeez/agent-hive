@@ -385,7 +385,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       name: h.name, command: h.command, args: h.args, envKeys: Object.keys(h.env ?? {}),
       tools: h.tools.map((t) => t.name), started: Boolean(h.child),
     })),
-    mcpAdd: async ({ name, command, args, env } = {}) => {
+    mcpAdd: async (/** @type {{name?: string, command?: string, args?: string[], env?: Record<string,string>}} */ { name, command, args, env } = {}) => {
       const id = String(name ?? "").trim();
       if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id)) return { error: "サーバー名は英小文字数字と_-で32字以内" };
       if (!String(command ?? "").trim()) return { error: "commandが空です" };
