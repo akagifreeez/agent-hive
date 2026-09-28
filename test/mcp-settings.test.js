@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Bus } from "../src/engine/board.js";
+import { Board, Bus } from "../src/engine/board.js";
 import { TaskBlackboard } from "../src/engine/tasks.js";
 import { createTools } from "../src/engine/tools.js";
 import { McpHost } from "../src/engine/mcp.js";
