@@ -26,14 +26,15 @@ function makeTools(ws) {
 test("claimMiss: project無しでもopenタスクの一覧(id/role/project)を診断として返す", async () => {
   const ws = mktmp();
   const { tools, tasks } = makeTools(ws);
+  // 両方review固定のためimplの自分は請求できずclaimMissになる
   tasks.create({ id: "job-review", body: "レビューして", role: "review", project: "p1" });
-  tasks.create({ id: "job-lead", body: "分解して", project: "p2" });
+  tasks.create({ id: "job-review2", body: "レビューする", role: "review", project: "p2" });
   const r = await tools.execute("claim_next_task", {});
   assert.equal(r.ok, true);
   assert.equal(r.claimMiss, true);
   assert.match(r.text, /未着手タスクが2件あります/);
   assert.match(r.text, /job-review\(role:review\)\/project:p1/);
-  assert.match(r.text, /job-lead\/project:p2/);
+  assert.match(r.text, /job-review2\(role:review\)\/project:p2/);
   assert.match(r.text, /あなたのロールはimpl/);
   rmTree(ws);
 });
