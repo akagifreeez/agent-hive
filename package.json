@@ -19,7 +19,7 @@
     "desktop:smoke": "electron . --smoke",
     "desktop:pack": "electron-builder --dir",
     "desktop:dist": "electron-builder",
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node --test --test-force-exit \"test/*.test.js\"",
     "doctor": "node scripts/doctor.js",
     "typecheck": "tsc -p tsconfig.json"
   },
