@@ -20,6 +20,7 @@
 - 実験・デバッグ用スクリプト(tmp-*.mjs、exp-*、t_main等)をリポジトリ直下に置かない。特に鍵ファイルへのハードコード参照は機微情報の漏出リスク。作業終了時に削除する習慣(2026-09 cleanup-exp-files、search-alert-r7で残骸多数を確認)。旧記載の「t_main残存(未対応)」はcleanup-exp-filesで解決済み。
 
 - MCP設定ウィンドウ(/api/mcp・mcpAdd)のテスト(test/mcp-settings.test.js)は実物のstdioサーバーを起動するため遅い(私の環境で約100秒タイムアウトを確認、2026-09 merge-queue-r6-beta)。bashコマンドのタイムアウト上限(120秒)に達するため、テスト単体実行はtimeout併用か、対象を絞って実行すること。
+- npm test 全体(220件超)はマシン負荷次第で120秒を超えることがある。フルテストはタイムアウト上限300000msを指定して実行するか、着手前は関連テストだけ先に回す(2026-09 search-alert-r7で確認)。
 
 # 将来への引き継ぎ
 
@@ -30,3 +31,5 @@
 - 予算アラート(config.chat.budgetAlertUsd): usage.round購読で初回超過時のみメインボードへ告知(以後フラグ抑止)。UIはlive.budget参照。パッチ適用でlive配下からtop-levelへstateが逸出した事故あり — UIが参照するliveの構造を崩さないこと(2026-09 search-alert-r7)。
 - claimMiss診断(project無し時のopen一覧提示): claim_next_taskが空のとき、project指定なしでも全openのid/role/project一覧を応答へ含める。role不一致のタスクを実在のまま見失って空待ち・早期退場する事故(2026-09 r7で実害)の再発防止。テスト test/claim-miss-diagnosis.test.js(2026-09 overlap-guard-r6)。
 - タスク解放時の起床(task.released)とidle退場の入力保護(steering入力があれば請求ミス3回でも1回だけ退場回避)は engine標準挙動(chat.js)。解放タスクが凍結する問題への対策済み。
+- モデル/思考レベルの実行中切替UIは入力欄上の操作部(composer-model/composer-effort)。設定ウィンドウは権限モードとAPIキーに専念(2026-09 設定ウィンドウからの移設)。
+- レビュー済み地点はgitタグ reviewed(discover.jsのdiffプローブが git diff reviewed main でreview-changes起票、レビュー完了時にadvanceReviewedTagが前進)。distillの処理済みマーカーはエンジン管理でAIは触らない(2026-09)。
