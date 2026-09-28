@@ -45,6 +45,7 @@ export function loadConfig(configPath) {
   cfg.model.apiKey = resolveApiKey(cfg.model);
   // ポートの環境変数上書き(開発サーバーと並行して梱包アプリ/SMOKEを動かすときの衝突避け)
   if (process.env.HIVE_UI_PORT) cfg.ui.port = Number(process.env.HIVE_UI_PORT) || cfg.ui.port;
+  if (process.env.HIVE_MONITOR_PORT) cfg.ui.monitorPort = Number(process.env.HIVE_MONITOR_PORT) || cfg.ui.monitorPort;
   return cfg;
 }
 

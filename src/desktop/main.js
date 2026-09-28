@@ -3,6 +3,7 @@
 // デスクトップアプリとしての窓・トレイ常駐・ネイティブ通知だけを足す。
 import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, dialog } from "electron";
 import { writeFileSync } from "node:fs";
+import http from "node:http";
 import { join } from "node:path";
 import { loadConfig, dataDir } from "../config.js";
 import { OpenAIModel } from "../model/openai.js";
@@ -52,9 +53,13 @@ async function bootstrap() {
     smokeController = await runChat({ config, bus });
     const resultFile = process.env.HIVE_SMOKE_FILE ?? "smoke-result.txt";
     try {
-      const res = await fetch(`http://localhost:${config.ui.port}/api/state`);
-      const ok = res.ok;
-      writeFileSync(resultFile, ok ? "SMOKE OK\n" : `SMOKE FAIL (HTTP ${res.status})\n`);
+      // Electronのfetchはシステムプロキシの影響でlocalhostでも滞留することがあるためnodeのhttpで疎通する
+      const ok = await new Promise((resolve) => {
+        const req = http.get({ host: "localhost", port: config.ui.port, path: "/api/state", timeout: 5000 }, (r) => resolve(r.statusCode === 200));
+        req.on("error", () => resolve(false));
+        req.on("timeout", () => { req.destroy(); resolve(false); });
+      });
+      writeFileSync(resultFile, ok ? "SMOKE OK\n" : "SMOKE FAIL (HTTP)\n");
       app.exit(ok ? 0 : 1);
     } catch (err) {
       writeFileSync(resultFile, `SMOKE FAIL (${err.message})\n`);
