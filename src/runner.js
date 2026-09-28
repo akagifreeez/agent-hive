@@ -88,6 +88,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   };
 
   // MCPサーバー(config.mcp.servers)を起動してツールとして接続(失敗してもhiveは続行)
+  /** @type {import("./engine/mcp.js").McpHost[]} */
   const mcpHosts = Object.entries(config.mcp?.servers ?? {}).map(([name, def]) =>
     new McpHost({ name, bus, ...(typeof def === "string" ? { command: def } : def) })
   );
