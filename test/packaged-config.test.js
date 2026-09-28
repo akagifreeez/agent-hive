@@ -40,6 +40,9 @@ test("HIVE_UI_PORT: ui.portを環境変数で上書きできる(梱包SMOKEの�
     assert.equal(loadConfig().ui.port, 7802);
     delete process.env.HIVE_UI_PORT;
     assert.equal(loadConfig().ui.port, 7789, "無指定時は既定値に戻る");
+    process.env.HIVE_MONITOR_PORT = "7793";
+    assert.equal(loadConfig().ui.monitorPort, 7793, "モニタポートも上書きできる");
+    delete process.env.HIVE_MONITOR_PORT;
   } finally {
     if (prevData === undefined) delete process.env.HIVE_DATA; else process.env.HIVE_DATA = prevData;
     if (prevPort === undefined) delete process.env.HIVE_UI_PORT; else process.env.HIVE_UI_PORT = prevPort;
