@@ -31,7 +31,7 @@ test("/api/mcp: GETは一覧、POSTはopに応じてハンドラへ届く", asyn
   const bus = new Bus();
   const calls = [];
   const config = { workspace: ws, ui: { port: 0 }, model: { model: "m" }, agents: [] };
-  await startUiTokenized(_startUi, {
+  const ui = await startUiTokenized(_startUi, {
     config, modelFactory: () => ({}), bus, autoStart: false,
     onMcpList: () => [{ name: "echo", command: "node", args: ["x.mjs"], envKeys: ["TOK"], tools: ["echo"], started: true }],
     onMcpAdd: async (req) => { calls.push({ op: "add", ...req }); return { ok: true, tools: 1 }; },
@@ -57,6 +57,7 @@ test("/api/mcp: GETは一覧、POSTはopに応じてハンドラへ届く", asyn
     { op: "add", name: "a", command: "node", args: ["a.mjs"], env: { K: "v" } },
     { op: "remove", name: "a" },
   ]);
+  ui.close();
   rmTree(ws);
 });
 
