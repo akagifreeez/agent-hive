@@ -10,30 +10,98 @@
     "contextWindow": 200000,
     "reasoningEffort": "low"
   },
-  "budget": { "maxTokensPerRun": 2000000 },
-  "compact": { "thresholdPercent": 90 },
+  "budget": {
+    "maxTokensPerRun": 2000000
+  },
+  "compact": {
+    "thresholdPercent": 90
+  },
   "workspace": "workspace",
-  "worktrees": { "dir": "worktrees" },
-  "hierarchy": { "maxDepth": 2, "maxConcurrent": 12 },
-  "chat": { "lead": "lead", "workers": ["alpha", "beta", "gamma"], "mains": ["alpha", "beta", "gamma"], "maxTurnsPerRound": 12, "autoContinueRounds": 3, "idleClaimWaitSec": 45, "autoscale": true, "autoscaleIntervalSec": 30, "maxWorkersPerThread": 4 },
+  "worktrees": {
+    "dir": "worktrees"
+  },
+  "hierarchy": {
+    "maxDepth": 2,
+    "maxConcurrent": 12
+  },
+  "chat": {
+    "lead": "lead",
+    "workers": [
+      "alpha",
+      "beta",
+      "gamma"
+    ],
+    "mains": [
+      "alpha",
+      "beta",
+      "gamma"
+    ],
+    "maxTurnsPerRound": 12,
+    "autoContinueRounds": 3,
+    "idleClaimWaitSec": 45,
+    "autoscale": true,
+    "autoscaleIntervalSec": 30,
+    "maxWorkersPerThread": 4
+  },
   "agents": [
-    { "id": "alpha", "displayName": "アルファ", "role": "impl", "persona": "agents/alpha.md" },
-    { "id": "delta", "displayName": "デルタ", "role": "impl", "persona": "agents/delta.md" },
-    { "id": "beta", "displayName": "ベータ", "role": "review", "persona": "agents/beta.md" },
-    { "id": "gamma", "displayName": "ガンマ", "role": "lead", "persona": "agents/gamma.md" }
+    {
+      "id": "alpha",
+      "displayName": "アルファ",
+      "role": "impl",
+      "persona": "agents/alpha.md"
+    },
+    {
+      "id": "delta",
+      "displayName": "デルタ",
+      "role": "impl",
+      "persona": "agents/delta.md"
+    },
+    {
+      "id": "beta",
+      "displayName": "ベータ",
+      "role": "review",
+      "persona": "agents/beta.md"
+    },
+    {
+      "id": "gamma",
+      "displayName": "ガンマ",
+      "role": "lead",
+      "persona": "agents/gamma.md"
+    }
   ],
-  "loop": { "maxTurns": 40 },
-  "runner": { "timeoutSec": 900 },
+  "loop": {
+    "maxTurns": 40
+  },
+  "runner": {
+    "timeoutSec": 900
+  },
   "discovery": {
     "intervalSec": 120,
     "testCommand": "npm test"
   },
   "permissions": {
     "askTimeoutSec": 120,
-    "deny": ["rm -rf /", "rm -rf ~", "mkfs", "shutdown", "format ", "del /", ":(){:|:&};:"],
-    "ask": ["rm -rf", "git reset --hard", "git clean", "git push", "npm publish"]
+    "deny": [
+      "rm -rf /",
+      "rm -rf ~",
+      "mkfs",
+      "shutdown",
+      "format ",
+      "del /",
+      ":(){:|:&};:",
+      "curl"
+    ],
+    "ask": [
+      "rm -rf",
+      "git reset --hard",
+      "git clean",
+      "git push",
+      "npm publish"
+    ]
   },
-  "ui": { "port": 7789 },
+  "ui": {
+    "port": 7789
+  },
   "scenario": {
     "name": "stringutil",
     "seedFiles": [
