@@ -33,3 +33,6 @@
 - タスク解放時の起床(task.released)とidle退場の入力保護(steering入力があれば請求ミス3回でも1回だけ退場回避)は engine標準挙動(chat.js)。解放タスクが凍結する問題への対策済み。
 - モデル/思考レベルの実行中切替UIは入力欄上の操作部(composer-model/composer-effort)。設定ウィンドウは権限モードとAPIキーに専念(2026-09 設定ウィンドウからの移設)。
 - レビュー済み地点はgitタグ reviewed(discover.jsのdiffプローブが git diff reviewed main でreview-changes起票、レビュー完了時にadvanceReviewedTagが前進)。distillの処理済みマーカーはエンジン管理でAIは触らない(2026-09)。
+- MCPサーバーは設定ウィンドウから実行中に追加/削除できる(/api/mcp -> mcpAdd/mcpRemove)。実物のstdioサーバーを即起動し、ツール一覧は各ラウンドのcreateToolsで動的反映。永続化先は hive.local.json(userData基準=梱包時も有効)。一覧応答は mcpServersInfo() に統一され、envの値は返さない(envKeysのみ=機微情報の漏出防止契約)。テストは test/mcp-settings.test.js(遅いため単独実行推奨)(2026-09)。
+- safePath/safeWritePath は symlink実体(realpath)の脱出も拒否する。存在しないパスは最も近い存在する親を辿って検証。テスト test/safepath-symlink.test.js(2026-09)。
+- bashのstate/保護は2段階: (1)事前拒否 -- state/参照+書き込み指示子(> / tee / rm 等)の組合せを検出して拒否(変数展開やbase64は迂回可能) (2)事後検知 -- 実行前後の state/ スナップショット比較で変更を検出し、結果を警告付きの失敗に変換+permission.denied発火(実行取消はできないため可視化が目的)。テスト test/audit-guard.test.js・test/state-guard.test.js(2026-09)。
