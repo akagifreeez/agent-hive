@@ -95,8 +95,7 @@
    "git reset --hard",
    "git clean",
    "git push",
-   "npm publish",
-   "curl "
+   "npm publish"
   ]
  },
  "ui": {
