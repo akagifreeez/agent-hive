@@ -9,6 +9,7 @@
 - ポート/トークンは環境変数上書きが可能: HIVE_UI_PORT(ui.port)/HIVE_MONITOR_PORT(monitorPort)/HIVE_UI_TOKEN(CLI用CSRF)。開発サーバー起動中のSMOKEや梱包アプリ検証では衝突を避けるのに使う(2026-09 search-alert-r7)。
 - SMOKE疎通はElectron内fetchを使わない(システムプロキシでlocalhostでも滞留する)。node http + 5秒タイムアウトで実施(2026-09 search-alert-r7)。
 - マージは競合マーカーガード付き(src/engine/worktree.js mergeWithAgentBranch): (0)main側にマーカー残存ならマージ中止(marker:true) (1.5)ブランチ側の差分ファイルにマーカーがあれば拒否して作業者へ返送(「worktree内で削除してコミットしてから再finish」)。マーカー入りの確定がmainへ入る経路を構造的に遮断(2026-09 merge-queue-r6)。
+- 外部サイト取得はweb_fetchとbashのcurlで成功率が異なる(2026-09 weather-ai調査): www.gsi.go.jp等はweb_fetchで失敗・curlで成功(両方試すのが定石)。逆にDWD(wis2bucket.dwd.de)はcurlでも3回接続断=当環境からの経路特異性(betaも同様)。python3利用可(タイル座標計算等の小検証で実績)。
 
 # 失敗と教訓
 
@@ -23,6 +24,8 @@
 - **マージ過程で関数/typedefが二重化することがある**(2026-09 search-alert-r7-late): mcp.jsで mcpServersInfo が2個・typedefが2個になり SyntaxError 25ファイル連鎖(全テストが構文エラーで落ちる)。二重化は grep -c "export function <名前>" で検出。解消は1個目を残して2個目のコメントブロック(/**)から関数終了までを削除し、typecheckで確認。ネストしたマーカー(<<<<<<<の中に<<<<<<<)ができることもある — 検出は grep -c '<<<<<<<' で数を確認し、解消後に0であることを必ず検証(2026-09 merge-queue-r6 で mcp.js に再混入を複数回確認)。
 - **競合修復用の一時スクリプト(tmp-fix-*.mjs)は目的達成後に必ず削除**(2026-09 cleanup-tmp-fix-scriptsで実績)。マーカー解消の自動化に使ったスクリプトがリポジトリに残ると次の発見器・レビューのノイズになる。
 - 実験・デバッグ用スクリプト(tmp-*.mjs、exp-*、t_main等)をリポジトリ直下に置かない。特に鍵ファイルへのハードコード参照は機微情報の漏出リスク。作業終了時に削除する習慣(2026-09 cleanup-exp-files、search-alert-r7で残骸多数を確認)。旧記載の「t_main残存(未対応)」はcleanup-exp-filesで解決済み。
+- **URL仮定は必ず公式仕様と照合してから404を「配信終了」と判断する**(2026-09 weather-ai調査の実害): 地理院DEMタイルを xyz/dem14/{x}/{y}.txt(x/y/z順)と仮定して404→配信終了と誤認しかけた。正しくは xyz/dem14/{z}/{x}/{y}.txt(z/x/y順)。旧仕様の記憶・解説記事に基づくURLは初期テストで正規例(仕様ページ記載のURL)を通して検証してから応用する。404の原因は「終了・欠損・URL間違い」の3系統がある。
+- **ボードへの長文報告は末尾が途切れることがある**(2026-09 weather-ai調査で2名が実害・私も#13で発生): 報告は要点を前半に置き、長大なら複数投稿に分割する。途切れた場合は「続き」と明記して再投稿し、acceptance判定の証拠が1投稿内で完結するよう工夫する。
 
 - MCP設定ウィンドウ(/api/mcp・mcpAdd)のテスト(test/mcp-settings.test.js)は実物のstdioサーバーを起動するため遅い(私の環境で約100秒タイムアウトを確認、2026-09 merge-queue-r6-beta)。bashコマンドのタイムアウト上限(120秒)に達するため、テスト単体実行はtimeout併用か、対象を絞って実行すること。
 - npm test 全体(220件超)はマシン負荷次第で120秒を超えることがある。フルテストはタイムアウト上限300000msを指定して実行するか、着手前は関連テストだけ先に回す(2026-09 search-alert-r7で確認)。
@@ -43,3 +46,8 @@
 - MCPサーバーは設定ウィンドウから実行中に追加/削除できる(/api/mcp -> mcpAdd/mcpRemove)。実物のstdioサーバーを即起動し、ツール一覧は各ラウンドのcreateToolsで動的反映。永続化先は hive.local.json(userData基準=梱包時も有効)。一覧応答は mcpServersInfo() に統一され、envの値は返さない(envKeysのみ=機微情報の漏出防止契約)。mcpServersInfo/McpHostInstance は src/engine/mcp.js で1組のみ(重複定義は過去に実害)。テストは test/mcp-settings.test.js(遅いため単独実行推奨)(2026-09)。
 - safePath/safeWritePath は symlink実体(realpath)の脱出も拒否する。存在しないパスは最も近い存在する親を辿って検証。テスト test/safepath-symlink.test.js(2026-09)。
 - bashのstate/保護は2段階: (1)事前拒否 -- state/参照+書き込み指示子(> / tee / rm 等)の組合せを検出して拒否(変数展開やbase64は迂回可能) (2)事後検知 -- 実行前後の state/ スナップショット比較で変更を検出し、結果を警告付きの失敗に変換+permission.denied発火(実行取消はできないため可視化が目的)。テスト test/audit-guard.test.js・test/state-guard.test.js(2026-09)。
+- 気象データソース実テスト結果(2026-09 weather-ai改善調査・beta再現済み):
+  - GSI標高タイル: 現行は xyz/dem/{z}/{x}/{y}.txt(10m相当)と xyz/dem5a/{z}/{x}/{y}.txt(5m・航空レーザー)が生きている(盛岡で200実測)。dem14/dem10a/dem10b/dem_pngは当該地点で404。TXT=256×256カンマ区切り標高(m・小数2位・欠損e)、PNG=h=(2^16R+2^8G+B)×0.01m・欠損RGB(128,0,0)(仕様: cyberjapandata.gsi.go.jp/development/demtile.html)。リアルタイム読込は出典明示のみで申請不要(maps.gsi.go.jp/development/ichiran.html)。基盤地図情報FG-GML本体は要ログイン(service.gsi.go.jp/kiban)・旧匿名FTP(fgd.gsi.go.jp)は接続断。2025-04-01の標高成果改定は2025-07-31以降提供分に反映(同ページお知らせ)。
+  - GEFS: noaa-gefs-pds S3生存・匿名読取可。atmos/pgrb2sp25(0.25°)に geavg+gec00+gep01〜30(31ファイル/ステップ)。gespread単独ファイルは提供なし(KeyCount=0実測)→spreadはメンバーから自前計算。TMP:2mは1メッセージ約754KB・.idx+バイトレンジ(HTTP 206・"GRIB"確認)で取得可。f000〜f039は3h刻み・以降6h刻みでf240まで。メンバー全取得は約268MB/サイクル(12ステップ×31)。
+  - ECMWF Open Data: ecmwf-forecasts S3(eu-central-1)が公開・CC-BY-4.0。AIFS Single v2は2026-05-12運用開始。.indexはJSON Lines(param/_offset/_length)で2tのRange取得をbetaが再現(206・GRIB確認)。遡及は2023-01-18以降がバケット残存。
+  - WIS2 Global Cache(DWD): JMA発は通知メタデータのみでデータ実体0件(impl-1実測)。DWDへの直接接続は当環境から経路断(beta再現不可) — 結論は「impl-1実測+beta再現不可」併記で運用。
