@@ -5,3 +5,6 @@
 - devserverは単一プロセス管理(二重起動はalreadyRunning)。close時は子プロセスツリーごとkill。
 - ブラウザオープンはopen:true明示時のみ(openInBrowser差し替えでテスト容易)。
 - 発見器タスク(fix-/review-/distill-)は先着1名しかclaimできないため全員一斉起床は空転を生む(監査指摘。起床対象の絞り込みが将来課題)。
+- claim応答の診断(claim-miss-diagnosis): claim_next_taskが空のとき、project無し指定なら全openの id/role/project 一覧を、project指定なら一致タスクのrole不一致を実文面で返す。role不一致による空待ち退場を防ぐ(2026-09 search-alert-r7の実害=ガンマ(lead)がrole:implタスクを請求できず請求ループ→ミラータスク起票で回避、を根本対応)。
+- タスク解放時の起床(task.released): 解放を新規扱いにせず同スレッドのワーカー(とfix/review/distill系共通仕事)を起こす。解放されたタスクが誰にも起されず凍結する問題の対策。
+- idle退場の入力保護: 請求ミス3回でも未応答のsteering入力があれば退場を1回だけ回避して応答を促す(入力1件につき1回。無限ループにはしない)。
