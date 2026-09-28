@@ -298,20 +298,25 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           // 診断: project一致の未着手タスクがあるのに請求できない=role不一致が濃厚。
           // 「無い」としか返さないと実在するタスクを見失って空待ち・退場になる(r7で実際に発生)
           let hint = "";
-          if (args.project) {
-            try {
-              const open = tasks.list().open.filter((x) => (x.project || "") === String(args.project));
+          try {
+            const allOpen = tasks.list().open;
+            if (args.project) {
+              const open = allOpen.filter((x) => (x.project || "") === String(args.project));
               if (open.length) {
                 hint = `\n[診断] project「${args.project}」の未着手タスクが${open.length}件あります: ${open.map((x) => `${x.id}${x.role ? `(role:${x.role})` : ""}`).join(", ")}。あなたのロールは${agent.role}です。roleが一致するタスクか、role指定の無いタスクだけを請求できます。`;
               }
-            } catch {}
-          }
+            } else if (allOpen.length) {
+              // project無し(メインチャット)でも実在タスクを見失わせない。role不一致の空待ち・退場を防ぐ
+              const items = allOpen.map((x) => `${x.id}${x.role ? `(role:${x.role})` : ""}${x.project ? `/project:${x.project}` : ""}`);
+              hint = `\n[診断] 未着手タスクが${allOpen.length}件あります: ${items.join(", ")}。あなたのロールは${agent.role}です。roleが一致するタスクか、role指定の無いタスクだけを請求できます。`;
+            }
+          } catch {}
           return {
             ok: true,
             claimMiss: true,
             text: args.project
               ? `請求できるタスクはありません(project: ${args.project} のタスクは無いか、全て完了済み)。${hint}`
-              : "請求できるタスクはありません。",
+              : `請求できるタスクはありません。${hint}`,
           };
         }
         // 受け入れ基準(acceptance:メタ行)があれば先頭で目立たせる(完成判定のブレ防止)
