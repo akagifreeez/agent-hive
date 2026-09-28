@@ -34,7 +34,6 @@ export function mcpServersInfo(hosts) {
 }
 
 
-
 export class McpHost {
   constructor({ name, command, args = [], env = {}, bus = null, timeoutMs = 60000 }) {
     /** @type {string} */
