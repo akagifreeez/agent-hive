@@ -87,11 +87,19 @@ test("v6.1: 再起動してもボード投稿・スレッド・会話メモリ�
   assert.equal(existsSync(join(ws, "state", "mem-lead.json")), true); // 会話メモリ保存
   await ctl1.openThread({ project: "demo", goal: "復元テスト" });
   await waitUntil(() => ctl1.listThreads().includes("demo"));
-  // ワーカー3体の起動ラウンド(キックオフ+各ワーカーの応答投稿)が落ち着くまで待つ
+  // ワーカー3体の起動ラウンド(キックオフ+各ワーカーの応答投稿)が落ち着くまで待つ。
+  // 2連続同一行数だけだとstagger遅延で早期抜けし、直後の応答が混入する競合があった
+  // (memory: persist行数固定assertは並行負荷に弱い)。2連続同一+1秒静止を要求する。
   let prev = -1;
-  for (let i = 0; i < 50; i++) {
+  let stableCount = 0;
+  for (let i = 0; i < 100; i++) {
     const c = logLines(demoLog());
-    if (c === prev && c > 0) break;
+    if (c === prev && c > 0) {
+      stableCount++;
+      if (stableCount >= 5) break; // 2連続同一+約1秒静止
+    } else {
+      stableCount = 0;
+    }
     prev = c;
     await new Promise((r) => setTimeout(r, 200));
   }
