@@ -591,7 +591,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
             if (op !== "add" && op !== "remove") throw new Error("操作は add か remove を指定してください");
             const r = op === "add" ? await onMcpAdd(rest) : onMcpRemove(rest);
             if (!r || r.error) throw new Error(r?.error ?? "失敗しました");
-            json(res, r);
           } catch (err) {
             json(res, { error: err.message }, 400);
           }
