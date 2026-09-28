@@ -303,14 +303,12 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
             if (args.project) {
               const open = allOpen.filter((x) => (x.project || "") === String(args.project));
               if (open.length) {
-                hint = `
-[診断] project「${args.project}」の未着手タスクが${open.length}件あります: ${open.map((x) => `${x.id}${x.role ? `(role:${x.role})` : ""}`).join(", ")}。あなたのロールは${agent.role}です。roleが一致するタスクか、role指定の無いタスクだけを請求できます。`;
+                hint = `\n[診断] project「${args.project}」の未着手タスクが${open.length}件あります: ${open.map((x) => `${x.id}${x.role ? `(role:${x.role})` : ""}`).join(", ")}。あなたのロールは${agent.role}です。roleが一致するタスクか、role指定の無いタスクだけを請求できます。`;
               }
             } else if (allOpen.length) {
               // project無し(メインチャット)でも実在タスクを見失わせない。role不一致の空待ち・退場を防ぐ
               const items = allOpen.map((x) => `${x.id}${x.role ? `(role:${x.role})` : ""}${x.project ? `/project:${x.project}` : ""}`);
-              hint = `
-[診断] 未着手タスクが${allOpen.length}件あります: ${items.join(", ")}。あなたのロールは${agent.role}です。roleが一致するタスクか、role指定の無いタスクだけを請求できます。`;
+              hint = `\n[診断] 未着手タスクが${allOpen.length}件あります: ${items.join(", ")}。あなたのロールは${agent.role}です。roleが一致するタスクか、role指定の無いタスクだけを請求できます。`;
             }
           } catch {}
           return {
