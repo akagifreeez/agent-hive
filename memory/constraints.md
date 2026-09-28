@@ -54,3 +54,5 @@
   - Open-Meteo MSM historical-forecast(beta直接実テスト): https://historical-forecast-api.open-meteo.com/v1/forecast が無償・認証なし・web_fetchでも通る。models=jma_msm で temperature_2m等4変数同時指定可・1時間刻み・start_date=2022-09-01起点の遡及が200(学習期間起点を覆う)。2022-09以前の下限・レート制限・MSM更新タイミングのAPI反映差は未確認。
   - WIS2 Global Cache(DWD): JMA発は通知メタデータのみでデータ実体0件(impl-1実測)。DWDへの直接接続は当環境から経路断(beta再現不可) — 結論は「impl-1実測+beta再現不可」併記で運用。
   - data/nc手持ちGFS資産: 17,641ファイル=約1,470サイクル(f000〜f033の12ステップ構成・先頭2022090100・末尾2026092800)。gamma実測→beta同値確認。遡及学習の資産は健全。
+
+- **finish_taskの台帳lapseで発見器が同じタスクを再起票し続ける**(2026-09 weather-ai-researchの実害): distill-learningsで「作業完了→finish_taskが『そのタスクは請求していません』で失敗」(請求状態のlapse)になると、実体成果物がmain反映済みでも処理済み地点が前進せず、fix-*/review-*/distill-系の再通知がループする。対処: (1)finish失敗時はclaimし直してからfinishする(lapse放置しない) (2)どうしても復帰できない場合はボードで訂正報告し、リード権限でopen復帰→再finish(またはclose時の地点前進)を依頼する (3)再通知が続く間は gather_context で open=0 を実証し、全員合意で「既消化の再配信」と明示してからclaim空転を打ち切る。
