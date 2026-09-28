@@ -3,6 +3,7 @@
 - Windows環境(Git Bash自動検出)。リポジトリ内のテキストはCRLF混在。edit_fileのold_text一致はCRLFファイルで失敗するため、perl等でLFへ正規化してから編集する(2026-09 merge-queue-r6で確認)。
 - gccは無い環境。Cコードの検証はpython3等の代替実行で行う(harness-demoで実績)。
 - テストは `npm test`(node --test test/*.test.js)。worktree運用時は自分のブランチでコミットしfinish_taskでmainへマージ。
+- 型検査は `npm run typecheck`(tsc --checkJs)。コア契約(Post/TaskInfo/HiveConfig/ToolResult等)のtypedef逸脱を検出する。JSDoc注釈ズレはここで捕捉(2026-09 JSDoc契約の導入)。
 - UIサーバーのPOSTはCSRFトークン必須。テストからは test/helpers/hf-token.js の tokenedFetchOn() を使う。
 - state/ 配下は読み書き禁止(監査台帳含む)。横連携はボード投稿・タスク・gather_context 経由のみ。
 - ポート/トークンは環境変数上書きが可能: HIVE_UI_PORT(ui.port)/HIVE_MONITOR_PORT(monitorPort)/HIVE_UI_TOKEN(CLI用CSRF)。開発サーバー起動中のSMOKEや梱包アプリ検証では衝突を避けるのに使う(2026-09 search-alert-r7)。
