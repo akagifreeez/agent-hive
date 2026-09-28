@@ -5,8 +5,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Bus } from "../src/engine/board.js";
-import { startUi } from "../src/ui/server.js";
+import { Bus } from "../../src/engine/board.js";
+import { startUi } from "../../src/ui/server.js";
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-tclose-"));

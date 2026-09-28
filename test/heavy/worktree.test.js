@@ -6,11 +6,11 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "no
 function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視 */ } }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Board, Bus } from "../src/engine/board.js";
-import { TaskBlackboard } from "../src/engine/tasks.js";
-import { setupWorktrees, mergeAgentWork } from "../src/engine/worktree.js";
-import { ensureGitRepo } from "../src/engine/discover.js";
-import { runCommand } from "../src/engine/exec.js";
+import { Board, Bus } from "../../src/engine/board.js";
+import { TaskBlackboard } from "../../src/engine/tasks.js";
+import { setupWorktrees, mergeAgentWork } from "../../src/engine/worktree.js";
+import { ensureGitRepo } from "../../src/engine/discover.js";
+import { runCommand } from "../../src/engine/exec.js";
 
 function makeWorkspace() {
   return mkdtempSync(join(tmpdir(), "hive-wt-"));
@@ -94,7 +94,7 @@ test("finish_taskツール経由: マージ+ボード投稿+タスクdoneまで�
   const root = `${ws}-wt`;
   const [wt] = Object.values(await setupWorktrees({ mainWorkspace: ws, worktreeRoot: root, agents: [{ id: "alpha" }] }));
   tasks.seed([{ id: "build-thing", role: "impl", body: "作る" }]);
-  const { createTools } = await import("../src/engine/tools.js");
+  const { createTools } = await import("../../src/engine/tools.js");
   const tools = createTools({ agent: { id: "alpha", displayName: "アルファ", role: "impl" }, workspace: wt, mainWorkspace: ws, board, tasks, bus });
   await tools.execute("claim_next_task", {});
   await tools.execute("write_file", { path: "out.txt", content: "成果" });
