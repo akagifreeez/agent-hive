@@ -17,8 +17,8 @@ import { spawn } from "node:child_process";
  * @property {(name: string, args: Object) => Promise<{ok: boolean, text: string}>} call ツール呼び出し
  */
 
+/** 設定ウィンドウ向けのサーバー一覧(envの値は含めない)。 */
 /**
- * 設定ウィンドウ向けのサーバー一覧(envの値は含めない)。
  * @param {McpHostInstance[]} hosts
  * @returns {Array<{name: string, command: string, args: string[], envKeys: string[], tools: string[], started: boolean}>}
  */
@@ -32,6 +32,22 @@ export function mcpServersInfo(hosts) {
     started: Boolean(h.child),
   }));
 }
+
+<<<<<<< HEAD
+=======
+/**
+ * @typedef {Object} McpHostInstance
+ * @property {string} name サーバー名(ツール名の接頭辞 mcp__<name>__ に使う)
+ * @property {string} command 起動コマンド
+ * @property {string[]} args 引数
+ * @property {Object.<string,string>} env 環境変数
+ * @property {Array<{name: string, description?: string}>} tools 公開ツール(tools/listの結果)
+ * @property {any} child 起動済みプロセス
+ * @property {() => Promise<{ok: boolean, tools?: number, error?: string}>} start ハンドシェイクしてtools/listまで進める
+ * @property {() => void} stop サーバープロセスを止める
+ * @property {(name: string) => boolean} handles ツール名がこのサーバー宛か
+ * @property {(name: string, args: Object) => Promise<{ok: boolean, text: string}>} call ツール呼び出し
+ */
 
 
 export class McpHost {
