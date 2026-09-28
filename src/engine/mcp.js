@@ -33,8 +33,6 @@ export function mcpServersInfo(hosts) {
   }));
 }
 
-/** 設定ウィンドウ向けのサーバー一覧(envの値は含めない)。 */
-
 export class McpHost {
   constructor({ name, command, args = [], env = {}, bus = null, timeoutMs = 60000 }) {
     /** @type {string} */
