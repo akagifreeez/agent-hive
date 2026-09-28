@@ -33,6 +33,13 @@ export function mcpServersInfo(hosts) {
   }));
 }
 
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+>>>>>>> main
 /**
  * @typedef {Object} McpHostInstance
  * @property {string} name サーバー名(ツール名の接頭辞 mcp__<name>__ に使う)
@@ -48,6 +55,7 @@ export function mcpServersInfo(hosts) {
  */
 
 
+>>>>>>> main
 export class McpHost {
   constructor({ name, command, args = [], env = {}, bus = null, timeoutMs = 60000 }) {
     /** @type {string} */
