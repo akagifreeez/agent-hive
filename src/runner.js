@@ -17,7 +17,7 @@ import { SpawnManager } from "./engine/spawn.js";
 import { ChatHost } from "./engine/chat.js";
 import { buildMemoryContext, ensurePcRules } from "./engine/memory.js";
 import { buildSkillsIndex } from "./engine/skills.js";
-import { McpHost } from "./engine/mcp.js";
+import { McpHost, mcpServersInfo } from "./engine/mcp.js";
 import { createWorkflowApi, runWorkflowScript } from "./engine/workflow.js";
 import { Hooks } from "./engine/hooks.js";
 import { ROOT, dataDir } from "./config.js";
@@ -88,11 +88,10 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   };
 
   // MCPサーバー(config.mcp.servers)を起動してツールとして接続(失敗してもhiveは続行)
-  /** @type {import("./engine/mcp.js").McpHost[]} */
-  const mcpHosts = [];
-  for (const [name, def] of Object.entries(config.mcp?.servers ?? {})) {
-    mcpHosts.push(new McpHost({ name, bus, ...(typeof def === 'string' ? { command: def } : def) }));
-  }
+  /** @type {import("./engine/mcp.js").McpHostInstance[]} */
+  const mcpHosts = Object.entries(config.mcp?.servers ?? {}).map(([name, def]) =>
+    new McpHost({ name, bus, ...(typeof def === "string" ? { command: def } : def) })
+  );
   for (const h of mcpHosts) {
     const r = await h.start();
     if (!r.ok) bus.emit("scenario.warn", { message: `MCPサーバー ${h.name} の起動に失敗: ${r.error}` });
@@ -382,16 +381,8 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
 
   bus.emit("scenario.started", { name: `chat:${config.scenario.name}`, tasks: [] });
   return {
-    mcpList: () => {
-      const list = [];
-      for (const h of mcpHosts) {
-        list.push({
-          name: h.name, command: h.command, args: h.args, envKeys: Object.keys(h.env ?? {}),
-          tools: h.tools.map((t) => t.name), started: Boolean(h.child),
-        });
-      }
-      return list;
-    },
+    mcpList: () => mcpServersInfo(mcpHosts),
+    /** @param {{name?: string, command?: string, args?: string[], env?: Object.<string,string>}} o */
     mcpAdd: async ({ name, command, args, env } = {}) => {
       const id = String(name ?? "").trim();
       if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id)) return { error: "サーバー名は英小文字数字と_-で32字以内" };
@@ -400,11 +391,12 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       const host = new McpHost({ name: id, command: String(command).trim(), args, env, bus });
       const r = await host.start();
       if (!r.ok) return { error: `起動に失敗: ${r.error}` };
-      mcpHosts.push(host); // 配列は全エージェントのツール一覧と共有。次のラウンドから反映される
+      mcpHosts.push(/** @type {import("./engine/mcp.js").McpHostInstance} */ (/** @type {any} */ (host))); // 配列は全エージェントのツール一覧と共有。次のラウンドから反映される
       const local = readLocalCfg();
       writeLocalServers({ ...(local.mcp?.servers ?? {}), [id]: { command: String(command).trim(), args: args ?? [], env: env ?? {} } });
       return { ok: true, tools: r.tools };
     },
+    /** @param {{name?: string}} o */
     mcpRemove: ({ name } = {}) => {
       const id = String(name ?? "");
       const idx = mcpHosts.findIndex((h) => h.name === id);
