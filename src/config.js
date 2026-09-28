@@ -3,6 +3,29 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
+/**
+ * 動作設定の契約。hive.config.json(同梱物)に hive.local.json(書き込み可能側の上書き)を
+ * 統合し、パスを絶対解決した実行時の形。loadConfig()が返す。
+ * @typedef {Object} HiveConfig
+ * @property {{baseUrl: string, apiKeyEnv?: string, apiKeyFile?: string, apiKey: string|null, model: string, fallbackModels?: string[], temperature?: number, maxTokens?: number, timeoutMs?: number, contextWindow?: number, reasoningEffort?: string|null}} model OpenAI互換エンドポイントへの接続設定(apiKeyはenv/鍵ファイルから解決した実値)
+ * @property {string} workspace ワークスペースの絶対パス(開発時はリポジトリ直下・梱包時はuserData配下)
+ * @property {{dir: string}} worktrees エージェント作業用worktreeのルート
+ * @property {Array<{id: string, displayName: string, role: string, persona?: string, personaPath?: string}>} agents 参加エージェントの定義
+ * @property {{maxTurns?: number}} loop
+ * @property {{timeoutSec?: number}} runner
+ * @property {{port: number, monitorPort: number, monitorHost: string}} ui UI/モニタのポート(HIVE_UI_PORT/HIVE_MONITOR_PORTで上書き可)
+ * @property {{intervalSec?: number, testCommand?: string|null}} discovery 発見器(テストプローブ等)の設定
+ * @property {{askTimeoutSec?: number}} permissions
+ * @property {{maxTokensPerRun?: number}} budget 1ランあたりのトークン上限
+ * @property {{thresholdPercent?: number, keepRecentToolResults?: number}} compact 圧縮の設定
+ * @property {{maxDepth?: number, maxConcurrent?: number}} hierarchy
+ * @property {{lead?: string, workers?: string[], mains?: string[], idleClaimWaitSec?: number, autoscale?: boolean, autoscaleIntervalSec?: number, maxWorkersPerThread?: number, maxTurnsPerRound?: number, autoContinueRounds?: number, staggerMs?: number, schedules?: Array<{everyMinutes: number, text: string, thread?: string}>, budgetAlertUsd?: number}} chat チャット運用の設定(予算アラートは累積コストがこのしきい値を超えると1回告知)
+ * @property {{servers: Object.<string, Object>}} mcp
+ * @property {Object} hooks
+ * @property {Object} commands
+ * @property {{name?: string, seedFiles?: Array<{path: string, content: string}>}} scenario
+ */
+
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // 書き込み可能データの基準。梱包実行時(desktop/main.jsがHIVE_DATAを設定)はuserData配下、
 // 開発時はリポジトリ直下。設定JSONと personas(agents/*.md)は読み取り専用なのでROOTのまま。
@@ -11,6 +34,8 @@ export function dataDir() {
   return process.env.HIVE_DATA ? resolve(process.env.HIVE_DATA) : ROOT;
 }
 
+/** @param {string} [configPath] ROOT起点の設定ファイルパス(省略でhive.config.json)
+ * @returns {HiveConfig} */
 export function loadConfig(configPath) {
   const DATA = dataDir();
   const p = configPath ? resolve(ROOT, configPath) : resolve(ROOT, "hive.config.json");

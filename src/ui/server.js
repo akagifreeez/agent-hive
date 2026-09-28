@@ -55,6 +55,26 @@ export function newUiToken() {
   return randomBytes(24).toString("base64url");
 }
 
+/**
+ * チャットUI+モニタのHTTPサーバーを立てる。POSTはCSRFトークン必須。
+ * @param {Object} o
+ * @param {import("../config.js").HiveConfig} o.config
+ * @param {Function} [o.modelFactory] バッチシナリオモードで使う。chat常駐モードでは省略
+ * @param {import("../engine/board.js").Bus} [o.bus]
+ * @param {boolean} [o.autoStart]
+ * @param {(text: string, thread?: string|null) => void} [o.onSay]
+ * @param {(path: string, dataUrl: string, note: string, thread?: string|null) => void} [o.onAttach]
+ * @param {(req: Object) => {ok?: boolean, error?: string, [k: string]: any}} [o.onThread]
+ * @param {(req: Object) => {ok?: boolean, error?: string, [k: string]: any}} [o.onCloseThread]
+ * @param {(req: Object) => {ok?: boolean, error?: string, [k: string]: any}} [o.onFolder]
+ * @param {(req: Object) => {ok?: boolean, error?: string, [k: string]: any}} [o.onModel]
+ * @param {(mode: string) => {ok?: boolean, error?: string, mode?: string}} [o.onPermMode]
+ * @param {(name: string) => {ok?: boolean, error?: string}} [o.onWorkflow]
+ * @param {() => string[]} [o.onListWorkflows]
+ * @param {(req: {taskId: string, comment: string, thread?: string}) => {ok?: boolean, error?: string, id?: string, thread?: string}} [o.onFeedback]
+ * @param {(req: {project: string, paused: boolean}) => {ok?: boolean, error?: string}} [o.onThreadPause]
+ * @returns {Promise<Object>} サーバーハンドル(port/close等)
+ */
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
   const startedAt = Date.now();
   // UIトークン。環境変数 HIVE_UI_TOKEN(CLI等の外部クライアント用)で上書きできる
@@ -645,8 +665,9 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     server.listen(config.ui.port ?? 0, "127.0.0.1", () => {
       server.off("error", reject);
       // port 0(自動割当)時に実際のポートを反映(テスト等でURLを組み立てられるように)
-      config.ui.port = server.address().port;
-      resolve();
+      /** @type {import("node:net").AddressInfo} */ const addr = /** @type {any} */ (server.address());
+      config.ui.port = addr.port;
+      resolve(undefined);
     });
   }).catch((err) => {
     if (err.code === "EADDRINUSE") {
@@ -855,12 +876,14 @@ tick();setInterval(tick,3000);
   });
   const host = config.ui.monitorHost ?? "0.0.0.0";
   const port = config.ui.monitorPort ?? 0;
-  await new Promise((resolve) => server.listen(port, host, resolve));
+  await /** @type {Promise<void>} */ (new Promise((resolve) => server.listen(port, host, () => resolve())));
   server.unref();
-  console.log(`Monitor: http://localhost:${server.address().port} (読み取り専用・${host}で公開)`);
+  /** @type {import("node:net").AddressInfo} */ const mAddr = /** @type {any} */ (server.address());
+  console.log(`Monitor: http://localhost:${mAddr.port} (読み取り専用・${host}で公開)`);
   for (const list of Object.values(os.networkInterfaces())) {
     for (const n of list ?? []) {
-      if (n.family === "IPv4" && !n.internal) console.log(`Monitor(LAN): http://${n.address}:${server.address().port}`);
+      const mPort = /** @type {import("node:net").AddressInfo} */ (server.address()).port;
+    if (n.family === "IPv4" && !n.internal) console.log(`Monitor(LAN): http://${n.address}:${mPort}`);
     }
   }
   return server;
@@ -880,8 +903,13 @@ export function detectNpmScripts(workspace) {
 /* ============ /api/devserver: package.json scriptsの起動/停止 ============ */
 // 同時1プロセス。child_process.spawnで長時間起動し、pid保持+stopでkillする。
 // runCommand(タイムアウトで殺す)ではなくspawnを使うのがポイント。
+/** @type {{pid: number, script: string, url: string, child: import("node:child_process").ChildProcess}|null} */
 let devserverProc = null; // { pid, script, url, child }
 
+/**
+ * /api/devserverの処理(npm script起動/停止/状態)。二重起動は起動中プロセス情報を返す。
+ * @param {{method: string, body?: {action?: string, script?: string, url?: string}, workspace: string, uiPort?: number}} o
+ */
 export function handleDevserver({ method, body = {}, workspace, uiPort }) {
   if (method === "GET") {
     const pkg = readFileSyncSafe(join(workspace, "package.json"));

@@ -30,6 +30,11 @@ export function estimateMessagesTokens(messages) {
 
 // ツール結果の間引き。messages配列を直接書き換える(ZCodeと同様、ローカル文脈の破壊的整理)。
 // 戻り値: {changed, savingsTokens}
+/**
+ * 古いツール結果をプレースホルダへ置き換える(LLM不要の軽量圧縮)。
+ * @param {Array<{role: string, content: any}>} messages
+ * @param {{thresholdRatio?: number, contextWindow?: number}} opts
+ */
 export function microcompact(messages, { contextWindow, thresholdRatio = MICROCOMPACT_THRESHOLD_RATIO } = {}) {
   const budget = (contextWindow ?? 200000) * thresholdRatio;
   const est = estimateMessagesTokens(messages);

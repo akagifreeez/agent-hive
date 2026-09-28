@@ -12,6 +12,15 @@ const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
 
+// ツール実行結果の契約。全ツールはこの形を返し、loopの失敗連続打ち切り(idle退場)はokを数える。
+// textはそのままLLMへの教師文面になる(何が失敗し、次の一手は何かを書く)。
+/**
+ * @typedef {Object} ToolResult
+ * @property {boolean} ok
+ * @property {string} text
+ * @property {boolean} [claimMiss] 請求ミスのときtrue(idle退場判定で連続回数を数える)
+ */
+
 export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null }) {
 
   const mcpList = mcpHosts ?? [];

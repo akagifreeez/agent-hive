@@ -72,6 +72,30 @@ function currentTaskContext(tasks, agent, messages) {
   return user ? user.content.slice(0, 1500) : null;
 }
 
+/**
+ * エージェントループのオプション(常駐chatはmessages/seenBoard/drainInput/peekInputを渡す)。
+ * @typedef {Object} RunAgentLoopOptions
+ * @property {{id: string, displayName: string, role: string, personaPath?: string, personaText?: string, scenarioName?: string}} agent
+ * @property {{maxTokens?: number, chat: Function}} model chat({messages, tools, onDelta}) → {content, toolCalls, raw, usage}
+ * @property {{specs: Object[], execute: (name: string, args: Object) => Promise<import("./tools.js").ToolResult>}} tools
+ * @property {import("./board.js").Board} board
+ * @property {import("./tasks.js").TaskBlackboard} tasks
+ * @property {import("./board.js").Bus} bus
+ * @property {{add: Function}} [ledger]
+ * @property {{maxTokensPerRun?: number}} [budget]
+ * @property {number} [maxTurns]
+ * @property {string} [shellKind]
+ * @property {number} [contextWindow]
+ * @property {number} [thresholdPercent]
+ * @property {Array<{role: string, content: any, tool_calls?: any, tool_call_id?: string}>} [messages] 常駐chatは外部保持の記憶を渡す
+ * @property {number|null} [seenBoard] ボード既読位置(二重配信の防止)
+ * @property {string|null} [memory] 永続記憶の注入文脈
+ * @property {(() => any[])|null} [drainInput] ターン境界で割込ませる入力の取り出し(steering)
+ * @property {(() => boolean)|null} [peekInput] 未処理入力が待っているか(idle退場の抑制)
+ * @property {number} [claimMissesLimit] 連続請求ミス何回でidle終了するか
+ */
+
+/** @param {RunAgentLoopOptions} o */
 export async function runAgentLoop({
   agent, model, tools, board, tasks, bus,
   ledger = null, budget = null,

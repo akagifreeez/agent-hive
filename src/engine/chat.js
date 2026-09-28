@@ -59,6 +59,9 @@ export class ChatHost {
   }
 
   // 新タスク投入時の起床: 自分のprojectのタスク、または全スレッド共通の自動仕事(fix/review/distill)のみ
+  /**
+   * @param {{taskId: string, project: string}} p
+   */
   handleTaskCreated({ taskId, project }) {
     if (this.project && (project === this.project || /^(fix-|review-|distill-)/.test(taskId))) {
       for (const m of this.mains) {
@@ -69,6 +72,9 @@ export class ChatHost {
 
   // 解放タスクでの起床: 退場した担当者のタスクがopenへ戻ったら同じスレッドのメンバーを起こす。
   // task.createdだけだと「解放→誰にも起されず凍結」が起きる(r7で実際に発生)。
+  /**
+   * @param {{taskId: string}} p
+   */
   handleTaskReleased({ taskId }) {
     if (!this.project) return;
     let t = null;

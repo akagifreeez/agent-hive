@@ -8,11 +8,17 @@ import { runCommand } from "./exec.js";
 // マージ直列化: withMergeLock経由でのみ実行する。promiseチェーンのミューテックス。
 // mergeAgentWorkは内部でこれを使い、tools.js/chat.js等の呼び出し元もこのロックを共有する。
 let mergeChain = Promise.resolve();
+/**
+ * @template T
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
 export function withMergeLock(fn) {
-  const p = mergeChain.then(fn, fn);
+  const p = /** @type {Promise<T>} */ (mergeChain.then(fn, fn));
   mergeChain = p.then(() => {}, () => {});
   return p;
 }
+/** @template T @param {() => Promise<T>} fn @returns {Promise<T>} */
 function queueMerge(fn) {
   return withMergeLock(fn);
 }
@@ -60,6 +66,28 @@ export function statSummary(statText) {
   return parts.join(" ");
 }
 
+/**
+ * エージェントのworktree作業をmainへ取り込む(finish_taskとラウンド末自動マージの共通経路)。
+ * 取り込みはwithMergeLockで直列化される。
+ * @typedef {Object} MergeResult
+ * @property {boolean} ok
+ * @property {boolean} [merged] 新たに取り込んだか
+ * @property {boolean} [conflict] 競合(自動再試行でも解消できなかった)
+ * @property {string} text
+ * @property {string} [stat] git diff --statの要約
+ * @property {string} [patch] 差分本文(上限付き)
+ * @property {string} [summary]
+ * @property {boolean} [autoMerged] 競合からの自動再マージで成功した
+ */
+/**
+ * @param {Object} o
+ * @param {string} o.mainWorkspace
+ * @param {string} [o.worktreePath]
+ * @param {{id: string, displayName?: string}} o.agent
+ * @param {string} o.taskId
+ * @param {Function} [o.exec]
+ * @returns {Promise<MergeResult>}
+ */
 export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exec = runCommand }) {
   const branch = `agent/${agent.id}`;
   return queueMerge(async () => {

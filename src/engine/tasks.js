@@ -4,6 +4,19 @@
 import { mkdirSync, readdirSync, renameSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
+/**
+ * タスク1件の契約(list()/UI/LLM注入の共通形)。実体は tasks/{open,claimed,done} のMarkdown。
+ * @typedef {Object} TaskInfo
+ * @property {string} state 状態("open"|"claimed"|"done")
+ * @property {string} id タスクid(ファイル名から.mdを除いたもの)
+ * @property {string|null} agent 請求中エージェントid(openのときnull)
+ * @property {string|null} role 担当ロール(impl/review/lead等)。null=誰でも請求可
+ * @property {string|null} project 文脈(取り組み名=スレッド名)
+ * @property {string} acceptance 受け入れ基準
+ * @property {string} summary 本文の要約(先頭の実質行)
+ * @property {string} path タスクファイルのパス
+ */
+
 export class TaskBlackboard {
   constructor(workspace, bus = null) {
     this.dir = join(workspace, "tasks");
@@ -19,6 +32,12 @@ export class TaskBlackboard {
     for (const t of tasks ?? []) this.create(t);
   }
 
+  /**
+   * 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
+   * acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
+   * @param {{id: string, role?: string|null, body?: string, project?: string, acceptance?: string, createdBy?: string|null}} t
+   * @returns {boolean} 既存のidならfalse
+   */
   // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
   // acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
   create({ id, role, body, project = "", acceptance = "", createdBy = null }) {
@@ -93,6 +112,13 @@ export class TaskBlackboard {
   // 指定した文脈のタスクだけを請求対象にするので、別の取り組みのタスクと混ざらない。
   // 文脈内に何も無い場合、発見器起票の共通仕事(fix-/review-/distill-)へだけフォールバックする
   // (放置されると誰にも消化されないため。ユーザー/他プロジェクトのタスクは混ざらせない)。
+  /**
+   * タスクを請求する(open→claimedへの原子的rename)。roleは「タスクrole===自分のrole」
+   * または「タスクrole無し」のときだけ請求できる(不一致はclaimMissの診断文面で教える)。
+   * @param {{id: string, role: string|null}} agent 請求するエージェント
+   * @param {{project?: string}} [opts] project指定時はその文脈のタスクに絞る(無ければ共通仕事へフォールバック)
+   * @returns {{id: string, body: string}|null} 請求できたらタスク情報、できなければnull
+   */
   claim(agent, opts = {}) {
     const attempt = (files) => {
       for (const pass of [(r) => r === agent.role, (r) => r === null]) {
@@ -168,6 +194,10 @@ export class TaskBlackboard {
   }
 
   // UIのタスク管理パネル用。1件ごとに状態/担当/文脈/要約/ファイルパスを返す(本文は必要時のみ取得)
+  /**
+   * 全タスクの一覧をUI/LLM向けの共通形で返す
+   * @returns {{open: TaskInfo[], claimed: TaskInfo[], done: TaskInfo[]}}
+   */
   list() {
     // メタ行(role:/project:)と空行を除いた本文
     const bodyOf = (raw) => {

@@ -4,7 +4,13 @@
 // 判定ソース(provider usage優先: ZCode compact/policy.tsと同方針)に使う。
 // リトライはZCode adapters/model/retry-policy.ts+runner-retry.ts+failure-classifier.tsの移植:
 // 指数バックオフ+ジッタで最大10回、Retry-Afterは5分まで優先、429/5xx/529は可・401/403/400/422は不可。
+/**
+ * OpenAI互換エンドポイント(GLM等)への最小クライアント。
+ */
 export class OpenAIModel {
+  /**
+   * @param {{baseUrl: string, apiKey: string, model?: string, temperature?: number, maxTokens?: number, timeoutMs?: number, reasoningEffort?: string|null}} cfg
+   */
   constructor({ baseUrl, apiKey, model, temperature = 0.7, maxTokens = 2000, timeoutMs = 120000, reasoningEffort = null }) {
     if (!apiKey) throw new Error("APIキーが未設定です(環境変数か apiKeyFile を設定してください)");
     this.baseUrl = baseUrl.replace(/\/$/, "");

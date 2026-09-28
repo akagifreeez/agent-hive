@@ -10,6 +10,18 @@
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
+/**
+ * ワークフロースクリプトへ渡すAPI群を組み立てる。
+ * @param {Object} o
+ * @param {Function} o.openThread
+ * @param {Function} o.closeThread
+ * @param {Function} o.say
+ * @param {import("./tasks.js").TaskBlackboard} o.tasks
+ * @param {(ms: number) => Promise<void>} [o.sleep]
+ * @param {number} [o.pollMs]
+ * @param {Function} [o.log]
+ * @param {import("./board.js").Bus} [o.bus]
+ */
 export function createWorkflowApi({ openThread, closeThread, say, tasks, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), pollMs = 2000, log = () => {} }) {
   const counts = (project) => {
     const l = tasks.list();

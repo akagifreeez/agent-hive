@@ -34,6 +34,9 @@ export function normalizeCommand(cmd, { sort = false } = {}) {
 }
 
 export class PermissionGate {
+  /**
+   * @param {{bus?: import("./board.js").Bus, deny?: string[], ask?: string[], askTimeoutSec?: number, mode?: string}} opts
+   */
   constructor({ bus, deny = DEFAULT_DENY, ask = DEFAULT_ASK, askTimeoutSec = 120, mode = "normal" } = {}) {
     this.bus = bus;
     this.deny = deny;

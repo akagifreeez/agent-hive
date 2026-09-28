@@ -55,8 +55,8 @@ export class McpHost {
     this.child.stderr.on("data", () => {}); // サーバーのログは捨てる
     // 子のstdioパイプがイベントループを握ってプロセスが終わらなくならないようにする
     this.child.unref?.();
-    this.child.stdout.unref?.();
-    this.child.stderr.unref?.();
+    /** @type {any} */ (this.child.stdout).unref?.();
+    /** @type {any} */ (this.child.stderr).unref?.();
     this.child.on("exit", (code) => {
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
