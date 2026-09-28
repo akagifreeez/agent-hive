@@ -90,7 +90,7 @@ test("rapid-refillブレーカー: 圧縮が追いつかない連鎖で打ち切
     maxTokens: 4000,
     async chat({ messages }) {
       // 要約器(コンパクト要求)は常に成功
-      if (String(messages[0]?.content).includes("要約器")) {
+      if (String(messages[0]?.content).includes("conversation summarizer")) {
         return { content: "要約した", toolCalls: [], raw: { content: "要約した" }, usage: { promptTokens: 10, completionTokens: 1 } };
       }
       n++;
@@ -133,7 +133,7 @@ test("rapid-refill: 圧縮間に3ツールターン以上あればストリー�
   const model = {
     maxTokens: 4000,
     async chat({ messages }) {
-      if (String(messages[0]?.content).includes("要約器")) {
+      if (String(messages[0]?.content).includes("conversation summarizer")) {
         compacts++;
         return { content: "要約した", toolCalls: [], raw: { content: "要約した" }, usage: { promptTokens: 10, completionTokens: 1 } };
       }

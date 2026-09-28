@@ -82,7 +82,7 @@ test("applyCompaction: system+要約+直近4件を残す", () => {
 test("buildCompactRequest: タスク文脈があれば読み取り時キュレーションを足し、無ければ汎用のまま", () => {
   const msgs = [{ role: "user", content: "hi" }];
   const withCtx = buildCompactRequest(msgs, { taskContext: "タスク t1: 素数判定の実装" });
-  assert.match(withCtx[0].content, /読み取り時キュレーション/);
+  assert.match(withCtx[0].content, /Read-time curation/);
   assert.match(withCtx[0].content, /素数判定/);
   const without = buildCompactRequest(msgs);
   assert.equal(without[0].content, COMPACT_SYSTEM_PROMPT);
@@ -154,7 +154,7 @@ test("autocompact: 請求中タスクを条件に要約する", async () => {
   const model = {
     maxTokens: 4000,
     async chat({ messages }) {
-      if (String(messages[0]?.content).includes("要約器")) {
+      if (String(messages[0]?.content).includes("conversation summarizer")) {
         compactPrompts.push(messages[0].content);
         return { content: "要約した", toolCalls: [], raw: { content: "要約した" }, usage: { promptTokens: 10, completionTokens: 1 } };
       }
@@ -164,7 +164,7 @@ test("autocompact: 請求中タスクを条件に要約する", async () => {
   };
   await runAgentLoop({ agent, model, tools, board, tasks, bus, maxTurns: 4, contextWindow: 200000 });
   assert.equal(compactPrompts.length, 1);
-  assert.match(compactPrompts[0], /読み取り時キュレーション/);
+  assert.match(compactPrompts[0], /Read-time curation/);
   assert.match(compactPrompts[0], /bigwork/);
   assert.match(compactPrompts[0], /upper\/pad/);
   cleanup(ws);
@@ -182,7 +182,7 @@ test("autocompact: タスク請求が無ければ直近のユーザー指示を�
   const model = {
     maxTokens: 4000,
     async chat({ messages }) {
-      if (String(messages[0]?.content).includes("要約器")) {
+      if (String(messages[0]?.content).includes("conversation summarizer")) {
         compactPrompts.push(messages[0].content);
         return { content: "要約した", toolCalls: [], raw: { content: "要約した" }, usage: { promptTokens: 10, completionTokens: 1 } };
       }
@@ -197,7 +197,7 @@ test("autocompact: タスク請求が無ければ直近のユーザー指示を�
   ];
   await runAgentLoop({ agent, model, tools, board, tasks, bus, maxTurns: 4, contextWindow: 200000, messages: memory });
   assert.equal(compactPrompts.length, 1);
-  assert.match(compactPrompts[0], /読み取り時キュレーション/);
+  assert.match(compactPrompts[0], /Read-time curation/);
   assert.match(compactPrompts[0], /家計簿アプリ/);
   assert.doesNotMatch(compactPrompts[0], /ボード新着/);
   cleanup(ws);
