@@ -115,6 +115,18 @@ test("v6.1: 再起動してもボード投稿・スレッド・会話メモリ�
   const demo2 = opened2.find((t) => t.name === "demo");
   assert.ok(demo2, "スレッドが無音で復元されている");
   assert.equal(demo2.agents.length, 3);
+  // 無音復元の確認: 起動ラウンドの遅延投稿(stagger等)が混ざる場合があるため、
+  // 行数が静止するまで待ってから比較する(固定行数assertは並行負荷でフレーキーする)
+  {
+    let cur = logLines(demoLog());
+    let last = -1;
+    const deadline = Date.now() + 10000;
+    while (cur !== last && Date.now() < deadline) {
+      last = cur;
+      await new Promise((r) => setTimeout(r, 300));
+      cur = logLines(demoLog());
+    }
+  }
   assert.equal(logLines(demoLog()), demoLinesBefore, "無音復元なので投稿が増えない");
   assert.ok(logLines(mainLog()) >= 2, "メインの履歴も保持されている");
   rmTree(ws);
