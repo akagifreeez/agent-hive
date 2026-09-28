@@ -88,14 +88,17 @@
       "shutdown",
       "format ",
       "del /",
-      ":(){:|:&};:"
+      ":(){:|:&};:",
+      "curl --upload",
+      "curl -T "
     ],
     "ask": [
       "rm -rf",
       "git reset --hard",
       "git clean",
       "git push",
-      "npm publish"
+      "npm publish",
+      "curl "
     ]
   },
   "ui": {
