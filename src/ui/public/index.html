@@ -1496,10 +1496,18 @@ function renderAll() {
   const permTxt = lastState.live.permMode === "auto" ? "perm:auto" : "perm:normal";
   const effTxt = uiEffort ?? lastState?.live?.modelEffort ? `effort:${uiEffort ?? lastState.live.modelEffort}` : null;
   const mdl = uiModelName ?? lastState.live.modelName ?? lastState.model?.name ?? "";
+<<<<<<< Updated upstream
   // usage予算アラート: /api/stateのlive.budget(exceeded/costUsd)をステータスライン(左下)へ出す
   const b = lastState.live.budget;
   const budgetTxt = b?.exceeded ? `予算超過: 累積${Number(b.costUsd ?? 0).toFixed(2)}` : null;
   const bits = [mdl, effTxt, permTxt, budgetTxt, lastState.live.scenario ? `[${lastState.live.scenario.phase}]` : null].filter(Boolean);
+=======
+  // 予算アラート表示: 超過済みのときだけステータスライン(nav-foot)へ出す
+  const budgetBits = (lastState.live.budget && lastState.live.budget.exceeded)
+    ? ["予算超過: 累積$" + Number(lastState.live.budget.costUsd ?? 0).toFixed(2)]
+    : [];
+  const bits = [...budgetBits, mdl, effTxt, permTxt, lastState.live.scenario ? `[${lastState.live.scenario.phase}]` : null].filter(Boolean);
+>>>>>>> Stashed changes
   $("nav-foot").textContent = bits.join(" · ");
 }
 
