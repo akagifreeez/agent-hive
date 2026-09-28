@@ -588,13 +588,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         req.on("end", async () => {
           try {
             const { op, ...rest } = JSON.parse(body);
-<<<<<<< HEAD
-            const r = op === "add" ? await onMcpAdd(rest) : op === "remove" ? onMcpRemove(rest) : null;
-=======
             if (op !== "add" && op !== "remove") throw new Error("操作は add か remove を指定してください");
-            const r = op === "add" ? await onMcpAdd(rest) : onMcpRemove(rest);
->>>>>>> main
-            if (!r || r.error) throw new Error(r?.error ?? "失敗しました");
+            const r = op === "add" ? await onMcpAdd(rest) : onMcpRemove(rest);            if (!r || r.error) throw new Error(r?.error ?? "失敗しました");
             json(res, r);
           } catch (err) {
             json(res, { error: err.message }, 400);
