@@ -381,6 +381,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
 
   bus.emit("scenario.started", { name: `chat:${config.scenario.name}`, tasks: [] });
   return {
+
     mcpList: () => mcpServersInfo(mcpHosts),
     /** @param {{name?: string, command?: string, args?: string[], env?: Object.<string,string>}} o */
     mcpAdd: async ({ name, command, args, env } = {}) => {
@@ -396,6 +397,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       writeLocalServers({ ...(local.mcp?.servers ?? {}), [id]: { command: String(command).trim(), args: args ?? [], env: env ?? {} } });
       return { ok: true, tools: r.tools };
     },
+
     /** @param {{name?: string}} o */
     mcpRemove: ({ name } = {}) => {
       const id = String(name ?? "");
