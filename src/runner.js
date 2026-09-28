@@ -20,7 +20,8 @@ import { buildSkillsIndex } from "./engine/skills.js";
 import { McpHost } from "./engine/mcp.js";
 import { createWorkflowApi, runWorkflowScript } from "./engine/workflow.js";
 import { Hooks } from "./engine/hooks.js";
-import { ROOT } from "./config.js";
+import { ROOT, dataDir } from "./config.js";
+import { renameSync } from "node:fs";
 
 export function createModelFactory(config) {
   return (agent = {}) => {
@@ -96,6 +97,18 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   }
 
   const hooks = new Hooks({ config, cwd: config.workspace, bus });
+  // MCP設定の動的管理(設定ウィンドウから)。追加/削除はhive.local.json(DATA側)へ永続化する
+  const localCfgPath = join(dataDir(), "hive.local.json");
+  const readLocalCfg = () => {
+    try { return JSON.parse(readFileSync(localCfgPath, "utf8")); } catch { return {}; }
+  };
+  const writeLocalServers = (servers) => {
+    const local = readLocalCfg();
+    local.mcp = { ...(local.mcp ?? {}), servers };
+    const tmp = `${localCfgPath}.tmp`;
+    writeFileSync(tmp, JSON.stringify(local, null, 1));
+    renameSync(tmp, localCfgPath);
+  };
   const manager = new SpawnManager({
     mainWorkspace: config.workspace,
     worktreeRoot,
@@ -367,6 +380,35 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
 
   bus.emit("scenario.started", { name: `chat:${config.scenario.name}`, tasks: [] });
   return {
+    mcpList: () => mcpHosts.map((h) => ({
+      name: h.name, command: h.command, args: h.args, envKeys: Object.keys(h.env ?? {}),
+      tools: h.tools.map((t) => t.name), started: Boolean(h.child),
+    })),
+    mcpAdd: async ({ name, command, args, env } = {}) => {
+      const id = String(name ?? "").trim();
+      if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id)) return { error: "サーバー名は英小文字数字と_-で32字以内" };
+      if (!String(command ?? "").trim()) return { error: "commandが空です" };
+      if (mcpHosts.some((h) => h.name === id)) return { error: `サーバー ${id} は既に接続されています` };
+      const host = new McpHost({ name: id, command: String(command).trim(), args, env, bus });
+      const r = await host.start();
+      if (!r.ok) return { error: `起動に失敗: ${r.error}` };
+      mcpHosts.push(host); // 配列は全エージェントのツール一覧と共有。次のラウンドから反映される
+      const local = readLocalCfg();
+      writeLocalServers({ ...(local.mcp?.servers ?? {}), [id]: { command: String(command).trim(), args: args ?? [], env: env ?? {} } });
+      return { ok: true, tools: r.tools };
+    },
+    mcpRemove: ({ name } = {}) => {
+      const id = String(name ?? "");
+      const idx = mcpHosts.findIndex((h) => h.name === id);
+      if (idx < 0) return { error: `サーバー ${id} は接続されていません` };
+      mcpHosts[idx].stop();
+      mcpHosts.splice(idx, 1);
+      const local = readLocalCfg();
+      const servers = { ...(local.mcp?.servers ?? {}) };
+      delete servers[id];
+      writeLocalServers(servers);
+      return { ok: true };
+    },
     say: (text, thread = null) => {
       const t = thread ? threads.get(thread) : null;
       if (t) return t.host.say(text);

@@ -62,7 +62,7 @@ export function loadConfig(configPath) {
     compact: { thresholdPercent: 90, keepRecentToolResults: 5, ...(raw.compact ?? {}) },
     hierarchy: { maxDepth: 2, maxConcurrent: 6, ...(raw.hierarchy ?? {}) },
     chat: { mains: ["alpha", "beta", "gamma"], maxTurnsPerRound: 12, ...(raw.chat ?? {}) },
-    mcp: raw.mcp ?? { servers: {} },
+    mcp: { servers: { ...(raw.mcp?.servers ?? {}), ...(local.mcp?.servers ?? {}) } }, // local.json側で追加/上書きできる
     hooks: raw.hooks ?? {},
     commands: raw.commands ?? {},
     scenario: { seedFiles: [], ...raw.scenario },

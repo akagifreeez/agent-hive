@@ -73,9 +73,12 @@ export function newUiToken() {
  * @param {() => string[]} [o.onListWorkflows]
  * @param {(req: {taskId: string, comment: string, thread?: string}) => {ok?: boolean, error?: string, id?: string, thread?: string}} [o.onFeedback]
  * @param {(req: {project: string, paused: boolean}) => {ok?: boolean, error?: string}} [o.onThreadPause]
+ * @param {() => Object[]} [o.onMcpList]
+ * @param {(req: Object) => Promise<Object>} [o.onMcpAdd]
+ * @param {(req: Object) => Object} [o.onMcpRemove]
  * @returns {Promise<Object>} サーバーハンドル(port/close等)
  */
-export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null, onMcpList = null, onMcpAdd = null, onMcpRemove = null }) {
   const startedAt = Date.now();
   // UIトークン。環境変数 HIVE_UI_TOKEN(CLI等の外部クライアント用)で上書きできる
   const uiToken = process.env.HIVE_UI_TOKEN || newUiToken();
@@ -568,6 +571,25 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         req.on("end", () => {
           try {
             const r = saveApiKey(JSON.parse(body || "{}"), config);
+            json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/mcp" && req.method === "GET" && onMcpList) {
+        json(res, { servers: onMcpList() });
+        return;
+      }
+      if (url.pathname === "/api/mcp" && req.method === "POST" && (onMcpAdd || onMcpRemove)) {
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", async () => {
+          try {
+            const { op, ...rest } = JSON.parse(body);
+            const r = op === "add" ? await onMcpAdd(rest) : onMcpRemove(rest);
+            if (!r || r.error) throw new Error(r?.error ?? "失敗しました");
             json(res, r);
           } catch (err) {
             json(res, { error: err.message }, 400);

@@ -48,3 +48,27 @@ test("HIVE_UI_PORT: ui.portを環境変数で上書きできる(梱包SMOKEの�
     if (prevPort === undefined) delete process.env.HIVE_UI_PORT; else process.env.HIVE_UI_PORT = prevPort;
   }
 });
+
+test("hive.local.jsonのmcp.serversでMCP設定を追加/上書きできる", async () => {
+  const userData = resolve(mkdtempSync(join(tmpdir(), "hive-mcplocal-")));
+  const prev = process.env.HIVE_DATA;
+  process.env.HIVE_DATA = userData;
+  try {
+    const { writeFileSync } = await import("node:fs");
+    const { loadConfig } = await import("../src/config.js");
+    writeFileSync(join(userData, "hive.local.json"), JSON.stringify({
+      mcp: { servers: { echo: { command: "node", args: ["echo.mjs"] } } },
+    }));
+    const cfg = loadConfig();
+    assert.equal(cfg.mcp.servers.echo.command, "node");
+    // 同名はローカル側が上書き
+    writeFileSync(join(userData, "hive.local.json"), JSON.stringify({
+      mcp: { servers: { echo: { command: "node", args: ["v2.mjs"] } } },
+    }));
+    assert.deepEqual(loadConfig().mcp.servers.echo.args, ["v2.mjs"]);
+  } finally {
+    if (prev === undefined) delete process.env.HIVE_DATA;
+    else process.env.HIVE_DATA = prev;
+    try { rmSync(userData, { recursive: true, force: true }); } catch { /* ロックは無視 */ }
+  }
+});

@@ -17,5 +17,8 @@ export function chatUiHandlers(getController) {
     onListWorkflows: () => c()?.listWorkflows() ?? [],
     onFeedback: (req) => c()?.feedback(req),
     onThreadPause: (req) => c()?.setThreadPaused(req),
+    onMcpList: () => c()?.mcpList() ?? [],
+    onMcpAdd: (req) => c()?.mcpAdd(req),
+    onMcpRemove: (req) => c()?.mcpRemove(req),
   };
 }
