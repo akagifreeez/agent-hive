@@ -42,6 +42,7 @@ async function setup() {
 
 test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレッドの集計を作る", () => {
   const now = new Date();
+  // 日付はUTC基準で作る(toISOStringの日付境界と揃える。ローカル深夜0時前後でも安定)
   const d = (offsetDays, hour) => {
     const t = new Date(now);
     t.setUTCDate(t.getUTCDate() - offsetDays);
