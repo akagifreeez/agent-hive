@@ -1229,11 +1229,90 @@ function renderStatusTab(body) {
     }
     const tr = document.createElement("tr");
     tr.className = "total";
-    tr.innerHTML = `<td>合計</td><td></td><td></td><td>${totTok.toLocaleString()}</td><td>$${totUsd.toFixed(4)}</td>`;
+    tr.innerHTML = `<td>合計</td><td></td><td></td><td>${totTok.toLocaleString()}</td><td>${totUsd.toFixed(4)}</td>`;
     tb.appendChild(tr);
     tbl.appendChild(tb);
     body.appendChild(tbl);
   }
+  // 日別・スレッド別の集計ビュー(イシュー#6)。/api/usageのaggregate(14日分)を表示
+  renderUsageAggregate(body);
+}
+
+// usage集計ビュー(イシュー#6): 日別・スレッド別・日別xスレッドの消費を/statusタブへ出す。
+// /api/usageのaggregate(aggregateUsageの返値)をそのまま表にする。
+async function renderUsageAggregate(body) {
+  let agg = null;
+  try {
+    const r = await (await hfetch("/api/usage")).json();
+    agg = r.aggregate ?? null;
+  } catch { return; } // 取得失敗時は黙って省略(本体の表示を壊さない)
+  if (!agg) return;
+  const fmtUsd = (n) => `${Number(n ?? 0).toFixed(4)}`;
+  if (agg.byThread?.length) {
+    const hT = document.createElement("div");
+    hT.className = "sec";
+    hT.textContent = "スレッド別消費(14日)";
+    body.appendChild(hT);
+    const t1 = document.createElement("table");
+    t1.className = "usage-tbl";
+    t1.innerHTML = "<thead><tr><th>スレッド</th><th>calls</th><th>tokens(in/out)</th><th>cost</th></tr></thead>";
+    const tb1 = document.createElement("tbody");
+    for (const r of agg.byThread) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${escapeHtml(r.thread)}</td><td>${r.calls}</td>` +
+        `<td>${r.promptTokens.toLocaleString()} / ${r.completionTokens.toLocaleString()}</td><td>${fmtUsd(r.costUsd)}</td>`;
+      tb1.appendChild(tr);
+    }
+    t1.appendChild(tb1);
+    body.appendChild(t1);
+  }
+  if (agg.byDate?.length) {
+    const hD = document.createElement("div");
+    hD.className = "sec";
+    hD.textContent = "日別消費(14日)";
+    body.appendChild(hD);
+    const t2 = document.createElement("table");
+    t2.className = "usage-tbl";
+    t2.innerHTML = "<thead><tr><th>日付</th><th>calls</th><th>tokens(in/out)</th><th>cost</th></tr></thead>";
+    const tb2 = document.createElement("tbody");
+    for (const r of agg.byDate) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${escapeHtml(r.date)}</td><td>${r.calls}</td>` +
+        `<td>${r.promptTokens.toLocaleString()} / ${r.completionTokens.toLocaleString()}</td><td>${fmtUsd(r.costUsd)}</td>`;
+      tb2.appendChild(tr);
+    }
+    t2.appendChild(tb2);
+    body.appendChild(t2);
+    // 日別xスレッドの内訳(マトリクス): 日付ごとにスレッド別のcostを1行にまとめる
+    const byDay = new Map();
+    for (const m of agg.matrix ?? []) {
+      const row = byDay.get(m.date) ?? new Map();
+      row.set(m.thread, (row.get(m.thread) ?? 0) + Number(m.costUsd ?? 0));
+      byDay.set(m.date, row);
+    }
+    if (byDay.size) {
+      const threads = [...new Set((agg.matrix ?? []).map((m) => m.thread))];
+      const hM = document.createElement("div");
+      hM.className = "sec";
+      hM.textContent = "日別xスレッド(14日)";
+      body.appendChild(hM);
+      const t3 = document.createElement("table");
+      t3.className = "usage-tbl";
+      t3.innerHTML = "<thead><tr><th>日付</th>" + threads.map((t) => `<th>${escapeHtml(t)}</th>`).join("") + "</tr></thead>";
+      const tb3 = document.createElement("tbody");
+      for (const [date, row] of byDay) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${escapeHtml(date)}</td>` + threads.map((t) => `<td>${row.has(t) ? fmtUsd(row.get(t)) : "—"}</td>`).join("");
+        tb3.appendChild(tr);
+      }
+      t3.appendChild(tb3);
+      const wrap = document.createElement("div");
+      wrap.style.cssText = "overflow-x:auto;max-width:100%;";
+      wrap.appendChild(t3);
+      body.appendChild(wrap);
+    }
+  }
+}
   // セッション保存/読込
   const h2 = document.createElement("div");
   h2.className = "sec";
