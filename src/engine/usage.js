@@ -57,7 +57,7 @@ export function aggregateUsage(history, opts = {}) {
     if (sinceMs != null && d.getTime() < sinceMs) continue; // 期間外は除外
     // usage.summary(シナリオ全体の合計サマリ)はusage.roundの積み上げと二重計上になるため集計対象外
     if (typeof h.agent !== "string" || !h.agent) continue;
-    const date = d.toISOString().slice(0, 10);
+    const date = localDateKey(d); // ローカル日付基準(ユーザー視点の「日別」。深夜帯の前日バケット落ちを防ぐ)
     const thread = resolveThread(h);
     const t = h.totals ?? {};
     const calls = Number(t.calls ?? 0);
@@ -100,3 +100,12 @@ function resolveThread(h) {
   if (agent && WORKER_SUFFIX_RE.test(agent)) return agent.replace(WORKER_SUFFIX_RE, "");
   return "__main__";
 }
+
+// ローカルタイムゾーンの年月日(YYYY-MM-DD)を返す。集計の「日」はユーザーの地元日付で括る。
+export function localDateKey(d) {
+  const dd = d instanceof Date ? d : new Date(d);
+  const y = dd.getFullYear();
+  const m = String(dd.getMonth() + 1).padStart(2, "0");
+  const day = String(dd.getDate()).padStart(2, "0");
+  return y + "-" + m + "-" + day;
+}
