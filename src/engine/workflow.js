@@ -9,6 +9,7 @@
 // 制御構文(if/for/while)は普通のJS。型のある中間結果ではなく、blackboard上の実データを受け渡す。
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { validateSchema, findPlaceholders, parseJsonLoose, guardJson } from "./schema-guard.js";
 
 /**
  * ワークフロースクリプトへ渡すAPI群を組み立てる。
