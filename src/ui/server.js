@@ -721,11 +721,13 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/mcp" && req.method === "GET" && onMcpList) {
-        {
-          // ブラウザ実操作が要る場合の案内(#10): レンダリング必須の操作はMCP(Playwright等)で拡張する設計
-          const list = onMcpList();
-          json(res, { servers: list, browserHint: list.length ? `MCP接続済み(${list.map((s) => s.name).join(", ")})` : "MCP未接続 — リンク先のレンダリング等が要る実操作はPlaywright等のMCPサーバー接続で拡張できます" });
-        }
+        // MCP接続の有無を案内(内蔵ブラウザツールはHTTPレベル操作まで。レンダリング必須の実操作はMCP拡張)
+        const servers = onMcpList() ?? [];
+        const connected = servers.map((x) => String(x?.name ?? "")).filter(Boolean);
+        const guidance = connected.length
+          ? "MCP接続済み: " + connected.join("・")
+          : "MCP未接続(Playwright等のMCPサーバーでクリックやスクリーンショット等の実操作が拡張可能)";
+        json(res, { servers: servers, guidance: guidance });
         return;
       }
       if (url.pathname === "/api/mcp" && req.method === "POST" && (onMcpAdd || onMcpRemove)) {
