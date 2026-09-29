@@ -1,7 +1,7 @@
 // ローカルWebUI。依存ゼロ(node:http + SSE)。後からElectron殻で包む前提なので
 // 描画はブラウザ側に寄せ、サーバーは状態API+SSEストリームだけを持つ。
 import { createServer } from "node:http";
-import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync, realpathSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -1109,9 +1109,22 @@ function readFileSafe(workspace, p) {
   const root = resolve(workspace);
   const full = resolve(root, p);
   if (full !== root && !full.startsWith(root + sep)) return "(ワークスペース外のパスです)";
+  let realRoot = root;
   try {
-    statSync(full);
-    return readFileSync(full, "utf8").slice(0, 200 * 1024);
+    realRoot = realpathSync(root);
+  } catch {}
+  let realFull = full;
+  try {
+    realFull = realpathSync(full);
+  } catch {
+    return "(ファイルがありません)";
+  }
+  if (realFull !== realRoot && !realFull.startsWith(realRoot + sep)) {
+    return "(ワークスペース外のパスです)";
+  }
+  try {
+    statSync(realFull);
+    return readFileSync(realFull, "utf8").slice(0, 200 * 1024);
   } catch {
     return "(ファイルがありません)";
   }
