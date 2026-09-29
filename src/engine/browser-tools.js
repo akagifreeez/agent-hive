@@ -47,43 +47,44 @@ function btAttr(attrs, name) {
 function btFormFields(formInner) {
   const fields = [];
   const pushField = (f) => { if (f.name && fields.length < 100) fields.push(f); };
-  let order = 0;
+  // input|select|textarea を1つの正規表現で出現順に走査する(HTML上の順序=order)
+  const tagRe = /<(input|select|textarea)\s([^>]*?)(?:>([\s\S]*?)<\/\1\s*>|\/?>)/gi;
   let m;
-  const inputRe = /<input\s([^>]*)>/gi;
-  while ((m = inputRe.exec(formInner))) {
-    const attrs = m[1] ?? "";
-    const type = (btAttr(attrs, "type") || "text").toLowerCase();
-    if (type === "submit" || type === "button" || type === "image") continue;
-    pushField({ name: btAttr(attrs, "name") ?? "", type, value: btAttr(attrs, "value") ?? "", order: ++order });
-  }
-  const selectRe = /<select\s([^>]*)>([\s\S]*?)<\/select\s*>/gi;
-  while ((m = selectRe.exec(formInner))) {
-    const attrs = m[1] ?? "";
-    const options = [];
-    const optRe = /<option\s([^>]*)>([\s\S]*?)<\/option\s*>/gi;
-    let om;
-    let value = "";
-    while ((om = optRe.exec(m[2] ?? ""))) {
-      const oa = om[1] ?? "";
-      const val = btAttr(oa, "value") ?? btStripTags(om[2]);
-      const selected = /(^|\s)selected(\s|$|=)/i.test(oa);
-      if (!value || selected) value = val;
-      options.push(val);
+  let order = 0;
+  while ((m = tagRe.exec(formInner))) {
+    const tag = m[1].toLowerCase();
+    const attrs = m[2] ?? "";
+    const inner = m[3] ?? "";
+    if (tag === "input") {
+      const type = (btAttr(attrs, "type") || "text").toLowerCase();
+      if (type === "submit" || type === "button" || type === "image") continue;
+      pushField({ name: btAttr(attrs, "name") ?? "", type, value: btAttr(attrs, "value") ?? "", order: ++order });
+    } else if (tag === "select") {
+      const options = [];
+      const optRe = /<option\s([^>]*)>([\s\S]*?)<\/option\s*>/gi;
+      let om;
+      let value = "";
+      while ((om = optRe.exec(inner))) {
+        const oa = om[1] ?? "";
+        const val = btAttr(oa, "value") ?? btStripTags(om[2]);
+        const selected = /(^|\s)selected(\s|$|=)/i.test(oa);
+        if (!value || selected) value = val;
+        options.push(val);
+      }
+      pushField({ name: btAttr(attrs, "name") ?? "", type: "select", value, options, order: ++order });
+    } else {
+      pushField({ name: btAttr(attrs, "name") ?? "", type: "textarea", value: btDecodeEntities(inner), order: ++order });
     }
-    pushField({ name: btAttr(attrs, "name") ?? "", type: "select", value, options, order: ++order });
-  }
-  const taRe = /<textarea\s([^>]*)>([\s\S]*?)<\/textarea\s*>/gi;
-  while ((m = taRe.exec(formInner))) {
-    pushField({ name: btAttr(m[1] ?? "", "name") ?? "", type: "textarea", value: btDecodeEntities(m[2] ?? ""), order: ++order });
   }
   return fields;
 }
+
 
 /**
  * HTMLをページ情報へ構造化する。
  * @param {string} html 生HTML
  * @param {string} baseUrl 絶対URL(相対リンク解決の基準)
- * @returns {{url: string, title: string, headings: string[], links: Array<{text: string, href: string|null}>, forms: Array<{index: number, method: string, action: string, html: string, fields: Array<{name: string, type: string, value: string, options?: string[], order: number}>}>, text: string, raw: string}}
+ * @returns {{url: string, title: string, headings: string[], links: Array<{text: string, href: string|null}>, forms: Array<{index: number, method: string, methodRaw?: string, action: string, html: string, fields: Array<{name: string, type: string, value: string, options?: string[], order: number}>}>, text: string, raw: string}}
  */
 export function parsePage(html, baseUrl) {
   const src = String(html ?? "");
@@ -104,7 +105,8 @@ export function parsePage(html, baseUrl) {
     const raw = am[1] ?? am[2] ?? am[3] ?? "";
     const text = btStripTags(am[4]);
     const href = normalizeUrl(raw, base);
-    if (!text && !href) continue;
+    if (href === null) continue; // javascript:/断片(#)等はリンク一覧から除外(テスト仕様: e80e512)
+    if (!text) continue;
     links.push({ text, href });
   }
   const forms = [];
@@ -112,11 +114,12 @@ export function parsePage(html, baseUrl) {
   let fm;
   while ((fm = fRe.exec(src))) {
     const attrs = fm[1] ?? "";
-    const method = (btAttr(attrs, "method") || "GET").toUpperCase();
+    const methodRaw = btAttr(attrs, "method") || "get";
     const actionRaw = btAttr(attrs, "action") || "";
     forms.push({
       index: forms.length + 1,
-      method: method || "GET",
+      method: methodRaw || "GET",
+      methodRaw,
       action: normalizeUrl(actionRaw || base, base) ?? base,
       html: fm[2] ?? "",
       fields: btFormFields(fm[2] ?? ""),
@@ -139,7 +142,9 @@ export function extractElements(page, filter = {}) {
   let index = 0;
   for (const type of want) {
     if (type === "link") {
+      // page.links(正規化済み・危険スキーム除外済み)をそのまま列挙する
       for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href });
+      }
     } else if (type === "form") {
       for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {
@@ -208,12 +213,17 @@ export function applyFormValues(form, values) {
  * 送信リクエストを組み立てる(GETはURL結合・POSTはurlenc)。
  * opts.selector指定時はフォームHTML内一致を検証し、無ければthrow(誤送信防止)。
  */
+const BS = String.fromCharCode(92); // バックスラッシュ(正規表現を文字列連結で組むための定数)
+const DQ = String.fromCharCode(34); // ダブルクォート
+const SQ = String.fromCharCode(39); // シングルクォート
 export function buildSubmission(form, values, opts = {}) {
   if (!form) throw new Error("フォームが見つかりません");
   const f = applyFormValues(form, values);
   if (opts.selector) {
-    const selRe = new RegExp("<" + String(opts.selector) + "(\\s|>)", "i");
-    if (!selRe.test(String(form.html ?? ""))) throw new Error("フォーム内に要素 " + String(opts.selector) + " が見つかりません(誤送信防止のため送信しません)");
+    const sel = String(opts.selector).trim().toLowerCase();
+    const esc = sel.replace(new RegExp("[.*+?^\${}()|[\]\\]", "g"), "\\$&");
+    const inForm = new RegExp("<" + esc + "(\s|>)", "i").test(String(form.html ?? "")) || (form.fields ?? []).some((x) => x.name.toLowerCase() === sel);
+    if (!inForm) throw new Error("フォーム内に要素 " + String(opts.selector) + " が見つかりません(誤送信防止のため送信しません)");
   }
   const pairs = f.fields.filter((x) => x.name).map((x) => [x.name, x.value ?? ""]);
   const body = new URLSearchParams(pairs).toString();

@@ -93,7 +93,11 @@ function currentTaskContext(tasks, agent, messages) {
  * @property {(() => any[])|null} [drainInput] ターン境界で割込ませる入力の取り出し(steering)
  * @property {(() => boolean)|null} [peekInput] 未処理入力が待っているか(idle退場の抑制)
  * @property {number} [claimMissesLimit] 連続請求ミス何回でidle終了するか
+<<<<<<< HEAD
  * @property {((messages: any[]) => void)|null} [checkpointFn] ツール実行済み地点でメッセージスナップシュットを保存する(イシュー#4)
+=======
+ * @property {((messages: any[]) => void)|null} [checkpointFn] ツール実行済み地点でスナップショットを保存するコールバック(イシュー#4)
+>>>>>>> main
  */
 
 /** @param {RunAgentLoopOptions} o */
