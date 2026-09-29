@@ -214,6 +214,9 @@ export async function runAgentLoop({
         reasoning: res.usage?.reasoningTokens ?? 0,
         ctxChars, msgCount: messages.length,
       }) + "\n");
+      // UIのリアルタイム表示用(イシュー#17): トレースと同じ値をbusへ流す。
+      // server.jsが受けて live.agents[id].ctx へ使用/上限/残りを計算して保持する
+      bus.emit("usage.trace", { agent: agent.id, turn, ctxChars });
     } catch { /* トレースの失敗でループを止めない */ }
     // サーバー側web_searchが走ったら活動ログへ(ZCodeの検索表示相当)
     if (res.searches?.length) {
