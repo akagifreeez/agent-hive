@@ -53,6 +53,9 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
     { at: d(0, 15), agent: "issue-x-alpha", endedBy: "turn-limit", totals: { calls: 3, promptTokens: 200, completionTokens: 80, reasoningTokens: 20, costUsd: 0.4 } },
     { at: d(1, 9), agent: "issue-x-alpha", endedBy: "ok", totals: { calls: 1, promptTokens: 300, completionTokens: 120, reasoningTokens: 30, costUsd: 0.6 } },
     { at: d(1, 9), totals: { calls: 5, promptTokens: 1000, completionTokens: 500, reasoningTokens: 0, costUsd: 1.0 } },
+    // thread付き(スレッドチャットのusage.round)
+    { at: d(0, 11), thread: "issue-x", agent: "issue-x-alpha", endedBy: "ok", totals: { calls: 1, promptTokens: 40, completionTokens: 20, reasoningTokens: 0, costUsd: 0.1 } },
+    { at: d(1, 12), thread: "issue-x", agent: "issue-x-beta", endedBy: "ok", totals: { calls: 3, promptTokens: 60, completionTokens: 30, reasoningTokens: 0, costUsd: 0.3 } },
     { at: "不正な日付", totals: { calls: 9, costUsd: 9 } },
     null,
   ];
@@ -61,24 +64,24 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
   assert.ok(agg.byDate.length >= 2);
   assert.equal(agg.byDate[0].date, now.toISOString().slice(0, 10), "1件目は今日");
   const today = agg.byDate[0];
-  assert.equal(today.calls, 5);
-  assert.ok(Math.abs(today.costUsd - 0.6) < 1e-9, 'costUsd合計(浮動小数は接近比較)');
-  assert.equal(today.promptTokens, 300);
-  assert.equal(today.completionTokens, 130);
+  assert.equal(today.calls, 6);
+  assert.ok(Math.abs(today.costUsd - 0.7) < 1e-9, 'costUsd合計(浮動小数は接近比較)');
+  assert.equal(today.promptTokens, 340);
+  assert.equal(today.completionTokens, 150);
   assert.equal(today.reasoningTokens, 30);
   // スレッド別
   const th = Object.fromEntries(agg.byThread.map((r) => [r.thread, r]));
-  assert.equal(th["__main__"].calls, 3);
-  assert.equal(th["__main__"].costUsd, 1.2);
-  assert.equal(th["issue-x"].calls, 4);
-  assert.equal(th["issue-x"].costUsd, 1.0);
+  assert.equal(th["__main__"].calls, 7);
+  assert.ok(Math.abs(th["__main__"].costUsd - 1.2) < 1e-9, "mainのcost合計");
+  assert.equal(th["issue-x"].calls, 7);
+  assert.ok(Math.abs(th["issue-x"].costUsd - 1.3) < 1e-9, "issue-xのcost合計");
   assert.ok(!th["__main__"].agentIds.includes("issue-x-alpha"), "スレッド別のエージェント一覧は自分のスレッド分だけ");
   assert.ok(th["issue-x"].agentIds.includes("issue-x-alpha"));
   // 日別xスレッド
   const key = (date, thread) => `${date}|${thread}`;
   const m = Object.fromEntries(agg.matrix.map((r) => [key(r.date, r.thread), r]));
   const todayMain = m[key(now.toISOString().slice(0, 10), "__main__")];
-  assert.ok(!todayMain, "今日のmain分は無い(今日のusage.roundはスレッド名付き)");
+  assert.ok(todayMain && todayMain.calls === 4, "今日のmain分はleadラウンドのみ(calls=4)");
 });
 
 test("aggregateUsage: 空や形状不良のhistoryでも安全に空集計を返す", () => {
