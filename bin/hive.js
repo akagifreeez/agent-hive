@@ -25,6 +25,7 @@ const HELP = `agent-hive CLI — 稼働中のhiveを端末から操作する
   feedback <taskId> <コメント>  マージ済み差分への修正依頼を送る
   pause <スレッド> / resume <スレッド>  スレッドの一時停止/再開
   audit                     監査台帳(state/audit.jsonl)の直近記録を見る(-n 件数、既定30)
+  notify                    通知(承認待ち/マージ/長時間タスク完了)の最新を監視から見る
   usage                     トークン消費の直近サマリ
 
   --port N                  UIサーバーのポート(既定: HIVE_UI_PORT または 7789)
@@ -281,6 +282,28 @@ async function cmdTaskAction(o, args, action) {
   return r;
 }
 
+async function cmdNotify(o) {
+  // 監視(monitor)の通知フィードを見る(#11)。監視が無効なら案内して終わり
+  const s = await api(o.port, "/api/state");
+  const mPort = s.monitorPort;
+  if (!mPort) {
+    console.error("監視(monitor)が無効です。起動時に ui.monitorPort を設定してください。");
+    exit(1);
+  }
+  const snap = await api(mPort, "/api/monitor");
+  const pend = snap.pendingRequests ?? [];
+  const list = snap.notifications ?? [];
+  console.log(`${ACCENT}承認待ち ${pend.length}件${RESET}`);
+  for (const r of pend) console.log(`  \u{1F510} #${r.id} ${r.command}`);
+  console.log(`${ACCENT}通知 ${list.length}件${RESET}(新しい順)`);
+  for (const n of list) {
+    const at = n.at ? String(n.at).replace("T", " ").slice(0, 19) : "-";
+    const icon = n.kind === "permission.request" ? "\u{1F510}" : (n.kind === "merge.completed" ? "\u{1F500}" : "\u23F1");
+    console.log(`  ${DIM}${at}${RESET} ${icon} ${BOLD}${n.title}${RESET} ${n.body}`);
+  }
+  if (!pend.length && !list.length) console.log("(通知なし)");
+}
+
 async function cmdAudit(o) {
   const r = await api(o.port, `/api/audit?limit=${o.limit}`);
   const audit = r.audit ?? [];
@@ -314,6 +337,7 @@ async function main() {
     return cmdTasks(opts, sub);
   }
   if (cmd === "audit") return cmdAudit(opts);
+  if (cmd === "notify") return cmdNotify(o);
   if (cmd === "board") return cmdBoard(opts);
   if (cmd === "say") return cmdSay(opts, args);
   if (cmd === "feedback") return cmdFeedback(opts, args);
