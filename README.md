@@ -16,17 +16,18 @@ Multiple resident agents (a leader, per-thread workers, and autoscaled extras) t
 
 <!-- auto:cli-commands start -->
 ```
-node bin/hive.js status            稼働状態(モデル/タスク/スレッド/エージェント)を一覧
-node bin/hive.js threads           スレッド一覧(フォルダ・停止中表示つき)
-node bin/hive.js say <テキスト>        メインチャットへ発言(--thread でスレッド指定)
-node bin/hive.js board [-n 件数]     最近のボード投稿を見る(既定30件)
-node bin/hive.js watch             ボードの新着をリアルタイムで流し見(Ctrl+Cで終了)
-node bin/hive.js chat [--thread 名前]  対話モード。入力した行がそのまま発言になる
+node bin/hive.js status                    稼働状態(モデル/タスク/スレッド/エージェント)を一覧
+node bin/hive.js threads                   スレッド一覧(フォルダ・停止中表示つき)
+node bin/hive.js tasks [open|claimed|done] タスク一覧(省略時は未着手+作業中)
+node bin/hive.js say <テキスト>            メインチャットへ発言(--thread でスレッド指定)
+node bin/hive.js board [-n 件数]           最近のボード投稿を見る(既定30件)
+node bin/hive.js watch                     ボードの新着をリアルタイムで流し見(Ctrl+Cで終了)
+node bin/hive.js chat [--thread 名前]      対話モード。入力した行がそのまま発言になる
 node bin/hive.js feedback <taskId> <コメント>  マージ済み差分への修正依頼を送る
 node bin/hive.js pause <スレッド> / resume <スレッド>  スレッドの一時停止/再開
-node bin/hive.js audit             監査台帳(state/audit.jsonl)の直近記録を見る(-n 件数、既定30)
-node bin/hive.js notify            通知(承認待ち/マージ/長時間タスク完了)の最新を監視から見る
-node bin/hive.js usage             トークン消費の直近サマリ
+node bin/hive.js audit                     監査台帳(state/audit.jsonl)の直近記録を見る(-n 件数、既定30)
+node bin/hive.js notify                    通知(承認待ち/マージ/長時間タスク完了)の最新を監視から見る
+node bin/hive.js usage                     トークン消費の直近サマリ
 ```
 <!-- auto:cli-commands end -->
 
@@ -135,12 +136,14 @@ docs/         設計ノート・監査レポート(redteam結果含む)
 
 <!-- auto:repo-layout start -->
 ```
-src/engine/ コア(ボード/タスク/worktree/ループ/発見器/記憶/権限/MCP/監査)
-src/ui/ HTTPサーバー+ブラウザUI(依存ゼロ)
 src/desktop/ Electron殻(トレイ常駐・通知・梱包時のデータ分離)
+src/engine/ コア(ボード/タスク/worktree/ループ/発見器/記憶/権限/MCP/監査)
+src/model/ モデルアダプタ(ワイヤ形式ごと)+ファクトリ+共有スロットリング
+src/ui/ HTTPサーバー+ブラウザUI(依存ゼロ)
 bin/ CLI
 agents/ エージェントのペルソナ
 docs/ 設計ノート・監査レポート(redteam結果含む)
+memory/ エージェント用の永続記憶(制約・決定事項)
 scripts/ 補助スクリプト(doctor/e2e等)
 test/ テスト(node --test)
 ```
