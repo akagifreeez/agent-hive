@@ -48,6 +48,7 @@ test("checkpoint: モデル異常で中断したラウンドがスナップシ�
   const agent = { id: "cp-lead", displayName: "シー", role: "lead", depth: 0, personaText: "# C" };
   const host = new ChatHost({
     mains: [agent],
+    mainWorkspace: ws,
     modelFactory: () => model,
     toolsFactory: () => ({
       specs: [{ name: "noop", description: "何もしない", parameters: { type: "object", properties: {} } }],

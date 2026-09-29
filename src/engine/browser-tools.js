@@ -84,7 +84,7 @@ function btFormFields(formInner) {
  * HTMLをページ情報へ構造化する。
  * @param {string} html 生HTML
  * @param {string} baseUrl 絶対URL(相対リンク解決の基準)
- * @returns {{url: string, title: string, headings: string[], links: Array<{text: string, href: string|null}>, forms: Array<{index: number, method: string, action: string, html: string, fields: Array<{name: string, type: string, value: string, options?: string[], order: number}>}>, text: string, raw: string}}
+ * @returns {{url: string, title: string, headings: string[], links: Array<{text: string, href: string|null}>, forms: Array<{index: number, method: string, methodRaw?: string, action: string, html: string, fields: Array<{name: string, type: string, value: string, options?: string[], order: number}>}>, text: string, raw: string}}
  */
 export function parsePage(html, baseUrl) {
   const src = String(html ?? "");
@@ -119,6 +119,7 @@ export function parsePage(html, baseUrl) {
     forms.push({
       index: forms.length + 1,
       method: methodRaw || "GET",
+      methodRaw,
       action: normalizeUrl(actionRaw || base, base) ?? base,
       html: fm[2] ?? "",
       fields: btFormFields(fm[2] ?? ""),
@@ -143,7 +144,7 @@ export function extractElements(page, filter = {}) {
     if (type === "link") {
       for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href });
     } else if (type === "form") {
-      for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.methodRaw ?? f.method, action: f.action, fields: f.fields.length });
+      for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {
       const hRe = /<h([1-6])(\s[^>]*)?>([\s\S]*?)<\/h\1\s*>/gi;
       let hm;
