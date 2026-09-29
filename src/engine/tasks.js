@@ -13,8 +13,13 @@ import { join } from "node:path";
  * @property {string|null} role 担当ロール(impl/review/lead等)。null=誰でも請求可
  * @property {string|null} project 文脈(取り組み名=スレッド名)
  * @property {string} acceptance 受け入れ基準
+<<<<<<< HEAD
  * @property {string[]} dependsOn 依存タスクid(未完了があるとclaim不可)
  * @property {string|null} model タスク別モデル指定(ModelRef文字列)。リーダーだけ設定可・null=既定モデル
+=======
+  * @property {string[]} dependsOn 依存タスクid(未完了があるとclaim不可)
+ * @property {string|null} model リーダーが指定した代替モデルref(#12)。null=既定モデル
+>>>>>>> main
  * @property {boolean} blocked 依存未完了でclaim不可のときtrue(openのみ計算)
  * @property {string} summary 本文の要約(先頭の実質行)
  * @property {string} path タスクファイルのパス
@@ -38,12 +43,20 @@ export class TaskBlackboard {
   /**
    * 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
    * acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
+<<<<<<< HEAD
    * @param {{id: string, role?: string|null, body?: string, project?: string, acceptance?: string, dependsOn?: string[], model?: string|null, createdBy?: string|null}} t
+=======
+   * @param {{id: string, role?: string|null, body?: string, project?: string, acceptance?: string, dependsOn?: string[], createdBy?: string|null, model?: string|null}} t
+>>>>>>> main
    * @returns {boolean} 既存のidならfalse
    */
   // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
   // acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
+<<<<<<< HEAD
   create({ id, role, body, project = "", acceptance = "", dependsOn = [], model = null, createdBy = null }) {
+=======
+  create({ id, role, body, project = "", acceptance = "", dependsOn = [], createdBy = null, model = null }) {
+>>>>>>> main
     const f = join(this.open, `${id}.md`);
     if (existsSync(f)) return false;
     const meta = metaLines(project, role, acceptance, dependsOn, model);
@@ -356,6 +369,8 @@ export function readMeta(file) {
       const m = l.match(/^model:\s*(.+)$/);
       if (m) meta.model = m[1].trim() || null;
       if (d) meta.dependsOn = String(d[1]).split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+      const mo = l.match(/^model:\s*(.+)$/);
+      if (mo) meta.model = mo[1].trim() || null;
     }
     return meta;
   } catch {
@@ -388,8 +403,14 @@ function metaLines(project, role, acceptance = "", dependsOn = [], model = null)
   if (acc) lines.push(`acceptance: ${acc}`);
   const dep = dependsLine(dependsOn);
   if (dep) lines.push(dep);
+<<<<<<< HEAD
   const ml = modelLine(model);
   if (ml) lines.push(ml);
+=======
+  // リーダーが特定タスクだけ代替モデルを指定(#12)。1行メタ
+  const mo = String(model ?? "").trim().replace(/[\r\n]/g, "");
+  if (mo) lines.push(`model: ${mo.slice(0, 80)}`);
+>>>>>>> main
   return lines.length ? lines.join("\n") + "\n" : "";
 }
 

@@ -2,6 +2,7 @@
 // 階層(メイン→サブ→作業員)は「仕事の組織化」だけに使い、コミュニケーションは
 // 全レベルが同じボードで合流する(報告は必ずボード/親への秘密チャネルは作らない)。
 import { join, resolve } from "node:path";
+import { readdirSync } from "node:fs";
 import { createWorktree } from "./worktree.js";
 import { createTools } from "./tools.js";
 import { readMeta } from "./tasks.js";
@@ -19,6 +20,18 @@ const WORKER_PERSONA = (displayName, role) => `# ${displayName}(スポーンさ�
 - 追加の仕事が必要になったら create_task で起票し、ボードでも告知する。
 - 困ったらボードで質問する(親に直接ではなく全員に見える形で)。
 `;
+
+// 請求中ブリーフタスクのメタからmodel指定を読む(#12)。無ければnull(既定モデル)
+function readTaskModel(tasks, agentId) {
+  try {
+    const dir = join(tasks.dir, "claimed");
+    const f = readdirSync(dir).find((x) => x === `${agentId}--spawn-${agentId}.md`);
+    if (!f) return null;
+    return readMeta(join(dir, f)).model ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export class SpawnManager {
   constructor({
@@ -55,13 +68,21 @@ export class SpawnManager {
 
   // ツールから呼ばれる。呼び出し元は待たせないので、ループは非同期で走らせる。
   // boardは呼び出し元のスレッドのボード(v6。省略時は構築時のboard=メイン)。
+<<<<<<< HEAD
   async spawn({ parent, board = null, displayName, role, brief, project = "", model = null, expendable = false }) {
+=======
+  async spawn({ parent, board = null, displayName, role, brief, project = "", expendable = false, model = null }) {
+>>>>>>> main
     const depth = (parent.depth ?? 0) + 1;
     if (depth > this.hierarchy.maxDepth) {
       return { error: `深さの上限(${this.hierarchy.maxDepth})に達しています。あなたの配下には作れません。` };
     }
     if (this.live.size >= this.hierarchy.maxConcurrent) {
       return { error: `同時エージェント数の上限(${this.hierarchy.maxConcurrent})に達しています。既存の作業の完了を待ってください。` };
+    }
+    // model指定(#12)はリーダー(depth 0)のみ。子からの指定は既定運用へ戻すため拒否
+    if (model && (parent.depth ?? 0) !== 0) {
+      return { error: "model指定はリーダーのみ可能です(基本は既定モデルを使います)。" };
     }
     if (!brief || !brief.trim()) {
       return { error: "briefが空です。何を/どう確認するかを書いてください。" };
@@ -91,7 +112,11 @@ export class SpawnManager {
     this.live.set(id, { displayName: dn, depth, parent: parent.id, status: "working", model: model ?? null });
     // ブリーフ=このエージェントの請求済みタスク。finish_taskで完了→main自動マージまで繋がる
     const projNote = project ? `文脈(project): ${project} — 追加のタスクを請求するときは project: ${project} で絞ること。\n\n` : "";
+<<<<<<< HEAD
     this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, project, model: model ?? null, body: `${projNote}スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
+=======
+    this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, project, model, body: `${projNote}スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
+>>>>>>> main
     this.bus.emit("agent.spawned", { agent: { id, displayName: dn, depth, parent: parent.id, role: agent.role, thread: project || null } });
     b.post("system", `[スポーン] ${parent.displayName} が作業エージェント ${dn}(${id}) を作成しました。`);
 
@@ -102,9 +127,14 @@ export class SpawnManager {
 
   async runAgent(agent, worktreePath, brief, board = null) {
     const b = board ?? this.board;
+<<<<<<< HEAD
     // タスク別モデル選択(イシュー#12): 自分のブリーフタスク(spawn-*)にmodel指定があればそのrefを渡す。未指定なら従来どおり
     const briefTask = this.tasks.claimedBy(agent.id).find((t) => t.id === `spawn-${agent.id}`);
     const taskModel = briefTask ? (readMeta(join(this.tasks.claimed, `${agent.id}--spawn-${agent.id}.md`)).model ?? null) : null;
+=======
+    // タスクにmodel指定があればそれを優先(#12: リーダーが特例で指定)。無ければ既定どおり
+    const taskModel = readTaskModel(this.tasks, agent.id);
+>>>>>>> main
     const model = this.modelFactory({ ...agent, model: taskModel ?? agent.model });
     const tools = createTools({
       agent,
