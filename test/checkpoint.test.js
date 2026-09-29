@@ -36,7 +36,7 @@ test("checkpoint: モデル異常で中断したラウンドがスナップシ�
     maxTokens: 100,
     async chat({ messages }) {
       n++;
-      calls.push(messages.map((m) => `${m.role}:${String(m.content).slice(0, 24)}`));
+      calls.push(messages.map((m) => m.role));
       if (n === 1) {
         // 1回目: 1ターン目は応答するがツール実行後に2ターン目で死ぬ
         return { content: "", toolCalls: [{ name: "noop", args: {} }], raw: {} };
@@ -56,29 +56,26 @@ test("checkpoint: モデル異常で中断したラウンドがスナップシ�
     board, tasks, bus, maxTurnsPerRound: 6, staggerMs: 0,
   });
   host.say("チェックポイント検証");
-  // 1回目: 2ターン目のmodel.chatで死ぬのを待つ
-  await waitUntil(() => n >= 2, 4000);
-  // スナップショットが書かれている(エラー直前=1ターン目のツール実行後)
+  // エラーで復元されるまで待つ(n>=2のmodel.chat失敗→スナップショット復元)
+  let restored = null;
+  bus.on("checkpoint.restored", (e) => { restored = e; });
+  await waitUntil(() => restored !== null, 4000);
+  assert.ok(restored, "モデル異常時にcheckpoint復元が走る");
+  assert.equal(restored.agent, "cp-lead");
+  assert.ok(restored.messages >= 3, "復元されたmessagesはスナップショット一式");
+  // スナップショットは一度書かれて、復元時に削除される
   const cpFile = join(ws, "state", "checkpoint-cp-lead.json");
-  assert.ok(existsSync(cpFile), "state/checkpoint-<id>.json が作られる");
-  const cp = JSON.parse(readFileSync(cpFile, "utf8"));
-  assert.ok(Array.isArray(cp.messages) && cp.messages.length >= 3, "スナップショットはsystem+user+ツール結果を含む");
-  assert.equal(cp.messages.at(-1).role, "tool", "最後の要素はツール実行結果");
+  assert.equal(existsSync(cpFile), false, "復元後はcheckpointを削除(失敗の無限ループ防止)");
 
-  // 2回目のchat()が成功してラウンドが終わるのを待つ
+  // 次のラウンドがスナップショット地点から再開する(kickoff二重積みなし)
+  host.wake(agent, "[チャット] 続きをどうぞ");
   await waitUntil(() => n >= 3, 4000);
   await waitUntil(() => !host.roundState.get("cp-lead")?.running, 4000);
-
-  // 復元: メモリがスナップショット地点から再開している(キックオフ文の二重積みがない)
+  const second = calls[2];
+  assert.ok(second.includes("tool"), "復元後のラウンドにツール結果が引き継がれている");
   const mem = JSON.parse(readFileSync(join(ws, "state", "mem-cp-lead.json"), "utf8"));
-  const userMsgs = mem.messages.filter((m) => m.role === "user");
-  assert.equal(userMsgs.length, 1, "ユーザーメッセージ(kickoff)は1回だけ=二重積みされていない");
-  // 2回目のchatに渡ったmessagesはスナップショットを引き継いでいる(最初のkickoff文を含みつつツール結果も残る)
-  const second = calls[2] ?? calls[1];
-  assert.ok(second.some((m) => m.startsWith("tool:")), "復元後のラウンドにツール結果が引き継がれている");
-  // resume完了後、checkpointファイルは削除される(失敗の無限ループ防止)
-  await waitUntil(() => !existsSync(cpFile), 4000);
-  assert.equal(existsSync(cpFile), false, "復元後はcheckpointを削除");
+  const continuations = mem.messages.filter((m) => m.role === "user" && m.content.includes("続きをどうぞ"));
+  assert.equal(continuations.length, 1, "継続入力は1回だけ積まれる(スナップショットは置き換えなので二重化しない)");
   rmTree(ws);
 });
 
