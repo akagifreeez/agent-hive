@@ -68,13 +68,17 @@ export class SpawnManager {
 
   // ツールから呼ばれる。呼び出し元は待たせないので、ループは非同期で走らせる。
   // boardは呼び出し元のスレッドのボード(v6。省略時は構築時のboard=メイン)。
-  async spawn({ parent, board = null, displayName, role, brief, project = "", expendable = false }) {
+  async spawn({ parent, board = null, displayName, role, brief, project = "", expendable = false, model = null }) {
     const depth = (parent.depth ?? 0) + 1;
     if (depth > this.hierarchy.maxDepth) {
       return { error: `深さの上限(${this.hierarchy.maxDepth})に達しています。あなたの配下には作れません。` };
     }
     if (this.live.size >= this.hierarchy.maxConcurrent) {
       return { error: `同時エージェント数の上限(${this.hierarchy.maxConcurrent})に達しています。既存の作業の完了を待ってください。` };
+    }
+    // model指定(#12)はリーダー(depth 0)のみ。子からの指定は既定運用へ戻すため拒否
+    if (model && (parent.depth ?? 0) !== 0) {
+      return { error: "model指定はリーダーのみ可能です(基本は既定モデルを使います)。" };
     }
     if (!brief || !brief.trim()) {
       return { error: "briefが空です。何を/どう確認するかを書いてください。" };
@@ -104,7 +108,7 @@ export class SpawnManager {
     this.live.set(id, { displayName: dn, depth, parent: parent.id, status: "working" });
     // ブリーフ=このエージェントの請求済みタスク。finish_taskで完了→main自動マージまで繋がる
     const projNote = project ? `文脈(project): ${project} — 追加のタスクを請求するときは project: ${project} で絞ること。\n\n` : "";
-    this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, project, body: `${projNote}スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
+    this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, project, model, body: `${projNote}スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
     this.bus.emit("agent.spawned", { agent: { id, displayName: dn, depth, parent: parent.id, role: agent.role, thread: project || null } });
     b.post("system", `[スポーン] ${parent.displayName} が作業エージェント ${dn}(${id}) を作成しました。`);
 

@@ -60,6 +60,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           body: { type: "string", description: "具体的な指示(何を/どう確認するか/完了条件)" },
           acceptance: { type: "string", description: "受け入れ基準。完了とみなす客観的な条件を1文で(例: npm testが通り、境界の両側を検証している)" },
           depends_on: { type: "array", items: { type: "string" }, description: "先行タスクidの配列。全てdoneになるまでこのタスクは請求できない" },
+          model: { type: "string", description: "[リーダー専用・任意] このタスクだけ代替モデルref(provider/modelまたはベアID)を使う。基本は既定モデルのまま(相当な理由があるときだけ)" },
         },
         required: ["task_id", "body"],
         additionalProperties: false,
@@ -457,6 +458,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           role: args.role ? String(args.role) : undefined,
           project: args.project ? String(args.project) : "",
           brief: String(args.brief ?? ""),
+          model: String(args.model ?? "").trim() || null,
         });
         if (r.error) return { ok: false, text: `スポーンできません: ${r.error}` };
         return { ok: true, text: `サブエージェント ${r.id}(${r.displayName}) をスポーンしました。進捗はボードに流れます。` };
