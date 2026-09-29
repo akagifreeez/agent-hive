@@ -322,8 +322,9 @@
   #dlg input:focus { outline: none; border-color: var(--accent); }
   #dlg .row { display: flex; justify-content: flex-end; gap: 8px; }
   #toasts { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
-  .toast { background: var(--panel2); border: 1px solid var(--line-strong); border-left: 3px solid var(--accent); color: var(--label); border-radius: 6px; padding: 8px 12px; font-size: 12px; box-shadow: var(--shadow-overlay); max-width: 340px; }
+  .toast { background: var(--panel2); border: 1px solid var(--line-strong); border-left: 3px solid var(--accent); color: var(--label); border-radius: 6px; padding: 8px 12px; font-size: 12px; box-shadow: var(--shadow-overlay); max-width: 380px; word-break: break-word; cursor: pointer; }
   .toast.err { border-left-color: var(--err); }
+  .toast.expanded { max-width: 600px; max-height: 50vh; overflow-y: auto; white-space: pre-wrap; }
 </style>
 </head>
 <body>
@@ -1572,8 +1573,10 @@ function toast(msg, kind = "err") {
   const t = document.createElement("div");
   t.className = "toast " + kind;
   t.textContent = msg;
+  t.title = "クリックで展開/閉じる";
+  t.onclick = () => t.classList.toggle("expanded");
   $("toasts").appendChild(t);
-  setTimeout(() => t.remove(), 4200);
+  setTimeout(() => { if (!t.classList.contains("expanded")) t.remove(); }, 5000);
 }
 
 // ブラウザ標準のpromptの代替。テキスト入力つきダイアログ。キャンセル/Escはnull
@@ -2139,6 +2142,20 @@ const ALL_COMMANDS = () => ({
   function renderTerminalTab() {
     const body = document.getElementById("ctx-body");
     body.innerHTML = "";
+    const topRow = document.createElement("div");
+    topRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;";
+    const sec = document.createElement("div");
+    sec.className = "sec";
+    sec.style.margin = "0";
+    sec.textContent = "ターミナル";
+    const clearBtn = document.createElement("button");
+    clearBtn.className = "btn";
+    clearBtn.textContent = "消去";
+    clearBtn.onclick = () => {
+      window.__termOut = "";
+      if (out) out.textContent = "";
+    };
+    topRow.append(sec, clearBtn);
     const out = document.createElement("pre");
     out.className = "fileview mono";
     out.style.minHeight = "200px";
@@ -2153,11 +2170,13 @@ const ALL_COMMANDS = () => ({
       input.value = "";
       window.__termOut = (window.__termOut ?? "") + "$ " + cmd + "\n";
       out.textContent = window.__termOut + "実行中...";
+      out.scrollTop = out.scrollHeight;
       const r = await (await hfetch("/api/exec", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ command: cmd }) })).json();
       window.__termOut += (r.text ?? "") + "\n";
       out.textContent = window.__termOut;
       out.scrollTop = out.scrollHeight;
     });
+    body.appendChild(topRow);
     body.appendChild(input);
     body.appendChild(out);
   }
