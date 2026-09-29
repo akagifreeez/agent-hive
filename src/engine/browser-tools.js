@@ -142,15 +142,10 @@ export function extractElements(page, filter = {}) {
   let index = 0;
   for (const type of want) {
     if (type === "link") {
-      // リンクはrawから直接列挙する(断片#...はhref=nullで残す。遷移候補の一覧性優先)。javascript:等は除外
-      const aRe = /<a\s[^>]*?href=(?:"([^"]*)"|'[^']*'|([^\s>]+))[^>]*>([\s\S]*?)<\/a\s*>/gi;
-      let am;
-      while ((am = aRe.exec(String(page.raw ?? ""))) && index < 100) {
-        const rawHref = am[1] ?? am[2] ?? am[3] ?? "";
-        const text = btStripTags(am[4]);
-        if (!text) continue;
-        if (/^(javascript|data|vbscript):/i.test(rawHref.trim())) continue;
-        out.push({ index: ++index, type, text, href: normalizeUrl(rawHref, page.url) });
+      // リンクはpage.linksを使う(parsePageと同じ一覧。断片#/javascript:は除外済み・テスト仕様 e80e512)
+      for (const l of page.links ?? []) {
+        if (index >= 100) break;
+        out.push({ index: ++index, type, text: l.text, href: l.href });
       }
     } else if (type === "form") {
       for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
