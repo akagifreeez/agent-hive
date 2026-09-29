@@ -59,7 +59,7 @@ npm start              # ブラウザUIのみ(http://localhost:7789)
 
 ### 設定
 
-- `hive.config.json` の `models` セクション: モデル接続をプロバイダ単位で定義する(複数契約に対応。`api` はワイヤ形式= `openai-completions`(OpenAI互換・GLM/OpenRouter等)または `anthropic-messages`(Claude。API key と setup-token sk-ant-oat01- の両方を鍵値のプレフィックスで自動判別))。`default` は `provider/model` 形の既定モデル、`fallbacks` は終端エラー時の代替列。auth は `env`(環境変数)/`file`(鍵ファイル)/`value`(直値)のいずれか:
+- `hive.config.json` の `models` セクション: モデル接続をプロバイダ単位で定義する(複数契約に対応。`api` はワイヤ形式= `openai-completions`(OpenAI互換・GLM/OpenRouter等)/ `anthropic-messages`(Claude。API key と setup-token sk-ant-oat01- の両方を鍵値のプレフィックスで自動判別)/ `openai-chatgpt-responses`(ChatGPT Plus/Pro。Codex OAuth で認証))。`default` は `provider/model` 形の既定モデル、`fallbacks` は終端エラー時の代替列。auth は `env`(環境変数)/`file`(鍵ファイル)/`value`(直値)のいずれか。設定UIの「モデルと接続」から鍵保存・OAuth認証・疎通テストができる:
 
   ```json
   "models": {
