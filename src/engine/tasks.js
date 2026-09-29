@@ -234,19 +234,20 @@ export class TaskBlackboard {
     };
     const open = readdirSync(this.open).filter((f) => f.endsWith(".md")).sort().map((f) => {
       const meta = readMeta(join(this.open, f));
-      return { state: "open", id: f.replace(/\.md$/, ""), agent: null, role: meta.role, project: meta.project, acceptance: meta.acceptance ?? "", summary: summarize(bodyOf(readFileSync(join(this.open, f), "utf8"))), path: `tasks/open/${f}` };
+      const deps = meta.dependsOn ?? [];
+      return { state: "open", id: f.replace(/\.md$/, ""), agent: null, role: meta.role, project: meta.project, acceptance: meta.acceptance ?? "", dependsOn: deps, blocked: deps.length > 0 && !this.canClaim(f), summary: summarize(bodyOf(readFileSync(join(this.open, f), "utf8"))), path: `tasks/open/${f}` };
     });
     const claimed = readdirSync(this.claimed).filter((f) => f.endsWith(".md")).sort().map((f) => {
       const meta = readMeta(join(this.claimed, f));
       const base = f.replace(/\.md$/, "");
       const idx = base.indexOf("--");
-      return { state: "claimed", id: base.slice(idx + 2), agent: base.slice(0, idx), role: meta.role, project: meta.project, acceptance: meta.acceptance ?? "", summary: summarize(bodyOf(readFileSync(join(this.claimed, f), "utf8"))), path: `tasks/claimed/${f}` };
+      return { state: "claimed", id: base.slice(idx + 2), agent: base.slice(0, idx), role: meta.role, project: meta.project, acceptance: meta.acceptance ?? "", dependsOn: meta.dependsOn ?? [], blocked: false, summary: summarize(bodyOf(readFileSync(join(this.claimed, f), "utf8"))), path: `tasks/claimed/${f}` };
     });
     const done = readdirSync(this.done).filter((f) => f.endsWith(".md")).sort().map((f) => {
       const base = f.replace(/\.md$/, "");
       const idx = base.indexOf("--");
       const meta = readMeta(join(this.done, f));
-      return { state: "done", id: base.slice(idx + 2), agent: base.slice(0, idx), role: null, project: meta.project, acceptance: meta.acceptance ?? "", summary: summarize(bodyOf(readFileSync(join(this.done, f), "utf8"))), path: `tasks/done/${f}` };
+      return { state: "done", id: base.slice(idx + 2), agent: base.slice(0, idx), role: null, project: meta.project, acceptance: meta.acceptance ?? "", dependsOn: meta.dependsOn ?? [], blocked: false, summary: summarize(bodyOf(readFileSync(join(this.done, f), "utf8"))), path: `tasks/done/${f}` };
     });
     return { open, claimed, done };
   }
