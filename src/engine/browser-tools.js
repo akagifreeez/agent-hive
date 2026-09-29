@@ -105,7 +105,7 @@ export function parsePage(html, baseUrl) {
     const raw = am[1] ?? am[2] ?? am[3] ?? "";
     const text = btStripTags(am[4]);
     const href = normalizeUrl(raw, base);
-    if (href === null) { if (raw.startsWith("#")) { links.push({ text, href: null }); } continue; }
+    if (href === null) continue; // javascript:/断片(#)等は除外
     if (!text) continue;
     links.push({ text, href });
   }
