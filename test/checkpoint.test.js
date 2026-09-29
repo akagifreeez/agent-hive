@@ -54,7 +54,7 @@ test("checkpoint: モデル異常で中断したラウンドがスナップシ�
       specs: [{ name: "noop", description: "何もしない", parameters: { type: "object", properties: {} } }],
       execute: async () => ({ ok: true, text: "noop実行" }),
     }),
-    board, tasks, bus, maxTurnsPerRound: 6, staggerMs: 0,
+    board, tasks, bus, maxTurnsPerRound: 6, staggerMs: 0, mainWorkspace: ws,
   });
   host.say("チェックポイント検証");
   // エラーで復元されるまで待つ(n>=2のmodel.chat失敗→スナップショット復元)
