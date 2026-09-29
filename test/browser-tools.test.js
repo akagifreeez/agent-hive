@@ -106,7 +106,11 @@ test("extractElements: 種別フィルタとジャンプ先(index)が返る", as
   assert.equal(headings[0].level, 1);
 
   const links = extractElements(page, { type: "link" });
+<<<<<<< HEAD
   assert.equal(links.length, 2); // 断片(#sec-1)はnormalizeUrlで除外(テスト仕様 e80e512)
+=======
+  assert.equal(links.length, 2); // 断片(#sec-1)はnormalizeUrlでnull→除外(実装契約: 断片は遷移候補から外す)
+>>>>>>> main
   assert.ok(links.every((l) => l.index >= 1));
 
   const all = extractElements(page, {});
