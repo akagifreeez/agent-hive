@@ -94,9 +94,9 @@ test("GET /api/usage-trace: agentフィルタとturn範囲(fromTurn/toTurn)で�
     assert.equal(r1.body.series.length, 1);
     assert.equal(r1.body.series[0].agent, "w1");
     assert.equal(r1.body.series[0].points.length, 4);
-    // turn範囲
+    // turn範囲(w2のturn=1は範囲外で除外される)
     const r2 = await fetchJson(`${base}/api/usage-trace?fromTurn=2&toTurn=5`);
-    assert.deepEqual(r2.body.series.map((s) => s.agent).sort(), ["w1", "w2"]);
+    assert.deepEqual(r2.body.series.map((s) => s.agent), ["w1"]);
     const w1 = r2.body.series.find((s) => s.agent === "w1");
     assert.deepEqual(w1.points.map((p) => p.turn), [2, 5]);
     // agent+範囲の併用
