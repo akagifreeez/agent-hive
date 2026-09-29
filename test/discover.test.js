@@ -165,28 +165,23 @@ test("READMEプローブ: 一致していれば起票しない・マーカー無
   const ws = makeWorkspace();
   const { bus, tasks } = makeEnv(ws);
   const { writeFileSync: wf, mkdirSync: mkd } = await import("node:fs");
+  const { markerStart, markerEnd } = await import("../src/engine/readme-auto.js");
   mkd(join(ws, "bin"), { recursive: true });
   wf(join(ws, "bin", "hive.js"), "const HELP = `x\n  status     一覧\n`;\nexport { parseGlobalArgs };\n");
-  const { updateReadmeFromCode } = await import("../src/engine/readme-auto.js");
   // まずは自動セクション無しの手書きREADME → 何も起きない(保護)
   wf(join(ws, "README.md"), "# 手書きREADME\n\n機械管理領域は無い。\n");
   const d = startDiscovery({ workspace: ws, tasks, bus, intervalSec: 3600, testCommand: null });
   await d.tick();
   assert.equal(tasks.existsOpenOrClaimed("update-readme"), false);
 
-  // 自動セクションを設置してコードと同期 → これも起票しない
-  updateReadmeSections(
-    { repoRoot: ws, sections: [{ id: "cli-commands", content: "PLACEHOLDER" }] },
-  );
-  const { markerStart, markerEnd } = await import("../src/engine/readme-auto.js");
-  const synced = wf(join(ws, "README.md"), "");
+  // 自動セクションを設置してコードと同期済みの内容 → これも起票しない
+  const { genCliCommands } = await import("../src/engine/readme-auto.js");
   wf(
     join(ws, "README.md"),
-    ["# タイトル", "", markerStart("cli-commands"), "```\nnode bin/hive.js status     一覧\n```", markerEnd("cli-commands"), ""].join("\n"),
+    ["# タイトル", "", markerStart("cli-commands"), genCliCommands("x\n  status     一覧\n"), markerEnd("cli-commands"), ""].join("\n"),
   );
   await d.tick();
   assert.equal(tasks.existsOpenOrClaimed("update-readme"), false);
-  assert.equal(synced, ""); // 未使用変数の暗示的な確認(常に空文字)
   d.stop();
   rmTree(ws);
 });
