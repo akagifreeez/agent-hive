@@ -46,7 +46,7 @@ function startLocalServer(routes) {
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", () => {
-      const route = routes[req.url] ?? {}; console.log("SRV:", req.method, req.url);
+      const route = routes[req.url] ?? {};
       if (route.seeOther) {
         res.writeHead(303, { location: route.seeOther });
         res.end();
@@ -56,7 +56,7 @@ function startLocalServer(routes) {
       const echo = route.echoBody
         ? PAGE_HTML.replace("__METHOD__", req.method).replace("__BODY__", body).replace("__CT__", req.headers["content-type"] ?? "(none)")
         : route.body ?? "";
-      console.log("SRV-echo len:", (echo??"").length, "bodyLen:", (route.body??"").length); res.end(echo);
+      res.end(echo);
     });
   });
   return new Promise((done) => {
