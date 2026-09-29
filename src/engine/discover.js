@@ -10,7 +10,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "./exec.js";
+<<<<<<< HEAD
 import { detectStaleSections, updateReadmeFromCode, genCliCommands, genRepoLayout, extractHelp } from "./readme-auto.js";
+=======
+import { detectStaleSections, genCliCommands, genRepoLayout, extractHelp } from "./readme-auto.js";
+>>>>>>> main
 
 export const FIX_TASK_ID = "fix-test-failures";
 export const REVIEW_TASK_ID = "review-changes";

@@ -78,7 +78,13 @@
 - **usage等の時刻境界テストはUTC/ローカル混在でflakyになる**: new Date()から生成した日付期待値は実行時刻(TZ・日をまたぐ時刻帯)でズレる。テスト側はTZ環境変数を明示固定するか、期待値も実装と同一の関数(localDateKey等)から生成する(2026-09 issue-costで実害→解決済み)。
 - **browser-toolsの断片リンク契約は統一済み**: normalizeUrlが #断片に対しnullを返し、links/extractElements双方の遷移候補から除外する。browserSubmitレポートの接頭辞は「method: 」(テスト期待と一致、test/browser-tools*.test.js 13/13)(2026-09)。
 - **edit_fileでテンプレートリテラルを壊したときの最短修復**は `git show main:<file>` で原本を取り直して該当ブロックを復元する(node -eパッチ再試行より安全。2026-09 issue-browserラウンドでworktree.js修復に実証)。
+- **usage集計の蓄積契約はrunner.jsのemit形式と一致させる(2026-09 issue-throttle系列で実害)**: runner.jsは usage.summary として `{byAgent, totals}` をemitする。server.js側で旧契約 `p.usage` だけを読むと totals:null がusage.jsonへ蓄積され集計が静かに欠落する。修正は `totals: p.totals ?? p.usage ?? null`(旧契約互換維持)。集計テストの期待値は「加法的整合」(スレッド別合計の総和=全レコード合計)で検算し、matrixのassertキー(mainとスレッド名)の取り違えにも注意する。
+- **usage-trace系の書込先はボードJSONLの親ディレクトリ配下に寄せ、state/監査領域直下には書かない(2026-09確定)**: loop.jsのトレースは二重ブロック(CWD相対のstate固定+persistPath基準)になりやすい。1本化の契約: persistPath無し時はthrowしcatchで握りつぶす(=監査領域へ決して書かない)。書込先を改修するときは「1ターン=1行」「state/直下にusage-trace.jsonlを生成しない」を実行再現で証跡にする。
 - **ボード投稿は自身のスレッドへ投稿すると自分のボードに載らない**: to_thread指定時の注意。lead報告の取りこぼしがあったら他スレッドの投稿を見る(gather_context source=threads)。
+
+- usage-traceとモニタ可視化(イシュー#15〜#17): (1)loop.jsはmodel.chatごとに usage-trace/usage-trace.jsonl へ1ターン1行追記(prompt/completion/reasoning内訳+ctxChars)。書込先はボードJSONLと同じ親の usage-trace/(state/監査領域には書かない。persistPath無し時はスキップ) (2)/api/usage-trace がagent・fromTurn/toTurnでフィルタしたseries/pointsを返す(fromTurn等はurl.searchParams由来のstring|nullも受ける契約) (3)loop.jsがbusへusage.traceを流すとserver.jsがlive.agents[id].ctx へ 使用/上限/残り(ctxWindow無ければ200Kフォールバック)を保持し、/api/stateで配布。エージェント詳細パネルのバー表示(使用/上限/残り+.hot警告色)のデータ源。トークン換算は「文字数/3切上げ」でcompact.jsと統一 (4)モニタページにmonitor-chart.js(IIFE・依存ゼロ・window/globalThis公開)でSVGチャート。yMaxは全系列(agents と tasks総数=open+claimed+done)の最大。XSS対策は数値toFixed+既知色リテラルのみ。テストからは globalThis.monitorChart 経由で呼ぶ(2026-09)。
+- README自動更新(readme-auto.js): 差分ベースでREADMEを再生成する。未閉鎖のHTMLコメントマーカー保護ケースをテスト済み(test/readme-auto 11件)(2026-09)。
+- **テストがstartUi()したら必ずui.close()する**: closeしないとサーバーハンドルが開いたままnode --testがプロセス終了できず、ファイル単位のタイムアウト(約60秒)で"test failed"になる(ctx-window-ui.testで実害・最小再現スクリプトで確定)。個別テストは全部緑なのにファイルだけ落ちるときはハンドル残存を疑う。finally で ui.close()+rmTree が定型(2026-09)。
 
 # 2026-09 issue-modelselect系列ラウンドの知見(ベータdistill)
 
@@ -102,3 +108,9 @@
 - **古い分岐の放棄ブランチは原則マージしない(巻き戻しリスク)**: クラッシュ復旧(respawn-*)で請求したブランチが古い世代(stability-r3等)だと、マージ時に113ファイル/約-1万行の巻き戻し差分となり最新機能(スロットリング等)を破壊しうる。放棄判断の検定手順: (1)merge-baseとbranch先頭の日付/コミットで分岐世代を確認 (2)`git diff main <branch>` の二点間diffで「機能の独自追加」を列挙(mainとの三点間diffは新旧混合で見誤る) (3)各機能が現mainに改善形で存在するか確認(killDevserverTree等の強化版) (4)関連テストを現mainで実行して緑を証跡にする → 放棄判断はボードへ根拠付きで記録し、worktree/ブランチは掃除タスクへ委ねる。完了条件は「取り込み or 放棄判断の記録」なので、記録だけでfinishしてよい。
 - usage集計UI(イシュー#6)の最終形: /api/usage(aggregateUsageのbyDate/byThread/matrix)+ index.html statusタブの renderUsageAggregate()。並行実装由来の usageAggTable 等の重複は統一済み — 再発時は grep -c で関数名を数え、main側へ統一する(2026-09)。
 - **leadロール(進行・調整)はreviewタスクを請求できない**: 発見器が起票するverify-*はrole:review固定のため、leadはclaim不可(approveは実装者でなければ可)。verify滞留はrole:review持ちのワーカーへボードで依頼するか、リーダーがroleを緩める。claim空転が続くときは診断文の「未着手一覧」でrole不一致を確認してから打ち切る(claimMiss診断と併用)。
+
+# 2026-09 feat-monitor-chartラウンドの知見(アルファdistill)
+
+- **自動解放(プロセス再起動)で請求が戻ってもworktreeは保持される**: コミット済みの成果は失われない。再請求したら git status/log で現状確認→必要なテストだけ再実行→finish_task が定型。無為に再実装しない(2026-09)。
+- **依存ゼロ(外部URL無し)テストではSVG名前空間URI(http://www.w3.org/2000/svg)を例外にする**: 属性値として使い取得はしない。監視は否定先読み付き正規表現 /https?:\/\/(?!www\.w3\.org)/ で行う(誤検知実績: test/monitor-chart.test.js)(2026-09)。
+- **ブラウザ向け描画は純関数モジュール(public/配下・IIFE+globalThis公開)+HTMLはfetchと注入のみに分離**すると、描画ロジックも統合(API応答の実行時契約)もNodeテストで検証できる(markdown.jsパターンの適用。詳細は上のイシュー#15-17節)(2026-09)。
