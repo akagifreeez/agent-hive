@@ -5,14 +5,14 @@
 // を検出してタスクを再起票する。ゾンビclaim回収(runner.js起動時)が担当を失った
 // claimed を解放するのに対し、こちらは「仕事そのものが消えている」ケースを救う。
 // 併せて、変更を持たない放棄ブランチ(worktrees/<agent>のみが残骸)の掃除も行う。
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runCommand } from "./exec.js";
 
 // パス比較用: OS差(Windowsの\)を吸収して小文字化して比較する
 /** @param {string} a @param {string} b */
 function samePath(a, b) {
-  const norm = (x) => String(x).replaceAll("\\", "/").replace(/[/]+$/, "").toLowerCase();
+  const norm = (x) => { let y = String(x).replaceAll("\\", "/").replace(/[/]+$/, "").toLowerCase(); try { y = realpathSync(y).replaceAll("\\", "/").toLowerCase(); } catch { /* 存在しないパスはそのまま */ } return y; };
   return norm(a) === norm(b);
 }
 
@@ -50,13 +50,13 @@ export async function respawnUnfinishedWork({ mainWorkspace, worktreeRoot, tasks
       ? readdirSync(worktreeRoot, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
       : [];
     for (const agentId of dirs) {
-      const path = resolve(join(worktreeRoot, agentId));
+      const path = realpathSync(resolve(join(worktreeRoot, agentId)));
       const f = /** @type {RespawnFinding} */ ({ agentId, hasDiff: false, dirty: false, merged: false, head: "", files: 0 });
-      const run = async (cmd) => runCommand({ command: cmd, cwd: mainWorkspace, outputLimit: 4000 });
+      const run = async (cmd) => { const r = await runCommand({ command: cmd, cwd: mainWorkspace, outputLimit: 4000 }); return { ok: r.ok, text: r.text.split("\n").slice(1).join("\n") }; };
       // worktreeが実体として有効か(git worktree listに載るか)。ゴミdirは無視
       const branch = `agent/${agentId}`;
       const listed = await run(`git worktree list --porcelain`);
-      if (!listed.ok || !listed.text.split("\n").some((l) => samePath(l, path))) continue;
+      if (!listed.ok || !listed.text.split("\n").some((l) => l.startsWith("worktree ") && samePath(l.slice("worktree ".length), path))) continue;
       // 未コミット変更
       const st = await run(`git -C '${path}' status --porcelain`);
       f.dirty = st.ok && st.text.split("\n").slice(1).some((l) => l.trim());
