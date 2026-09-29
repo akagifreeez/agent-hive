@@ -19,6 +19,7 @@ import { modelStateInfo, resolveDefaultSpec, probeModel, startOpenAIAuth } from 
 import { buildCatalog } from "../model/catalog.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
+import { aggregateUsage } from "../engine/usage.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
 
@@ -275,7 +276,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     },
     "scenario.started": (p) => { live.scenario = { name: p.name, phase: "running" }; },
     "usage.summary": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), totals: p.usage ?? null }),
-    "usage.round": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), agent: p.agent, endedBy: p.endedBy ?? "ok", totals: p.totals ?? null }),
+    "usage.round": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), agent: p.agent, thread: p.thread ?? '__main__', endedBy: p.endedBy ?? 'ok', totals: p.totals ?? null }),
     "scenario.finished": () => { if (live.scenario) live.scenario.phase = "done"; },
   };
   for (const [type, fn] of Object.entries(record)) bus.on(type, fn);
@@ -735,7 +736,13 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
-      if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
+      if (url.pathname === "/api/usage") {
+        // 集計ビュー(日別/スレッド別/日別xスレッド、イシュー#6)。usage raw文字列は旧契約として維持
+        const raw = readFileSyncSafe(join(config.workspace, "state", "usage.json"));
+        let history = [];
+        try { const parsed = JSON.parse(raw ?? "null"); if (Array.isArray(parsed)) history = parsed; } catch {}
+        return json(res, { usage: raw, aggregate: aggregateUsage(history, { days: 14 }) });
+      }
       if (url.pathname === "/api/memory") return json(res, { memory: listMemoryWithExpiry(config.workspace) });
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
       if (url.pathname === "/api/devserver") {
@@ -1201,7 +1208,10 @@ function persistUsage(workspace, entry) {
     mkdirSync(dir, { recursive: true });
       const file = join(dir, "usage.json");
       const history = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
-      history.push(entry);
+      // 日別・スレッド別集計(イシュー#6)用に日付とスレッド名を付けて蓄積する。
+      // thread無しの旧レコードとの互換は集計側(aggregateUsage)が__main__扱いで吸収。
+      const enriched = { ...entry, date: new Date().toISOString().slice(0, 10), thread: entry.thread ?? '__main__' };
+      history.push(enriched);
       writeFileSync(file, JSON.stringify(history.slice(-200), null, 1));
   } catch {}
 }

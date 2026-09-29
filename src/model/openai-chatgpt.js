@@ -8,6 +8,7 @@ import {
   RETRY_MAX_RETRIES, EMPTY_COMPLETION_MAX_RETRIES,
   computeRetryDelay, isRetryableStatus, modelSleep, parseRetryAfterMs,
 } from "./openai.js";
+import { gateProvider, noteProviderRateLimited, clearProviderRateLimit } from "./throttle.js";
 
 export class ChatGPTModel {
   /**
@@ -31,6 +32,8 @@ export class ChatGPTModel {
     let forceRefresh = false;
     let emptyRetries = 0;
     for (;;) {
+      // プロバイダ横断の共有クールダウン(他エージェントが429/529を見たら全員が待つ: イシュー#1)
+      await gateProvider(this.baseUrl);
       let token;
       try {
         token = await this.tokenFn({ forceRefresh });
@@ -60,6 +63,9 @@ export class ChatGPTModel {
       if (!res.ok) {
         const bodyText = await res.text().catch(() => "");
         if (isRetryableStatus(res.status) && attempt <= RETRY_MAX_RETRIES) {
+          if (res.status === 429 || res.status === 529) {
+            noteProviderRateLimited(this.baseUrl, parseRetryAfterMs(res));
+          }
           await modelSleep(computeRetryDelay(attempt, parseRetryAfterMs(res)));
           attempt++;
           continue;
@@ -78,6 +84,7 @@ export class ChatGPTModel {
         }
         throw new Error(`ストリームが途切れました: ${err.message}`);
       }
+      clearProviderRateLimit(this.baseUrl);
       const empty = !parsed.content && !(parsed.toolCalls?.length) && !parsed.usage;
       if (empty && emptyRetries < EMPTY_COMPLETION_MAX_RETRIES) {
         emptyRetries++;

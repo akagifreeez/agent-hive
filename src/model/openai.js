@@ -5,6 +5,9 @@
 // 判定ソース(provider usage優先: ZCode compact/policy.tsと同方針)に使う。
 // リトライはZCode adapters/model/retry-policy.ts+runner-retry.ts+failure-classifier.tsの移植:
 // 指数バックオフ+ジッタで最大10回、Retry-Afterは5分まで優先、429/5xx/529は可・401/403/400/422は不可。
+// プロバイダ横断スロットリング(throttle.js)にも参加: 429/529を受けたら同プロバイダ(baseUrl)を
+// 叩く全エージェントへ共有クールダウンを記録し、リクエスト前にgateで待つ(イシュー#1)。
+import { gateProvider, noteProviderRateLimited, clearProviderRateLimit } from "./throttle.js";
 /**
  * OpenAI互換エンドポイント(GLM等)への最小クライアント。
  */
@@ -59,6 +62,8 @@ export class OpenAIModel {
     if (useStream) body.stream = true;
     let emptyRetries = 0;
     for (let attempt = 1; ; attempt++) {
+      // プロバイダ横断の共有クールダウン(他エージェントが429/529を見たら全員が待つ: イシュー#1)
+      await gateProvider(this.baseUrl);
       let res;
       try {
         res = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -86,6 +91,9 @@ export class OpenAIModel {
           } catch {}
         }
         if (isRetryableStatus(res.status) && attempt <= RETRY_MAX_RETRIES) {
+          if (res.status === 429 || res.status === 529) {
+            noteProviderRateLimited(this.baseUrl, parseRetryAfterMs(res));
+          }
           await modelSleep(computeRetryDelay(attempt, parseRetryAfterMs(res)));
           continue;
         }
@@ -114,6 +122,7 @@ export class OpenAIModel {
         searches = data?.web_search ?? null;
         if (!msg) throw new Error(`応答の形式が不正です: ${JSON.stringify(data).slice(0, 300)}`);
       }
+      clearProviderRateLimit(this.baseUrl);
       // 空応答(テキストもツールもusageも無い)はZCodeと同様1回だけリトライ
       const empty = !msg.content && !(msg.tool_calls?.length) && !usage;
       if (empty && emptyRetries < EMPTY_COMPLETION_MAX_RETRIES) {

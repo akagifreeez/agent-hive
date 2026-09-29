@@ -226,6 +226,7 @@
   .taskrow .tid { font-family: var(--font-mono); font-size: 11px; color: var(--accent); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 52%; flex-shrink: 0; }
   .taskrow .tsum { flex: 1; color: var(--label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .acc { display: inline-block; font-size: 10px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 3px; padding: 0 4px; margin-right: 2px; vertical-align: 1px; }
+  .acc.dep { color: #e8a33d; border-color: color-mix(in srgb, #e8a33d 45%, transparent); }
   .taskrow .btn { padding: 1px 8px; font-size: 11px; flex-shrink: 0; }
   select.filter { width: 100%; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 4px 6px; font-size: 12px; font-family: var(--font-ui); box-shadow: var(--inset-field); }
   #newtask { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; border-top: 1px solid var(--separator); padding-top: 10px; }
@@ -934,6 +935,14 @@ function renderTasksTab(body, state) {
           tag.title = `受け入れ基準: ${t.acceptance}`;
           sum.prepend(tag, " ");
         }
+        if (Array.isArray(t.dependsOn) && t.dependsOn.length) {
+          const depTag = document.createElement("span");
+          depTag.className = "acc dep";
+          const depState = t.state === "open" && t.blocked ? "依存待ち" : "依存";
+          depTag.textContent = `${depState}:${t.dependsOn.join(",")}`;
+          depTag.title = `依存タスク: ${t.dependsOn.join(", ")}(全て完了で請求可能)`;
+          sum.prepend(depTag, " ");
+        }
         sum.onclick = () => showTaskBody(t);
         const mv = document.createElement("button");
         mv.className = "btn";
@@ -964,6 +973,7 @@ function renderTasksTab(body, state) {
     ${inThread ? "" : '<input id="nt-project" placeholder="project(任意、例: cuda-compress)">'}
     <input id="nt-role" placeholder="role(impl/review等、空欄で誰でも)">
     <input id="nt-acc" placeholder="受け入れ基準(任意、例: npm testが通る)">
+    <input id="nt-dep" placeholder="依存タスクid(任意、カンマ区切り。完了まで請求不可)">
     <textarea id="nt-body" placeholder="何を / どう確認するか / 完了条件"></textarea>
     <button id="nt-add" class="btn">投入(トークン消費なし)</button>`;
   body.appendChild(form);
@@ -1444,14 +1454,16 @@ async function createTask() {
   const project = projectInput ? projectInput.value.trim() : selectedThread === "__main__" ? "" : selectedThread;
   const role = $("nt-role").value.trim();
   const acceptance = $("nt-acc")?.value.trim() ?? "";
+  const depends_on = ($("nt-dep")?.value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const body = $("nt-body").value.trim();
   if (!body) { toast("本文(何を/完了条件)を書いてください"); return; }
-  const r = await (await hfetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, project, role, body, acceptance }) })).json();
+  const r = await (await hfetch("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "create", id, project, role, body, acceptance, depends_on }) })).json();
   if (r.error) { toast(`エラー: ${r.error}`); return; }
   $("nt-id").value = "";
   if (projectInput) projectInput.value = "";
   $("nt-role").value = "";
   if ($("nt-acc")) $("nt-acc").value = "";
+  if ($("nt-dep")) $("nt-dep").value = "";
   $("nt-body").value = "";
   refresh();
 }

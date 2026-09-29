@@ -50,7 +50,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     {
       name: "create_task",
-      description: "新しい仕事をタスクボードへ投入する。レビュー指摘の修正など後続の仕事を生んだときに使う。task_idは英小文字数字とハイフン。projectに文脈(取り組み名)を付けると、その取り組みのタスクとしてグルーピングされる。acceptanceに受け入れ基準(何ができたら完了とみなすか)を1文で書くと、ワーカーの完成判定がブレなくなる。",
+      description: "新しい仕事をタスクボードへ投入する。レビュー指摘の修正など後続の仕事を生んだときに使う。task_idは英小文字数字とハイフン。projectに文脈(取り組み名)を付けると、その取り組みのタスクとしてグルーピングされる。acceptanceに受け入れ基準(何ができたら完了とみなすか)を1文で書くと、ワーカーの完成判定がブレなくなる。depends_onに先行タスクidの配列を付けると、それらが全部完了するまでこのタスクは請求不可になる。",
       parameters: {
         type: "object",
         properties: {
@@ -59,6 +59,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           project: { type: "string", description: "文脈(プロジェクト)名。関連する取り組みに統一" },
           body: { type: "string", description: "具体的な指示(何を/どう確認するか/完了条件)" },
           acceptance: { type: "string", description: "受け入れ基準。完了とみなす客観的な条件を1文で(例: npm testが通り、境界の両側を検証している)" },
+          depends_on: { type: "array", items: { type: "string" }, description: "先行タスクidの配列。全てdoneになるまでこのタスクは請求できない" },
         },
         required: ["task_id", "body"],
         additionalProperties: false,
@@ -314,6 +315,14 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           let hint = "";
           try {
             const allOpen = tasks.list().open;
+            // 依存でブロック中のタスクは「実在するが依存未完了で請求不可」なので分けて教える(空待ち防止)
+            const blockedTasks = allOpen.filter((x) => Array.isArray(x.dependsOn) && x.dependsOn.length);
+            const depInfo = blockedTasks.length
+              ? blockedTasks.map((x) => {
+                  const parts = x.dependsOn.map((d) => `${d}(${tasks.isUnresolved(d) ? "未完了" : "完了済"})`);
+                  return `${x.id} ← ${parts.join(",")}`;
+                }).join(", ")
+              : "";
             if (args.project) {
               const open = allOpen.filter((x) => (x.project || "") === String(args.project));
               if (open.length) {
@@ -324,6 +333,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
               const items = allOpen.map((x) => `${x.id}${x.role ? `(role:${x.role})` : ""}${x.project ? `/project:${x.project}` : ""}`);
               hint = `\n[診断] 未着手タスクが${allOpen.length}件あります: ${items.join(", ")}。あなたのロールは${agent.role}です。roleが一致するタスクか、role指定の無いタスクだけを請求できます。`;
             }
+            if (depInfo) hint += `\n[診断] 依存でブロック中: ${depInfo}。依存タスクの完了を待つか、自分で依存タスクを請求して先に消化してください。`;
           } catch {}
           return {
             ok: true,
@@ -412,7 +422,8 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
           return { ok: false, text: "task_idは英小文字数字とハイフンで付けてください。" };
         }
-        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "", createdBy: agent.id });
+        const dependsOn = Array.isArray(args.depends_on) ? args.depends_on.map((s) => String(s ?? "").trim()).filter(Boolean) : [];
+        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "", dependsOn, createdBy: agent.id });
         if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
         // 重複検知: 未着手/作業中の既存タスクと共有ファイルがあれば警告を添える(ブロックはしない)
         const l = tasks.list();
@@ -429,7 +440,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           .join("\n");
         return {
           ok: true,
-          text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""})。` + (warn ? "\n\n" + warn : ""),
+          text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""}${dependsOn.length ? ` / 依存: ${dependsOn.join(",")}` : ""})。` + (warn ? "\n\n" + warn : ""),
         };
       }
       case "spawn_agent": {
