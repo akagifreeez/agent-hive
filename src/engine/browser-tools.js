@@ -142,6 +142,7 @@ export function extractElements(page, filter = {}) {
   let index = 0;
   for (const type of want) {
     if (type === "link") {
+<<<<<<< HEAD
       // リンクはrawから直接列挙する(断片#...はhref=nullで残す。遷移候補の一覧性優先)。javascript:等は除外
       const aRe = /<a\s[^>]*?href=(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a\s*>/gi;
       let am;
@@ -152,6 +153,10 @@ export function extractElements(page, filter = {}) {
         if (/^(javascript|data|vbscript):/i.test(rawHref.trim())) continue;
         out.push({ index: ++index, type, text, href: normalizeUrl(rawHref, page.url) });
       }
+=======
+      // page.links(parsePage済み・断片/javascript除外済み)をそのまま列挙する
+      for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href });
+>>>>>>> main
     } else if (type === "form") {
       for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {

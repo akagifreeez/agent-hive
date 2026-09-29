@@ -1342,6 +1342,7 @@ function renderStatusTab(body) {
     tbl.appendChild(tb);
     body.appendChild(tbl);
   }
+  // 日別・スレッド別の集計ビュー(GitHubイシュー#6)は先頭のusage集計ブロックで描画済み
   // セッション保存/読込
   const h2 = document.createElement("div");
   h2.className = "sec";
