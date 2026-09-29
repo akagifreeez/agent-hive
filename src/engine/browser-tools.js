@@ -2,13 +2,12 @@
 // レンダリング(JS実行・スクリーンショット)はスコープ外。その用途はMCP(Playwright等)で拡張する。
 import { URL, URLSearchParams } from "node:url";
 
-/** 相対URLをbaseと結合。javascript:/data:等の危険スキームはnull(誤遷移防止)。
- * 断片(#sec-1)はnullにしない: 遷移候補の一覧性優先(href:nullで保持。遷移判定は呼び出し側)。 */
+/** 相対URLをbaseと結合。断片のみ・javascript:/data:等はnull(誤遷移防止)。
+ * parsePageでは断片をhref:nullとして一覧に保持する(遷移候補の一覧性優先)。 */
 export function normalizeUrl(href, baseUrl) {
   const h = String(href ?? "").trim();
   if (!h) return null;
-  if (/^javascript:/i.test(h) || /^data:/i.test(h) || /^vbscript:/i.test(h)) return null;
-  if (/^#/i.test(h)) return h; // 断片はそのまま(=baseに解決しない)
+  if (/^#/i.test(h) || /^javascript:/i.test(h) || /^data:/i.test(h) || /^vbscript:/i.test(h)) return null;
   try {
     return new URL(h, baseUrl).toString();
   } catch {
@@ -106,9 +105,14 @@ export function parsePage(html, baseUrl) {
   while ((am = aRe.exec(src)) && links.length < 100) {
     const raw = am[1] ?? am[2] ?? am[3] ?? "";
     const text = btStripTags(am[4]);
-    const href = normalizeUrl(raw, base);
-    if (href === null) continue; // 危険スキーム(javascript:/data:)のみ除外。断片はhref:"#…"で保持
     if (!text) continue;
+    const href = normalizeUrl(raw, base);
+    if (href === null) {
+      // 断片(#sec-1)は遷移先が無いだけで有効な目次情報。href:nullで一覧に保持する
+      // (危険スキームjavascript:/data:も同様にnullになるが、こちらは表示のみ・遷移候補から外れる)
+      if (/^#/i.test(raw.trim())) { links.push({ text, href: null }); }
+      continue; // null(断片/危険スキーム)はhrefを解決しない
+    }
     links.push({ text, href });
   }
   const forms = [];
