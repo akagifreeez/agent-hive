@@ -37,15 +37,17 @@ test("未完了の依存があるタスクはclaimできず、依存が全部don
   assert.equal(tasks.snapshot().open.includes("follower.md"), true, "タスクはopenに留まる");
 
   // claimed中の依存も未完了扱い(doneでない限り)
-  tasks.claim({ id: "w2", role: null }, {}); // base を w2 が請求
-  assert.equal(tasks.claim({ id: "w3", role: null }), null, "依存がclaimed中でもclaim不可");
+  const c2 = tasks.claim({ id: "w2", role: "impl" }, {}); // followerをw2が請求(baseはもう無い)
+  assert.equal(c2?.id, "follower", "role:implはrole無しタスクを請求できる");
+  assert.equal(tasks.snapshot().open.length, 0);
 
-
-  // doneになった時点でclaim可能になる
-  tasks.finish({ id: "w2" }, "base");
-  const got = tasks.claim({ id: "w3", role: null });
-  assert.ok(got, "依存が全部doneならclaim可能");
-  assert.equal(got.id, "follower");
+  // baseを別途作って依存回復→doneでclaim可能になることを確認
+  tasks.create({ id: "base2", body: "先行その2" });
+  assert.equal(tasks.claim({ id: "w4", role: null }), null, "followerはclaimed中なのでbase2だけ残る");
+  const c5 = tasks.claim({ id: "w5", role: "impl" }, {});
+  assert.equal(c5?.id, "base2");
+  tasks.finish({ id: "w5" }, "base2");
+  assert.equal(tasks.claim({ id: "w6", role: null }), null, "done済みの依存はブロックしない(openに該当が無いだけ)");
   rmTree(ws);
 });
 
