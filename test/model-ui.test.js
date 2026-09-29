@@ -29,6 +29,8 @@ function mkConfig(ws) {
         prov: { baseUrl: "http://x.invalid/v4", api: "openai-completions", auth: { value: "sk-value-key-9999" }, models: [{ id: "main", name: "Main" }] },
         nolock: { baseUrl: "http://x.invalid/v4", api: "openai-completions", models: [{ id: "m1" }] },
         envprov: { baseUrl: "http://x.invalid/v4", api: "openai-completions", auth: { env: "HIVE_MODEL_UI_ENVKEY" }, models: [{ id: "m2" }] },
+        // builtinのopenaiを上書き: ストアfileをテスト固有にして本物のトークンと分離する
+        openai: { baseUrl: "http://x.invalid/backend-api", api: "openai-chatgpt-responses", auth: { type: "oauth", file: "state/test-openai-oauth.json" }, models: [{ id: "gpt-6-astra", name: "GPT-6 Astra" }] },
       },
     },
     model: { model: "main" },
@@ -189,7 +191,7 @@ test("設定API: /api/openai-auth は認証URLを発行し、手動貼り付け�
     assert.equal(tokenFetches[0].get("grant_type"), "authorization_code");
 
     // ストア保存+authHint(email)で見える
-    const saved = JSON.parse(readFileSync(join(dataDir, "state", "models-openai.oauth.json"), "utf8"));
+    const saved = JSON.parse(readFileSync(join(dataDir, "state", "test-openai-oauth.json"), "utf8"));
     assert.equal(saved.openai.email, "me@example.com");
     const { model: m1 } = await (await fetch(base + "/api/models")).json();
     const openaiP = m1.providers.find((p) => p.id === "openai");

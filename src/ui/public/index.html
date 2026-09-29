@@ -302,7 +302,7 @@
   #settings-btn { position: absolute; right: 12px; top: 9px; background: var(--panel2); border: 1px solid var(--separator); color: var(--sub); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
   #settings-btn:hover { color: var(--label); border-color: var(--line-strong); }
   /* ボード全文検索: ヘッダ右の入力欄と、ヒット一覧のオーバーレイ */
-  #board-search-box { position: absolute; right: 126px; top: 9px; }
+  #board-search-box { position: absolute; right: 252px; top: 9px; }
   #board-search { width: 120px; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 3px 8px; font-size: 11px; font-family: var(--font-ui); box-shadow: var(--inset-field); }
   #board-search:focus { outline: none; border-color: var(--accent); width: 200px; }
   #board-search::placeholder { color: var(--label-tertiary); }
@@ -359,6 +359,11 @@
         <span class="lbl">思考</span>
         <select id="composer-effort" title="思考レベル(次のラウンドから)">
           <option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+        </select>
+        <span class="lbl">権限</span>
+        <select id="composer-perm" title="権限モード(即時反映)。normal=承認制 / auto=自動許可">
+          <option value="normal">normal(要承認)</option>
+          <option value="auto">auto(自動許可)</option>
         </select>
       </div>
       <div class="row">
@@ -1631,6 +1636,7 @@ function syncComposerModelOpts() {
   cm.value = uiModelName ?? "";
   if (cm.value !== (uiModelName ?? "")) cm.value = ""; // 選択済みが一覧に無ければ既定へ
   $("composer-effort").value = uiEffort ?? liveEffort ?? "low";
+  $("composer-perm").value = lastState?.live?.permMode ?? "normal";
 }
 async function applyComposerModelChange({ model, effort } = {}) {
   if (model != null) {
@@ -1651,6 +1657,12 @@ async function applyComposerModelChange({ model, effort } = {}) {
   syncComposerModelOpts();
 }
 $("composer-effort").onchange = () => applyComposerModelChange({ effort: $("composer-effort").value });
+$("composer-perm").onchange = async () => {
+  const mode = $("composer-perm").value;
+  const r = await (await hfetch("/api/perm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode }) })).json();
+  if (r.error) { toast(`権限: ${r.error}`); syncComposerModelOpts(); return; }
+  toast(`権限モードを ${r.mode} に変更しました(即時反映)`, "ok");
+};
 $("composer-model").onchange = async () => {
   await applyComposerModelChange({ model: $("composer-model").value.trim() });
 };
