@@ -21,7 +21,7 @@ import { legacyModelSection } from "./model/catalog.js";
  * @property {{maxTokensPerRun?: number}} budget 1ランあたりのトークン上限
  * @property {{thresholdPercent?: number, keepRecentToolResults?: number}} compact 圧縮の設定
  * @property {{maxDepth?: number, maxConcurrent?: number}} hierarchy
- * @property {{lead?: string, workers?: string[], mains?: string[], idleClaimWaitSec?: number, autoscale?: boolean, autoscaleIntervalSec?: number, maxWorkersPerThread?: number, maxTurnsPerRound?: number, autoContinueRounds?: number, staggerMs?: number, schedules?: Array<{everyMinutes: number, text: string, thread?: string}>, budgetAlertUsd?: number}} chat チャット運用の設定(予算アラートは累積コストがこのしきい値を超えると1回告知)
+ * @property {{lead?: string, workers?: string[], mains?: string[], idleClaimWaitSec?: number, autoscale?: boolean, autoscaleIntervalSec?: number, maxWorkersPerThread?: number, maxTurnsPerRound?: number, autoContinueRounds?: number, staggerMs?: number, schedules?: Array<{everyMinutes: number, text: string, thread?: string}>, budgetAlertUsd?: number, requireSeparateApprove?: boolean}} chat チャット運用の設定(予算アラートは累積コストがこのしきい値を超えると1回告知。requireSeparateApprove=trueでfinish_task時に実装者以外の検証タスクを起票し、approve_taskでの承認済みタスクだけをマージする)
  * @property {{servers: Object.<string, Object>}} mcp
  * @property {Object} hooks
  * @property {Object} commands

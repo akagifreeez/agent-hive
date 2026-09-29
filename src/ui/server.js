@@ -402,6 +402,24 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
+      if (url.pathname === "/api/agent-memory") {
+        // エージェントの会話検査ビュー(#5): mem-<id>.jsonの直近メッセージの概要を返す
+        // (本文はデバッグ目的の読み取り専用表示で、実体はstate/mem-<id>.json)
+        const id = String(url.searchParams.get("agent") ?? "").replace(/[^\w-]/g, "");
+        try {
+          const d = JSON.parse(readFileSync(join(config.workspace, "state", `mem-${id}.json`), "utf8"));
+          const msgs = Array.isArray(d.messages) ? d.messages : [];
+          return json(res, {
+            agent: id, count: msgs.length,
+            tail: msgs.slice(-12).map((m) => ({
+              role: m.role ?? "?",
+              preview: String(typeof m.content === "string" ? m.content : JSON.stringify(m.content) ?? "").replace(/\s+/g, " ").slice(0, 240),
+            })),
+          });
+        } catch {
+          return json(res, { agent: id, count: 0, tail: [] });
+        }
+      }
       if (url.pathname === "/api/board") {
         const q = url.searchParams.get("q");
         if (q !== null) {

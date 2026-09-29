@@ -43,6 +43,7 @@
     ],
     "maxTurnsPerRound": 12,
     "autoContinueRounds": 3,
+    "requireSeparateApprove": true,
     "idleClaimWaitSec": 45,
     "autoscale": true,
     "autoscaleIntervalSec": 30,

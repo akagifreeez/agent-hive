@@ -988,6 +988,28 @@ function renderAgentsTab(body, state) {
       showWtdiff(id, r);
     };
     card.appendChild(wdb);
+    // 会話検査ビュー(#5): mem-<id>.jsonの直近メッセージの概要をダイアログで見る
+    const memBtn = document.createElement("button");
+    memBtn.className = "wtdiff-btn";
+    memBtn.textContent = "会話";
+    memBtn.title = "このエージェントの直近の会話(messages)を検査する";
+    memBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const r = await (await hfetch(`/api/agent-memory?agent=${encodeURIComponent(id)}`)).json();
+      const dlg = $("dlg");
+      $("dlg-title").textContent = `会話検査: ${label}`;
+      $("dlg-body").textContent = r.tail?.length
+        ? r.tail.map((m) => `[${m.role}] ${m.preview}`).join("\n\n")
+        : `会話メモリはまだありません(${r.count}件)`;
+      const inp = $("dlg-input");
+      inp.style.display = "none";
+      $("dlg-ok").textContent = "閉じる";
+      $("dlg-cancel").style.display = "none";
+      dlg.showModal();
+      $("dlg-ok").onclick = () => { dlg.close(); inp.style.display = ""; $("dlg-cancel").style.display = ""; };
+      $("dlg-cancel").onclick = () => { dlg.close(); inp.style.display = ""; $("dlg-cancel").style.display = ""; };
+    };
+    card.appendChild(memBtn);
     card.onclick = () => { selectedAgent = selectedAgent === id ? null : id; renderCtx(lastState); };
     body.appendChild(card);
     if (selectedAgent === id) body.appendChild(renderAgentLog(a));

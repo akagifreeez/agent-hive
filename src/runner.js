@@ -76,6 +76,17 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   });
   bus.on("merge.completed", () => void discovery.tick());
 
+  // 実装者≠検証者の強制(#3): chat.requireSeparateApprove=trueでfinish_task時に検証タスクを
+  // 起票し、approve_task(実装者以外)で承認されたタスクだけをマージする。全createToolsへ共有
+  const approvals = {
+    require: Boolean(config.chat?.requireSeparateApprove),
+    pending: new Map(), // taskId => {agentId, worktreePath}
+    pickReviewer(excludeId) {
+      const candidates = (config.agents ?? []).filter((a) => a.id !== excludeId);
+      return candidates.find((a) => a.role === "review") ?? candidates[0] ?? null;
+    },
+  };
+
   // 実行時のモデル/思考レベル切替(/model・/effortコマンドやUIから)。nullならconfigどおり
   const runtime = { model: null, effort: null };
   const modelFor = (agent) => {
@@ -128,6 +139,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     mcpHosts,
     hooks,
     idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0,
+    approvals,
   });
   const mcpTo = (extra) => ({ ...extra, mcpHosts, hooks, idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0 });
 
@@ -191,6 +203,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
 
         crossPoster,
         resolveBoard,
+        approvals,
 
       })),
       board: threadBoard, tasks, bus, ledger,
@@ -369,6 +382,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       resolveBoard,
       threadOpener: openThread,
       threadCloser: closeThread,
+      approvals,
     })),
     board: mainBoard, tasks, bus, ledger,
     budget: config.budget,

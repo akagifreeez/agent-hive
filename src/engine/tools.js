@@ -21,7 +21,7 @@ const BASH_OUTPUT_LIMIT = 8 * 1024;
  * @property {boolean} [claimMiss] 請求ミスのときtrue(idle退場判定で連続回数を数える)
  */
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null, approvals = null }) {
 
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
@@ -41,6 +41,11 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     {
       name: "finish_task",
       description: "自分が請求中のタスクを完了として確定する。task_idはclaim_next_taskの返値に示されたもの。",
+      parameters: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false },
+    },
+    {
+      name: "approve_task",
+      description: "検証したタスクを承認してmainへマージする。承認フロー(approvals)有効時、実装者以外のエージェントが検証後に実行する。自分が実装したタスクは承認できない。",
       parameters: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false },
     },
     {
@@ -339,6 +344,27 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         }
         // worktree運用時はmainへ自動マージしてから完了確定
         if (mainWorkspace) {
+          // 実装者≠検証者の強制(approvals.require): マージを保留し、実装者以外の検証タスクを起票する。
+          // 元タスクはclaimedのまま保留(approve_taskで承認された時点でマージ+完了確定)
+          if (approvals?.require) {
+            const reviewer = approvals.pickReviewer(agent.id);
+            const verifyId = `verify-${taskId}`;
+            if (reviewer && reviewer.id !== agent.id) {
+              const claimedTask = tasks.claimedBy(agent.id).find((t) => t.id === taskId);
+              const created = tasks.create({
+                id: verifyId,
+                role: reviewer.role,
+                project: claimedTask?.project ?? "",
+                body: `検証: タスク ${taskId}(${agent.id} 実装)の差分をレビューしてください。\n動作確認(テスト実行など)を行い、問題なければ approve_task (task_id: "${taskId}") で承認してください。承認後、成果が main へマージされます。`,
+                createdBy: agent.id,
+              });
+              approvals.pending.set(taskId, { agentId: agent.id, worktreePath: workspace });
+              return { ok: true, text: created
+                ? `検証タスク ${verifyId}(${reviewer.id} 担当)を起票しました。承認後、成果が main へマージされます。`
+                : `検証タスク ${verifyId} は既に起票済みです(承認待ち)。` };
+            }
+            // 実装者以外が設定にいない場合は承認不可として通常フローへ
+          }
           const m = await mergeAgentWork({ mainWorkspace, worktreePath: workspace, agent, taskId });
           if (m.conflict) {
             bus.emit("merge.conflict", { agent: agent.id, taskId });
@@ -354,6 +380,32 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const done = tasks.finish(agent, taskId);
         if (!done) return { ok: false, text: "タスクの完了確定に失敗しました。" };
         return { ok: true, text: `タスク ${taskId} を完了にしました。` };
+      }
+      case "approve_task": {
+        // 実装者≠検証者の強制の承認側。検証者が実行すると保留タスクをmainへマージし完了確定する
+        if (!approvals) return { ok: false, text: "この環境では承認フローは有効ではありません。" };
+        const approveId = String(args.task_id ?? "");
+        const pending = approvals.pending.get(approveId);
+        if (!pending) {
+          const ids = [...approvals.pending.keys()].join(", ") || "なし";
+          return { ok: false, text: `承認待ちのタスクがありません(承認待ち: ${ids})。task_idを確認してください。` };
+        }
+        if (pending.agentId === agent.id) {
+          return { ok: false, text: "自分が実装したタスクは自分で承認できません(実装者≠検証者の強制)。" };
+        }
+        const implementer = { id: pending.agentId, displayName: pending.agentId };
+        const m = await mergeAgentWork({ mainWorkspace, worktreePath: pending.worktreePath, agent: implementer, taskId: approveId });
+        if (m.conflict) {
+          return { ok: false, text: `マージが競合しています。実装者(${pending.agentId})に \`git merge main\` での解決を依頼してください。\n${m.text.slice(0, 600)}` };
+        }
+        if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
+        approvals.pending.delete(approveId);
+        const doneOk = tasks.finish({ id: pending.agentId }, approveId);
+        bus.emit("merge.completed", { agent: pending.agentId, taskId: approveId, stat: m.stat ?? "", patch: m.patch ?? "", summary: m.summary ?? "" });
+        board.post("system", `[承認] ${agent.displayName}(${agent.id}) がタスク ${approveId}(${pending.agentId}実装)を検証し、main へマージしました。`);
+        return { ok: true, text: doneOk
+          ? `タスク ${approveId} を承認してマージしました。`
+          : `タスク ${approveId} をマージしました(完了確定に失敗: 実装者ファイルの状態を確認)` };
       }
       case "create_task": {
         const id = String(args.task_id ?? "").trim();
@@ -697,6 +749,12 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
   }
 
   async function gatedBash(command, timeoutMs) {
+    // worktreeエージェントのmain書込拒否(#8): write/editはsafePathでworkspace外を既に拒否済みだが、
+    // bash経由の絶対パス書込は文字列として検出する。読み取り(cd/cat/diff main)は許可する
+    if (mainWorkspace && WRITE_INDICATORS.some((w) => String(command).includes(w)) && String(command).includes(mainWorkspace)) {
+      bus.emit("permission.denied", { agent: agent.id, command });
+      return { ok: false, text: "このコマンドは拒否されました(メインワークスペースへの書き込み操作を検出)。あなたの作業ディレクトリ(worktree)内でのみ作業してください。成果の反映は finish_task が行います。" };
+    }
     const tamper = auditTampering(command);
     if (tamper) {
       bus.emit("permission.denied", { agent: agent.id, command });

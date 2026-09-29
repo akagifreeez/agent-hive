@@ -28,7 +28,9 @@ export class SpawnManager {
     mcpHosts = null, // MCPサーバー群(外部ツール)
     hooks = null, // ライフサイクルフック
     idleClaimWaitSec = 0, // 請求ミス時に新着タスクを待つ秒数(トークン消費ゼロの待ち行)
+    approvals = null, // 実装者≠検証者の強制(#3)用の共有コンテキスト
   }) {
+    this.approvals = approvals;
     this.mainWorkspace = mainWorkspace;
     this.worktreeRoot = worktreeRoot;
     this.board = board;
@@ -104,6 +106,7 @@ export class SpawnManager {
       agent,
       workspace: worktreePath,
       mainWorkspace: this.mainWorkspace,
+      approvals: this.approvals,
       board: b,
       tasks: this.tasks,
       bus: this.bus,
