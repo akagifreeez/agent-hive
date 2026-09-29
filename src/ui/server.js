@@ -103,6 +103,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     },
   });
   const live = {
+    // CLI通知(#11): 最新の通知(承認待ち/マージ完了/長時間タスク完了)。新着順・最大30件
+    notifications,
     // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
     // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
     agents: {},
@@ -826,7 +828,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     throw err;
   });
   console.log(`UI: http://localhost:${config.ui.port}${autoStart ? " (シナリオを自動開始します)" : ""}`);
-  if (config.ui.monitorPort) {
+  // monitorPort: 0(エフェメラル扱い#テスト用)も有効。null/undefinedで無効
+  if (config.ui.monitorPort != null) {
     await startMonitor({ config, live, tasks, startedAt });
   }
   if (autoStart) {
@@ -1069,6 +1072,8 @@ tick();setInterval(tick,3000);
   const host = config.ui.monitorHost ?? "0.0.0.0";
   const port = config.ui.monitorPort ?? 0;
   await /** @type {Promise<void>} */ (new Promise((resolve) => server.listen(port, host, () => resolve())));
+  // 実ポート(0指定時のエフェメラル)をconfigへ書き戻す(テスト・CLIから参照可能に)
+  config.ui.monitorPort = /** @type {import("node:net").AddressInfo} */ (server.address()).port;
   server.unref();
   /** @type {import("node:net").AddressInfo} */ const mAddr = /** @type {any} */ (server.address());
   console.log(`Monitor: http://localhost:${mAddr.port} (読み取り専用・${host}で公開)`);

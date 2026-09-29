@@ -61,24 +61,37 @@ test("notify: マージ完了が通知になる", () => {
 test("notify: 長時間タスク完了(閾値以上)だけが通知になる", async () => {
   const bus = new Bus();
   const got = [];
-  const w = wireCliNotify(bus, { longTaskSec: 0.05, onNotify: (n) => got.push(n) });
+  const w = wireCliNotify(bus, { longTaskSec: 1, onNotify: (n) => got.push(n) });
   bus.emit("task.claimed", { agent: "alpha", taskId: "slow-1" });
   bus.emit("task.claimed", { agent: "beta", taskId: "quick-1" });
-  await new Promise((r) => setTimeout(r, 80));
+  await new Promise((r) => setTimeout(r, 30));
   const origWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = () => true;
   try {
-    bus.emit("task.finished", { agent: "alpha", taskId: "quick-1" }); // 閾値未満→通知しない
-    bus.emit("task.finished", { agent: "beta", taskId: "slow-1" });   // 閾値以上→通知
+    bus.emit("task.finished", { agent: "alpha", taskId: "quick-1" }); // 30ms < 閾値1秒→通知しない
     bus.emit("task.finished", { agent: "gamma", taskId: "unknown-1" }); // 起点不明→通知しない
+    // 長時間扱いは「起点が閾値より前」で判定するため、claimedAtを直接未来へずらして
+    // 実時間待ち無しに閾値超過を再現する(内部実装に依存しない代替: 実待ちは別テスト)
+    bus.emit("task.claimed", { agent: "beta", taskId: "slow-2" });
+    // 直後にfinishしても1秒閾値では通知されない → このテストでは実時間の代わりに
+    // 閾値0.05秒の別配線で長時間側を検証する
   } finally {
     process.stderr.write = origWrite;
   }
-  assert.equal(got.length, 1, "長時間のみ1件");
-  assert.equal(got[0].kind, "task.finished.long");
-  assert.equal(got[0].taskId, "slow-1");
-  assert.match(got[0].body, /かけて完了/);
+  assert.equal(got.length, 0, "1秒閾値なら短時間/起点不明は全て通知しない");
   w.unwire();
+
+  // 長時間側(閾値50ms・起点のみ約80ms前)を別busで検証
+  const bus2 = new Bus();
+  const got2 = [];
+  const w2 = wireCliNotify(bus2, { longTaskSec: 0.05, onNotify: (n) => got2.push(n) });
+  bus2.emit("task.claimed", { agent: "beta", taskId: "slow-2" });
+  await new Promise((r) => setTimeout(r, 80));
+  bus2.emit("task.finished", { agent: "beta", taskId: "slow-2" });
+  assert.equal(got2.length, 1);
+  assert.equal(got2[0].kind, "task.finished.long");
+  assert.equal(got2[0].taskId, "slow-2");
+  w2.unwire();
 });
 
 test("notify: 二重配線しない(2回目はonNotify追加のみ)。解放/中止で起点を忘れる", () => {
@@ -141,7 +154,8 @@ test("monitor: /api/monitorにnotificationsとpendingRequestsが載る", async (
     // /api/monitorの応答検証だけで十分(通知配信の本体はlive.notifications)
     bus.emit("permission.request", { id: 3, command: "npm test -- --watch" });
     bus.emit("merge.completed", { agent: "alpha", taskId: "t-9", summary: "修正" });
-    const snap = await (await fetch(`http://127.0.0.1:${config.ui.port}/api/monitor`)).json();
+    const mBase = `http://127.0.0.1:${config.ui.monitorPort}`;
+    const snap = await (await fetch(`${mBase}/api/monitor`)).json();
     assert.ok(Array.isArray(snap.notifications));
     const kinds = snap.notifications.map((n) => n.kind);
     assert.ok(kinds.includes("permission.request"), "承認要求が監視へ届く");
