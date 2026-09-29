@@ -76,6 +76,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           role: { type: "string", description: "ロール(impl/review/lead等)" },
           project: { type: "string", description: "文脈(プロジェクト)名。労働者が追加のタスクを請求するときの絞込に使われる" },
           brief: { type: "string", description: "初期ブリーフ。目標・完了条件・このタスク固有の指示のみ。共有素材は労働者が gather_context で読む" },
+          model: { type: "string", description: "この作業員のモデル指定(ModelRef)。リーダー専用・任意。未指定なら既定モデル" },
         },
         required: ["brief"],
         additionalProperties: false,
