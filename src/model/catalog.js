@@ -2,7 +2,7 @@
  * モデルカタログ: 内蔵(builtin.js)+設定(models.providers)をマージし、
  * ModelRefを実行時のModelSpecへ解決する。OpenClaw ModelRegistryの最小版。
  * プロバイダ(認証・baseUrlの名前空間)とapi(ワイヤ形式)は直交する。
- * @typedef {{id: string, baseUrl: string, api: string, name?: string, auth?: {env?: string, file?: string, value?: string}, params?: {temperature?: number, maxTokens?: number, timeoutMs?: number, contextWindow?: number, reasoningEffort?: string, webSearch?: boolean|object|null}, models?: Array<{id: string, name?: string, contextWindow?: number, maxTokens?: number, reasoning?: boolean, reasoningEffort?: string, cost?: {input?: number, output?: number}|null}>}} ProviderCfg
+ * @typedef {{id: string, baseUrl: string, api: string, name?: string, auth?: {type?: string, env?: string, file?: string, value?: string}, params?: {temperature?: number, maxTokens?: number, timeoutMs?: number, contextWindow?: number, reasoningEffort?: string, webSearch?: boolean|object|null}, models?: Array<{id: string, name?: string, contextWindow?: number, maxTokens?: number, reasoning?: boolean, reasoningEffort?: string, cost?: {input?: number, output?: number}|null}>}} ProviderCfg
  * @typedef {{id: string, name?: string, contextWindow?: number, maxTokens?: number, reasoning?: boolean, reasoningEffort?: string, cost?: {input?: number, output?: number, cacheRead?: number, cacheWrite?: number}|null}} ModelRow
  * @typedef {{provider: ProviderCfg, model: {id: string, name: string, contextWindow: number, maxTokens: number, reasoning: boolean, reasoningEffort: string|null, cost: {input?: number, output?: number, cacheRead?: number, cacheWrite?: number}|null}}} ModelSpec
  * @typedef {{default?: string|null, fallbacks?: string[]|null, providers?: Record<string, Object>}} ModelsCfg
@@ -69,10 +69,12 @@ export function resolveModel(catalog, refStr = null) {
 }
 
 /** プロバイダの認証値を解決する(value > env > file)。旧resolveApiKeyの一般化。
+ * auth.type="oauth"のプロバイダはここでは解決しない(トークンストア経由=src/model/openai-auth.js)。
  * fileはROOTとdataDir両方を試す(開発時はリポジトリ基準・梱包時はuserData基準)。
  * @param {ProviderCfg} provider @param {string[]} [baseDirs] @returns {string|null} */
 export function resolveAuthValue(provider, baseDirs = []) {
   const a = provider.auth ?? {};
+  if (a.type === "oauth") return null;
   if (a.value) return a.value;
   if (a.env && process.env[a.env]) return process.env[a.env];
   if (a.file) {

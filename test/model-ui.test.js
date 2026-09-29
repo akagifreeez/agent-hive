@@ -13,6 +13,12 @@ function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-model-ui-"));
 }
 
+// 疑似JWT(署名検証はしない・payload部だけを見る)
+function fakeJwt(claims) {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${b64({ alg: "none" })}.${b64(claims)}.sig`;
+}
+
 function mkConfig(ws) {
   return {
     workspace: ws, ui: { port: 0 },
@@ -126,6 +132,79 @@ test("設定API: /api/model-test は未知プロバイダでconfigエラー", as
     assert.equal(r.code, "config");
     ui.close();
   } finally {
+    if (prev === undefined) delete process.env.HIVE_DATA;
+    else process.env.HIVE_DATA = prev;
+    rmSync(ws, { recursive: true, force: true });
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("設定API: /api/openai-auth は認証URLを発行し、手動貼り付けでトークン保存・疎通まで通る", async () => {
+  const ws = mktmp();
+  const dataDir = mktmp();
+  const prev = process.env.HIVE_DATA;
+  process.env.HIVE_DATA = dataDir;
+  const origFetch = globalThis.fetch;
+  const tokenFetches = [];
+  let sseCalls = 0;
+  try {
+    const config = mkConfig(ws);
+    const ui = await startUiTokenized(startUi, { config, bus: new Bus(), autoStart: false });
+    const base = `http://127.0.0.1:${config.ui.port}`;
+    const post = (path, body) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json", "x-hive-token": ui.token }, body: JSON.stringify(body) });
+
+    // 認証URL発行(コールバックサーバが14546で立つ)
+    const r1 = await (await post("/api/openai-auth", { provider: "openai" })).json();
+    assert.equal(r1.ok, true);
+    const authUrl = new URL(r1.authUrl);
+    assert.equal(authUrl.origin + authUrl.pathname, "https://auth.openai.com/oauth/authorize");
+    const state = authUrl.searchParams.get("state");
+    assert.ok(state);
+
+    // state不一致の貼り付けは拒否
+    const bad = await (await post("/api/openai-auth", { provider: "openai", pasteUrl: `http://127.0.0.1:14546/auth/callback?code=c1&state=wrong` })).json();
+    assert.equal(bad.ok, false);
+    assert.match(bad.error, /state不一致/);
+
+    // トークン交換とCodexワイヤを差し替え: 貼り付け→ストア保存→/api/modelsのauthHint→プローブ疎通
+    globalThis.fetch = async (url, opts) => {
+      const s = String(url);
+      if (s.includes("/api/")) return origFetch(url, opts);
+      if (s.includes("auth.openai.com")) {
+        tokenFetches.push(new URLSearchParams(opts.body));
+        return { ok: true, status: 200, text: async () => JSON.stringify({ access_token: fakeJwt({ "https://api.openai.com/auth": { chatgpt_account_id: "acc-9" }, email: "me@example.com" }), refresh_token: "rt-9", expires_in: 3600 }) };
+      }
+      // Codexワイヤ: 軽量SSE応答
+      sseCalls++;
+      const enc = new TextEncoder();
+      return {
+        ok: true, status: 200,
+        body: { getReader: () => { const items = ['data: {"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1},"output":[]}}\n\n'].map((l) => enc.encode(l)); let i = 0; return { read: async () => (i < items.length ? { done: false, value: items[i++] } : { done: true }) }; } },
+      };
+    };
+    const paste = `http://127.0.0.1:14546/auth/callback?code=c1&state=${encodeURIComponent(state)}`;
+    const r2 = await (await post("/api/openai-auth", { provider: "openai", pasteUrl: paste })).json();
+    assert.equal(r2.ok, true, JSON.stringify(r2));
+    assert.equal(tokenFetches.length, 1);
+    assert.equal(tokenFetches[0].get("grant_type"), "authorization_code");
+
+    // ストア保存+authHint(email)で見える
+    const saved = JSON.parse(readFileSync(join(dataDir, "state", "models-openai.oauth.json"), "utf8"));
+    assert.equal(saved.openai.email, "me@example.com");
+    const { model: m1 } = await (await fetch(base + "/api/models")).json();
+    const openaiP = m1.providers.find((p) => p.id === "openai");
+    assert.equal(openaiP.auth, "oauth");
+    assert.equal(openaiP.authHint, "me@example.com");
+
+    // プローブ(Codexワイヤ)が疎通する
+    const r3 = await (await post("/api/model-test", { provider: "openai" })).json();
+    assert.equal(r3.ok, true, JSON.stringify(r3));
+    assert.equal(r3.ref, "openai/gpt-6-astra");
+    assert.equal(sseCalls, 1);
+
+    ui.close();
+  } finally {
+    globalThis.fetch = origFetch;
     if (prev === undefined) delete process.env.HIVE_DATA;
     else process.env.HIVE_DATA = prev;
     rmSync(ws, { recursive: true, force: true });

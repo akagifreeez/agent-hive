@@ -1775,9 +1775,10 @@ async function renderModelsList() {
       const nm = document.createElement("span");
       nm.className = "prov-name";
       nm.textContent = p.name;
+      const isOauth = p.auth === "oauth";
       const meta = document.createElement("span");
       meta.className = "prov-meta";
-      meta.textContent = `${p.api} / 鍵${p.authHint ?? "未設定"} / モデル${p.models.length}個`;
+      meta.textContent = `${p.api} / ${isOauth ? (p.authHint ? `認証済み(${p.authHint})` : "未認証") : `鍵${p.authHint ?? "未設定"}`} / モデル${p.models.length}個`;
       const keyInput = document.createElement("input");
       keyInput.type = "password";
       keyInput.autocomplete = "off";
@@ -1786,16 +1787,69 @@ async function renderModelsList() {
       keyInput.placeholder = p.authHint ? "差し替え" : "鍵を入力";
       const save = document.createElement("button");
       save.className = "btn";
-      save.textContent = "保存";
-      save.onclick = async () => {
-        const key = keyInput.value.trim();
-        if (!key) { toast("鍵が空です"); return; }
-        const r = await (await hfetch("/api/key", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: p.id, key }) })).json();
-        if (r.error) { toast(`鍵: ${r.error}`); return; }
-        keyInput.value = "";
-        toast(`${p.name} の鍵を保存しました(${r.hint})`, "ok");
-        renderModelsList();
-      };
+      let keyControls;
+      if (isOauth) {
+        // OAuth型(ChatGPT Plus/Pro): 鍵ではなくブラウザ認証。コールバックが自動受信
+        // できない場合に備え、リダイレクト先URLを貼り付ける欄も併設する
+        keyInput.style.display = "none";
+        const authBtn = document.createElement("button");
+        authBtn.className = "btn";
+        authBtn.textContent = "認証";
+        authBtn.onclick = async () => {
+          authBtn.disabled = true;
+          result.className = "prov-result";
+          result.textContent = "発行中…";
+          try {
+            const r = await (await hfetch("/api/openai-auth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: p.id }) })).json();
+            if (r.error) { toast(`認証: ${r.error}`); result.textContent = ""; return; }
+            const a = document.createElement("a");
+            a.href = r.authUrl;
+            a.target = "_blank";
+            a.rel = "noreferrer";
+            a.textContent = "認証ページを開く";
+            a.style.color = "var(--accent)";
+            result.className = "prov-result";
+            result.textContent = "";
+            result.appendChild(a);
+            if (r.manualOnly && r.note) result.appendChild(document.createTextNode(` ${r.note}`));
+            else result.appendChild(document.createTextNode(" ブラウザでログインしてください"));
+            window.open(r.authUrl, "_blank", "noreferrer");
+            setTimeout(() => renderModelsList(), 8000);
+            setTimeout(() => renderModelsList(), 20000);
+          } finally {
+            authBtn.disabled = false;
+          }
+        };
+        save.textContent = "送る";
+        save.title = "貼り付けたURLで認証を完了する";
+        save.onclick = async () => {
+          const url = keyInput2.value.trim();
+          if (!url) { toast("リダイレクト先のURLを貼り付けてください"); return; }
+          const r = await (await hfetch("/api/openai-auth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: p.id, pasteUrl: url }) })).json();
+          if (r.error) { toast(`認証: ${r.error}`); return; }
+          keyInput2.value = "";
+          toast(`${p.name} の認証を完了しました`, "ok");
+          renderModelsList();
+        };
+        keyControls = [authBtn];
+      } else {
+        save.textContent = "保存";
+        save.onclick = async () => {
+          const key = keyInput.value.trim();
+          if (!key) { toast("鍵が空です"); return; }
+          const r = await (await hfetch("/api/key", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: p.id, key }) })).json();
+          if (r.error) { toast(`鍵: ${r.error}`); return; }
+          keyInput.value = "";
+          toast(`${p.name} の鍵を保存しました(${r.hint})`, "ok");
+          renderModelsList();
+        };
+        keyControls = [keyInput];
+      }
+      const keyInput2 = document.createElement("input");
+      keyInput2.className = "prov-key";
+      keyInput2.spellcheck = false;
+      keyInput2.placeholder = "リダイレクト先URL";
+      if (!isOauth) keyInput2.style.display = "none";
       const test = document.createElement("button");
       test.className = "btn";
       test.textContent = "テスト";
@@ -1816,7 +1870,7 @@ async function renderModelsList() {
           test.disabled = false;
         }
       };
-      row.append(dot, nm, meta, keyInput, save, test, result);
+      row.append(dot, nm, meta, ...keyControls, keyInput2, save, test, result);
       box.appendChild(row);
     }
   } catch (e) {

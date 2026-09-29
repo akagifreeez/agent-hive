@@ -14,7 +14,7 @@ import { runCommand } from "../engine/exec.js";
 import { openInBrowser } from "../engine/browser.js";
 import { PermissionGate } from "../engine/permissions.js";
 import { ROOT, dataDir } from "../config.js";
-import { modelStateInfo, resolveDefaultSpec, probeModel } from "../model/factory.js";
+import { modelStateInfo, resolveDefaultSpec, probeModel, startOpenAIAuth } from "../model/factory.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
@@ -329,6 +329,24 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       // ?q= があるときは全文検索モード(全スレッド横断の本文部分一致)
+      if (url.pathname === "/api/openai-auth" && req.method === "POST") {
+        // Codex OAuthフロー開始(設定ウィンドウの「認証」)。コールバックサーバを立てて
+        // authUrlを返す。pasteUrl指定時はリダイレクト先URLからの手動トークン交換。
+        // ブラウザでのログイン完了後トークンを自動保存(エージェントを起こさない)
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", async () => {
+          try {
+            const { provider, pasteUrl } = JSON.parse(body || "{}");
+            const r = await startOpenAIAuth(config, { provider: provider ?? null, pasteUrl: pasteUrl ?? null });
+            if (!r.ok) json(res, r, 400);
+            else json(res, r);
+          } catch (err) {
+            json(res, { ok: false, error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/models") return json(res, { model: modelStateInfo(config) });
       if (url.pathname === "/api/board") {
         const q = url.searchParams.get("q");
