@@ -22,20 +22,30 @@ export function printNotifyLine(n) {
 
 /**
  * busへCLI通知を配線する。戻り値のunwire()で全リスナを外せる(テスト用)。
- * 二重配線防止: 同じbusに既に配線済みなら何もせずnullを返す(デスクトップ殻は
- * 独自のNative通知配線を持つため、wireCliNotifyを呼んでいても呼んでいなくても壊れない)。
+ * 二重配線防止: 同じbusへの2回目の呼び出しはリスナを足さず、opts.onNotifyだけを
+ * 既存の配線へ追加する(--chatの起動順: index.jsが先にコンソール配線 → startUiが
+ * 監視配信のonNotifyを後から追加、の順序の逆でも正しく動く)。デスクトップ殻は
+ * 独自のNative通知配線を持つため、wireCliNotifyを呼んでいれば併存しても壊れない。
  * @param {import("./engine/board.js").Bus} bus
  * @param {{longTaskSec?: number, onNotify?: (n: NotifyItem) => void, log?: (line: string) => void}} [opts]
- * @returns {{unwire: () => void}|null} 既に配線済みのときnull
+ * @returns {{unwire: () => void}|null} 既に配線済みのときnull(onNotifyの追加だけは実施)
  */
 export function wireCliNotify(bus, opts = {}) {
-  if (/** @type {any} */ (bus).__cliNotifyWired) return null;
-  /** @type {any} */ (bus).__cliNotifyWired = true;
+  const anyBus = /** @type {any} */ (bus);
+  if (anyBus.__cliNotifyWired) {
+    if (opts.onNotify) anyBus.__cliNotifyOnNotify.push(opts.onNotify);
+    return null;
+  }
+  anyBus.__cliNotifyWired = true;
+  anyBus.__cliNotifyOnNotify = [];
+  if (opts.onNotify) anyBus.__cliNotifyOnNotify.push(opts.onNotify);
   const longTaskSec = Number(opts.longTaskSec) > 0 ? Number(opts.longTaskSec) : 600;
   const emit = (n) => {
     // コンソール出力は常に本体(通知の最低保証)。onNotifyは監視(/api/monitor)への追加配信
     printNotifyLine(n);
-    if (opts.onNotify) opts.onNotify(n);
+    for (const f of anyBus.__cliNotifyOnNotify) {
+      try { f(n); } catch { /* 配信先の失敗で通知本体を止めない */ }
+    }
   };
   const offReq = bus.on("permission.request", (p) => {
     emit({ kind: "permission.request", at: new Date().toISOString(), id: p.id, title: `承認待ち #${p.id}`, body: String(p.command ?? "").slice(0, 120) });
@@ -66,7 +76,8 @@ export function wireCliNotify(bus, opts = {}) {
     unwire: () => {
       offReq(); offMerge(); offClaimed(); offReleased(); offCancelled(); offFinished();
       claimedAt.clear();
-      delete /** @type {any} */ (bus).__cliNotifyWired;
+      anyBus.__cliNotifyOnNotify = [];
+      delete anyBus.__cliNotifyWired;
     },
   };
 }

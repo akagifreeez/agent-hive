@@ -14,6 +14,7 @@ import { runCommand } from "../engine/exec.js";
 import { openInBrowser } from "../engine/browser.js";
 import { PermissionGate } from "../engine/permissions.js";
 import { ROOT, dataDir } from "../config.js";
+import { wireCliNotify } from "../notify.js";
 import { modelStateInfo, resolveDefaultSpec, probeModel, startOpenAIAuth } from "../model/factory.js";
 import { buildCatalog } from "../model/catalog.js";
 import { spawn } from "node:child_process";
@@ -88,6 +89,18 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
   const boardStore = new BoardStore(config.workspace);
+  // CLI通知(#11): 承認待ち/マージ完了/長時間タスク完了をコンソールへ出しつつ、
+  // live.notificationsへ貯めて監視(monitor)へ配信する。--chat等でindex.js側から
+  // 先に配線されていても、ここではonNotify(監視配信)の追加だけを行う(二重出力にならない)
+  /** @type {import("../notify.js").NotifyItem[]} */
+  const notifications = [];
+  wireCliNotify(bus, {
+    longTaskSec: config.notify?.longTaskSec ?? 600,
+    onNotify: (n) => {
+      notifications.unshift(n);
+      if (notifications.length > 30) notifications.length = 30;
+    },
+  });
   const live = {
     // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
     // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
