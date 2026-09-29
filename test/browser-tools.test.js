@@ -166,10 +166,10 @@ test("buildSubmission: method/url/body/content-typeを組み立て(GETはクエ�
 });
 
 test("browserFetch: ローカルサーバーからGETし、page+rawが返る(絶対URL必須)", async (t) => {
-  const { server, base } = await startLocalServer(t, { "/page.html": { body: PAGE_HTML } });
+  const { server, base } = await startLocalServer({ "/page.html": { body: PAGE_HTML } });
   const r = await browserFetch(`${base}/page.html`);
   assert.equal(r.ok, true);
-  console.log("DBG:", r.ok, r.status, JSON.stringify(r.page?.title), (r.raw??"").length); assert.equal(r.page.title, "フォームページ");
+  assert.equal(r.page.title, "フォームページ");
   assert.ok(r.status === 200);
   assert.ok(String(r.raw).includes("見出しH1"));
 
@@ -180,7 +180,7 @@ test("browserFetch: ローカルサーバーからGETし、page+rawが返る(絶
 });
 
 test("browserExtract: 取得→抽出が1呼び出しで通る(url+selector)", async (t) => {
-  const { server, base } = await startLocalServer(t, { "/page.html": { body: PAGE_HTML } });
+  const { server, base } = await startLocalServer({ "/page.html": { body: PAGE_HTML } });
   const r = await browserExtract({ url: `${base}/page.html`, selector: "h1" });
   assert.equal(r.ok, true);
   assert.match(r.text, /見出しH1/);
@@ -188,7 +188,7 @@ test("browserExtract: 取得→抽出が1呼び出しで通る(url+selector)", a
 });
 
 test("browserSubmit: POSTでフォーム送信でき、303はlocation追従して取れる", async (t) => {
-  const { server, base } = await startLocalServer(t, {
+  const { server, base } = await startLocalServer({
     "/login": { echoBody: true, contentType: "text/html; charset=utf-8" },
   });
   const r = await browserSubmit({
@@ -204,7 +204,7 @@ test("browserSubmit: POSTでフォーム送信でき、303はlocation追従し�
 });
 
 test("browserSubmit: 303 See Other はlocationへ追従して最終応答を返す", async (t) => {
-  const { server, base } = await startLocalServer(t, {
+  const { server, base } = await startLocalServer({
     "/login": { seeOther: "/done.html" },
     "/done.html": { body: "<h1>完了</h1>" },
   });
@@ -215,7 +215,7 @@ test("browserSubmit: 303 See Other はlocationへ追従して最終応答を返�
 });
 
 test("browserSubmit: セレクタ一致なし・フォームなしは送信しない", async (t) => {
-  const { server, base } = await startLocalServer(t, { "/login": { echoBody: true } });
+  const { server, base } = await startLocalServer({ "/login": { echoBody: true } });
   const noSel = await browserSubmit({ html: PAGE_HTML, base_url: `${base}/`, values: {}, selector: "nosuch" });
   assert.equal(noSel.ok, false);
   assert.match(noSel.text, /nosuch/);
