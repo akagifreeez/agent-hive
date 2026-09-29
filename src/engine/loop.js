@@ -107,6 +107,7 @@ export async function runAgentLoop({
   drainInput = null, // () => ターン境界で割込ませる入力の配列(steering)。呼ぶたに取り出す
   peekInput = null, // () => 未処理入力が待っているか(取り出さず覗くだけ)。idle退場の抑制に使う
   claimMissesLimit = 3, // 連続請求ミス何回でidle終了するか(追加ワーカーは1で早期退場)
+  checkpointFn = null, // (messages) => void ツール実行済み地点でスナップショットを保存する(イシュー#4)
 }) {
   if (!messages) {
     const sys = buildSystemPrompt(agent, shellKind);
@@ -186,7 +187,7 @@ export async function runAgentLoop({
       releaseClaims("モデルエラー");
       bus.emit("agent.status", { agent: agent.id, status: "error" });
       bus.emit("agent.error", { agent: agent.id, turn, error: err.message });
-      return { ok: false, error: err.message, seenBoard: seen };
+      return { ok: false, endedBy: "error", error: err.message, seenBoard: seen };
     }
     if (ledger) {
       ledger.add(agent.id, res.usage);
