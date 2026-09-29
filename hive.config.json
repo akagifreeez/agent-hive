@@ -27,7 +27,7 @@
   },
   "hierarchy": {
     "maxDepth": 2,
-    "maxConcurrent": 12
+    "maxConcurrent": 35
   },
   "chat": {
     "lead": "lead",
