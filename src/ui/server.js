@@ -18,6 +18,7 @@ import { modelStateInfo, resolveDefaultSpec, probeModel, startOpenAIAuth } from 
 import { buildCatalog } from "../model/catalog.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
+import { aggregateUsage } from "../engine/usage.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
 
@@ -722,7 +723,13 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
-      if (url.pathname === "/api/usage") return json(res, { usage: readFileSyncSafe(join(config.workspace, "state", "usage.json")) });
+      if (url.pathname === "/api/usage") {
+        // 集計ビュー(日別/スレッド別/日別xスレッド、イシュー#6)。usage raw文字列は旧契約として維持
+        const raw = readFileSyncSafe(join(config.workspace, "state", "usage.json"));
+        let history = [];
+        try { const parsed = JSON.parse(raw ?? "null"); if (Array.isArray(parsed)) history = parsed; } catch {}
+        return json(res, { usage: raw, aggregate: aggregateUsage(history, { days: 14 }) });
+      }
       if (url.pathname === "/api/memory") return json(res, { memory: listMemoryWithExpiry(config.workspace) });
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
       if (url.pathname === "/api/devserver") {
