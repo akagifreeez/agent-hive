@@ -106,11 +106,11 @@ test("extractElements: 種別フィルタとジャンプ先(index)が返る", as
   assert.equal(headings[0].level, 1);
 
   const links = extractElements(page, { type: "link" });
-  assert.equal(links.length, 2); // 断片(#sec-1)はnormalizeUrlで除外
+  assert.equal(links.length, 3); // 断片(#sec-1)はhref:nullで保持(遷移候補の一覧性優先)
   assert.ok(links.every((l) => l.index >= 1));
 
   const all = extractElements(page, {});
-  assert.equal(all.length, 5); // リンク2+フォーム1+見出し2(断片リンクは除外)
+  assert.equal(all.length, 6); // リンク3(断片含むhref:null)+フォーム1+見出し2
 });
 
 test("extractText: セレクタ指定で部分テキスト抽出", async (t) => {
@@ -166,7 +166,7 @@ test("buildSubmission: method/url/body/content-typeを組み立て(GETはクエ�
 });
 
 test("browserFetch: ローカルサーバーからGETし、page+rawが返る(絶対URL必須)", async (t) => {
-  const { server, base } = await startLocalServer(t, { "/page.html": { body: PAGE_HTML } });
+  const { server, base } = await startLocalServer({ "/page.html": { body: PAGE_HTML } });
   const r = await browserFetch(`${base}/page.html`);
   assert.equal(r.ok, true);
   assert.equal(r.page.title, "フォームページ");
@@ -180,7 +180,7 @@ test("browserFetch: ローカルサーバーからGETし、page+rawが返る(絶
 });
 
 test("browserExtract: 取得→抽出が1呼び出しで通る(url+selector)", async (t) => {
-  const { server, base } = await startLocalServer(t, { "/page.html": { body: PAGE_HTML } });
+  const { server, base } = await startLocalServer({ "/page.html": { body: PAGE_HTML } });
   const r = await browserExtract({ url: `${base}/page.html`, selector: "h1" });
   assert.equal(r.ok, true);
   assert.match(r.text, /見出しH1/);
@@ -188,7 +188,7 @@ test("browserExtract: 取得→抽出が1呼び出しで通る(url+selector)", a
 });
 
 test("browserSubmit: POSTでフォーム送信でき、303はlocation追従して取れる", async (t) => {
-  const { server, base } = await startLocalServer(t, {
+  const { server, base } = await startLocalServer({
     "/login": { echoBody: true, contentType: "text/html; charset=utf-8" },
   });
   const r = await browserSubmit({
@@ -204,7 +204,7 @@ test("browserSubmit: POSTでフォーム送信でき、303はlocation追従し�
 });
 
 test("browserSubmit: 303 See Other はlocationへ追従して最終応答を返す", async (t) => {
-  const { server, base } = await startLocalServer(t, {
+  const { server, base } = await startLocalServer({
     "/login": { seeOther: "/done.html" },
     "/done.html": { body: "<h1>完了</h1>" },
   });
@@ -215,7 +215,7 @@ test("browserSubmit: 303 See Other はlocationへ追従して最終応答を返�
 });
 
 test("browserSubmit: セレクタ一致なし・フォームなしは送信しない", async (t) => {
-  const { server, base } = await startLocalServer(t, { "/login": { echoBody: true } });
+  const { server, base } = await startLocalServer({ "/login": { echoBody: true } });
   const noSel = await browserSubmit({ html: PAGE_HTML, base_url: `${base}/`, values: {}, selector: "nosuch" });
   assert.equal(noSel.ok, false);
   assert.match(noSel.text, /nosuch/);
