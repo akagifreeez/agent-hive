@@ -106,3 +106,9 @@
 - **古い分岐の放棄ブランチは原則マージしない(巻き戻しリスク)**: クラッシュ復旧(respawn-*)で請求したブランチが古い世代(stability-r3等)だと、マージ時に113ファイル/約-1万行の巻き戻し差分となり最新機能(スロットリング等)を破壊しうる。放棄判断の検定手順: (1)merge-baseとbranch先頭の日付/コミットで分岐世代を確認 (2)`git diff main <branch>` の二点間diffで「機能の独自追加」を列挙(mainとの三点間diffは新旧混合で見誤る) (3)各機能が現mainに改善形で存在するか確認(killDevserverTree等の強化版) (4)関連テストを現mainで実行して緑を証跡にする → 放棄判断はボードへ根拠付きで記録し、worktree/ブランチは掃除タスクへ委ねる。完了条件は「取り込み or 放棄判断の記録」なので、記録だけでfinishしてよい。
 - usage集計UI(イシュー#6)の最終形: /api/usage(aggregateUsageのbyDate/byThread/matrix)+ index.html statusタブの renderUsageAggregate()。並行実装由来の usageAggTable 等の重複は統一済み — 再発時は grep -c で関数名を数え、main側へ統一する(2026-09)。
 - **leadロール(進行・調整)はreviewタスクを請求できない**: 発見器が起票するverify-*はrole:review固定のため、leadはclaim不可(approveは実装者でなければ可)。verify滞留はrole:review持ちのワーカーへボードで依頼するか、リーダーがroleを緩める。claim空転が続くときは診断文の「未着手一覧」でrole不一致を確認してから打ち切る(claimMiss診断と併用)。
+
+# 2026-09 feat-monitor-chartラウンドの知見(アルファdistill)
+
+- **自動解放(プロセス再起動)で請求が戻ってもworktreeは保持される**: コミット済みの成果は失われない。再請求したら git status/log で現状確認→必要なテストだけ再実行→finish_task が定型。無為に再実装しない(2026-09)。
+- **依存ゼロ(外部URL無し)テストではSVG名前空間URI(http://www.w3.org/2000/svg)を例外にする**: 属性値として使い取得はしない。監視は否定先読み付き正規表現 /https?:\/\/(?!www\.w3\.org)/ で行う(誤検知実績: test/monitor-chart.test.js)(2026-09)。
+- **ブラウザ向け描画は純関数モジュール(public/配下・IIFE+globalThis公開)+HTMLはfetchと注入のみに分離**すると、描画ロジックも統合(API応答の実行時契約)もNodeテストで検証できる(markdown.jsパターンの適用。詳細は上のイシュー#15-17節)(2026-09)。
