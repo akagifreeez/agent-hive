@@ -120,6 +120,7 @@ export function parsePage(html, baseUrl) {
     forms.push({
       index: forms.length + 1,
       method: methodRaw || "GET",
+      methodRaw,
       action: normalizeUrl(actionRaw || base, base) ?? base,
       html: fm[2] ?? "",
       fields: btFormFields(fm[2] ?? ""),
@@ -211,6 +212,9 @@ export function applyFormValues(form, values) {
  * 送信リクエストを組み立てる(GETはURL結合・POSTはurlenc)。
  * opts.selector指定時はフォームHTML内一致を検証し、無ければthrow(誤送信防止)。
  */
+const BS = String.fromCharCode(92); // バックスラッシュ(正規表現を文字列連結で組むための定数)
+const DQ = String.fromCharCode(34); // ダブルクォート
+const SQ = String.fromCharCode(39); // シングルクォート
 export function buildSubmission(form, values, opts = {}) {
   if (!form) throw new Error("フォームが見つかりません");
   const f = applyFormValues(form, values);

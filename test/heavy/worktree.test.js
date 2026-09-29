@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
-function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視 */ } }
+function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ } }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Board, Bus } from "../../src/engine/board.js";
@@ -16,7 +16,7 @@ function makeWorkspace() {
   return mkdtempSync(join(tmpdir(), "hive-wt-"));
 }
 
-test("setupWorktrees: クリーンならfreshに張り直し、未コミット変更は保持+onKept告知", async () => {
+test("setupWorktrees: 未マージコミットは保持(onKept告知)、マージ済みクリーンのみfresh(#7)", async () => {
   const ws = makeWorkspace();
   const bus = new Bus();
   await ensureGitRepo(ws);
@@ -25,7 +25,7 @@ test("setupWorktrees: クリーンならfreshに張り直し、未コミット�
   const p1 = await setupWorktrees({ mainWorkspace: ws, worktreeRoot: root, agents });
   assert.ok(existsSync(p1.alpha));
   assert.ok(existsSync(join(p1.alpha, ".gitignore")));
-  // alphaはクリーン(コミットだけ) → 再実行でブランチごとfreshになる
+  // alphaはコミットだけ(未マージ) → 削除せず保持する(イシュー#7: respawnの検出対象を消さない)
   await runCommand({ command: "git -c user.name=t -c user.email=t@t commit -q --allow-empty -m old-work", cwd: p1.alpha, outputLimit: 500 });
   // betaは未コミットの下書き → 無音に壊さず保持する
   writeFileSync(join(p1.beta, "draft.md"), "未コミットの下書き");
@@ -35,9 +35,9 @@ test("setupWorktrees: クリーンならfreshに張り直し、未コミット�
     onKept: (k) => kept.push(k),
   });
   const log = await runCommand({ command: "git log --oneline agent/alpha", cwd: ws, outputLimit: 500 });
-  assert.doesNotMatch(log.text, /old-work/); // クリーンなブランチ残骸は掃除
+  assert.match(log.text, /old-work/); // 未マージコミットは保持される
   assert.equal(existsSync(join(p2.beta, "draft.md")), true); // 未コミット変更は保持
-  assert.deepEqual(kept.map((k) => k.agentId), ["beta"]);
+  assert.deepEqual(kept.map((k) => k.agentId).sort(), ["alpha", "beta"]);
   rmTree(ws);
   rmTree(root);
 });
