@@ -76,7 +76,7 @@ function btFormFields(formInner) {
   while ((m = taRe.exec(formInner))) {
     pushField({ name: btAttr(m[1] ?? "", "name") ?? "", type: "textarea", value: btDecodeEntities(m[2] ?? ""), order: ++order });
   }
-  return fields;
+    return fields.sort((a, b) => a.order - b.order);
 }
 
 /**
@@ -117,8 +117,7 @@ export function parsePage(html, baseUrl) {
     const actionRaw = btAttr(attrs, "action") || "";
     forms.push({
       index: forms.length + 1,
-      method: methodRaw.toUpperCase() || "GET",
-      methodRaw,
+      method: methodRaw || "GET",
       action: normalizeUrl(actionRaw || base, base) ?? base,
       html: fm[2] ?? "",
       fields: btFormFields(fm[2] ?? ""),
