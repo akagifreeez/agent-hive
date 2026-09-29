@@ -32,8 +32,7 @@ export async function setupWorktrees({ mainWorkspace, worktreeRoot, agents, exec
     const path = resolve(join(worktreeRoot, agent.id));
     if (existsSync(path)) {
       const st = await exec({ command: "git status --porcelain", cwd: path, outputLimit: 2000 });
-      const dirty = st.ok && st.text.split("
-").slice(1).some((l) => l.trim());
+      const dirty = st.ok && st.text.split("\n").slice(1).some((x) => x.trim());
       if (dirty) {
         paths[agent.id] = path;
         onKept?.({ agentId: agent.id, path, detail: st.text.slice(0, 800) });
@@ -61,8 +60,7 @@ export async function hasUnmergedWork({ mainWorkspace, agentId, exec = runComman
   const anc = await exec({ command: `git merge-base --is-ancestor ${branch} main`, cwd: mainWorkspace, outputLimit: 200 });
   if (anc.ok) return false; // mainに含まれている(マージ済み) → 作り直してよい
   const log = await exec({ command: `git log main..${branch} --oneline`, cwd: mainWorkspace, outputLimit: 2000 });
-  return Boolean(log.ok && log.text.split("
-").slice(1).some((l) => l.trim())); // 未マージコミットあり
+  return Boolean(log.ok && log.text.split("\n").slice(1).some((x) => x.trim())); // 未マージコミットあり
 }
 
 // 1エージェント分のworktreeを動的に作る(v5: スポーンされるエージェント向け)
