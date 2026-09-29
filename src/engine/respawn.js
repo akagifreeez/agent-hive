@@ -37,7 +37,7 @@ function samePath(a, b) {
  * @param {Object} o
  * @param {string} o.mainWorkspace mainワークスペース(gitリポジトリ)
  * @param {string} o.worktreeRoot worktrees/<agentId> の親ディレクトリ
- * @param {import("./tasks.js").TaskBlackboard} tasks 再起票先タスクボード
+ * @param {import("./tasks.js").TaskBlackboard} o.tasks 再起票先タスクボード
  * @param {Object|null} [o.board] 告知先ボード(null可)
  * @param {Object|null} [o.bus] イベント発火先(null可)
  * @param {{cleanup?: boolean}} [o.opts] cleanup=trueで変更ゼロの放棄worktree/ブランチを自動削除(既定は提案のみ)
