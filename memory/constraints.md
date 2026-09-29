@@ -75,3 +75,12 @@
 - **browser-toolsの断片リンク契約は統一済み**: normalizeUrlが #断片に対しnullを返し、links/extractElements双方の遷移候補から除外する。browserSubmitレポートの接頭辞は「method: 」(テスト期待と一致、test/browser-tools*.test.js 13/13)(2026-09)。
 - **edit_fileでテンプレートリテラルを壊したときの最短修復**は `git show main:<file>` で原本を取り直して該当ブロックを復元する(node -eパッチ再試行より安全。2026-09 issue-browserラウンドでworktree.js修復に実証)。
 - **ボード投稿は自身のスレッドへ投稿すると自分のボードに載らない**: to_thread指定時の注意。lead報告の取りこぼしがあったら他スレッドの投稿を見る(gather_context source=threads)。
+
+# 2026-09 issue-checkpoint系列ラウンドの追加知見(ベータdistill)
+
+- **respawnスキャンとテストの競合**: 起動時respawn単体は正しい。e2e(respawn-chat)が落ちるときは、テストがworktreeに置いたwipコミットを「直前ラウンドのラウンド末自動マージ(mergeAgentWork)」が先にmainへ取り込み、スキャン時点で差分が消えている競合。テストでクラッシュを模擬するならラウンド末マージ完了を待つか dirty(未コミット)状態を使う。respawnを疑う前に git merge-base --is-ancestor で既取り込みを確認する(観測: コミット直後は差分あり→数秒後に消滅)。切り分けには respawnの直接呼び出し+実TaskBlackboardが有効。
+- **fix-*/review-*は解放→再請求の競合が起きる**: 通知と同時にclaimすると「他拠点で完了済み」で弾かれる。弾かれたら実質完了をボードで確認し、open復帰したら検証者の視点でapproveまで通す(重複実装しない)。verify-*は実装者以外限定のためrole:implワーカーは請求不可=承認待ちが滞る。承認待ちは自分のスレッドのrole:reviewが居るうちに処理する。
+- **verify連鎖の打ち切り**: verify-verify-verify-* の多段検証は発見器再起票連鎖の兆候。実装がmain反映済みなら「検証→approve」で閉じ、新規検証タスクを起票しない。
+- **テストの期待値は「最後に緑になった契約」へ実装+テスト同時一括で揃える**: browser-tools断片リンク(href:null保持⇔除外)とsubmit報告書式(送信:/method:)は実装・テストが交互に書き換わり退行を繰り返した(2026-09実害: 構文破損コミットも混入)。修正は同一コミットで揃え、契約コメント(例: 「断片は遷移候補から除外(e80e512)」)をコードに明記する。
+- **TZ境界のテスト検証は3環境**: usage-aggregateはUTC基準日付生成(setUTCDate/setUTCHours)へ統一の上、TZ=Asia/Tokyo/UTC/America/Los_Angelesの3環境でpassを取るのが検証証跡。1環境だけでは深夜帯を取りこぼす(2026-09 fix-usage-aggregate-tz)。
+- **checkpoint/resume実装の注意(イシュー#4)**: 復元後にcheckpointファイルを必ず削除(残すとmodelエラー→復元→失敗の無限ループ)。checkpointFnはツール実行済み地点で呼ぶ。対象はモデル異常(endedBy:error)のみで、ツール打ち切り・予算停止は対象外という設計判断(2026-09)。
