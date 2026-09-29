@@ -45,37 +45,40 @@ function btAttr(attrs, name) {
 
 /** form内HTMLからフィールド(input/select/textarea)を抽出(submit系は除外)。 */
 function btFormFields(formInner) {
-  const src = String(formInner ?? "");
   const fields = [];
   const pushField = (f) => { if (f.name && fields.length < 100) fields.push(f); };
-  const tokenRe = new RegExp("<(input|select|textarea)([^>]*)(?:>(\[\s\S]*?)<\/(?:input|select|textarea)\s*>|\s*?>)", "gi");
+  // input|select|textarea を1つの正規表現で出現順に走査する(HTML上の順序=order)
+  const tagRe = /<(input|select|textarea)\s([^>]*?)(?:>([\s\S]*?)<\/\1\s*>|\/?>)/gi;
   let m;
-  while ((m = tokenRe.exec(src))) {
-    const tag = String(m[1]).toLowerCase();
+  let order = 0;
+  while ((m = tagRe.exec(formInner))) {
+    const tag = m[1].toLowerCase();
     const attrs = m[2] ?? "";
-    const type = (btAttr(attrs, "type") || (tag === "input" ? "text" : tag)).toLowerCase();
-    if (type === "submit" || type === "button" || type === "image") continue;
-    if (tag === "select") {
+    const inner = m[3] ?? "";
+    if (tag === "input") {
+      const type = (btAttr(attrs, "type") || "text").toLowerCase();
+      if (type === "submit" || type === "button" || type === "image") continue;
+      pushField({ name: btAttr(attrs, "name") ?? "", type, value: btAttr(attrs, "value") ?? "", order: ++order });
+    } else if (tag === "select") {
       const options = [];
-      const optRe = new RegExp("<option\s([^>]*)>(\[\s\S]*?)<\/option\s*>", "gi");
+      const optRe = /<option\s([^>]*)>([\s\S]*?)<\/option\s*>/gi;
       let om;
       let value = "";
-      while ((om = optRe.exec(m[3] ?? ""))) {
+      while ((om = optRe.exec(inner))) {
         const oa = om[1] ?? "";
         const val = btAttr(oa, "value") ?? btStripTags(om[2]);
-        const selected = /(^|s)selected(s|$|=)/i.test(oa);
-        if (selected || !value) value = val;
+        const selected = /(^|\s)selected(\s|$|=)/i.test(oa);
+        if (!value || selected) value = val;
         options.push(val);
       }
-      pushField({ name: btAttr(attrs, "name") ?? "", type: "select", value, options, order: fields.length + 1 });
-    } else if (tag === "textarea") {
-      pushField({ name: btAttr(attrs, "name") ?? "", type: "textarea", value: btDecodeEntities(m[3] ?? ""), order: fields.length + 1 });
+      pushField({ name: btAttr(attrs, "name") ?? "", type: "select", value, options, order: ++order });
     } else {
-      pushField({ name: btAttr(attrs, "name") ?? "", type, value: btAttr(attrs, "value") ?? "", order: fields.length + 1 });
+      pushField({ name: btAttr(attrs, "name") ?? "", type: "textarea", value: btDecodeEntities(inner), order: ++order });
     }
   }
   return fields;
 }
+
 
 /**
  * HTMLをページ情報へ構造化する。
@@ -102,7 +105,7 @@ export function parsePage(html, baseUrl) {
     const raw = am[1] ?? am[2] ?? am[3] ?? "";
     const text = btStripTags(am[4]);
     const href = normalizeUrl(raw, base);
-    if (href === null) { if (/^#/i.test(raw)) { links.push({ text, href: null }); } continue; }
+    if (href === null) { if (raw.startsWith("#")) { links.push({ text, href: null }); } continue; }
     if (!text) continue;
     links.push({ text, href });
   }
