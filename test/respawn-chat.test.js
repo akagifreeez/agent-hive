@@ -43,7 +43,8 @@ test("runChat: 起動時にworktree差分をスキャンし、未完了作業を
   assert.ok(readFileSync !== null);
   // crashy-alphaのworktreeに未マージコミットを作る(=プロセス死で中断した作業)
   writeFileSync(join(wtPath, "half-done.txt"), "crashed work\n");
-  await runCommand({ command: `git add -A && git -c user.name=t -c user.email=t@t commit -q -m "wip-crash"`, cwd: wtPath, outputLimit: 500 });
+  // 未コミット変更として残す(=プロセス死で確定できなかった作業。コミット済み版は
+  // ラウンド終了の自動マージで回収されるため、ここでは kept の対象を作る)
   // 2回目の起動(=クラッシュ後の再起動)
   const bus2 = new Bus();
   const posts2 = [];
