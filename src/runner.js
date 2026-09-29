@@ -10,6 +10,7 @@ import { runAgentLoop } from "./engine/loop.js";
 import { PermissionGate } from "./engine/permissions.js";
 import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
 import { setupWorktrees } from "./engine/worktree.js";
+import { respawnUnfinishedWork } from "./engine/respawn.js";
 import { runCommand } from "./engine/exec.js";
 import { UsageLedger } from "./engine/usage.js";
 import { OpenAIModel } from "./model/openai.js";
@@ -65,6 +66,21 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   }
 
   const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
+  // 起動時のクラッシュ復旧スキャン(#7): 前回プロセス死で中断したworktree差分から
+  // 未完了作業を再起票し、変更ゼロの放棄ブランチを掃除(提案/オプションで自動)する。
+  // 失敗しても起動は止めない(スキャンは最善努力)。
+  try {
+    const rr = await respawnUnfinishedWork({
+      mainWorkspace: config.workspace, worktreeRoot, tasks,
+      board: mainBoard, bus,
+      opts: { cleanup: Boolean(config.chat?.respawn?.cleanup) },
+    });
+    if (rr.respawned.length) console.log(`[agent-hive] 起動時: 未完了のworktree作業を再起票しました(${rr.respawned.join(", ")})`);
+    if (rr.swept.length) console.log(`[agent-hive] 起動時: 放棄worktree/ブランチを掃除しました(${rr.swept.join(", ")})`);
+  } catch (err) {
+    bus.emit("scenario.warn", { message: `起動時スキャンに失敗(起動は続行): ${err instanceof Error ? err.message : err}` });
+  }
+
   // 永続記憶(memory/)+スキル索引を毎回読み直す(distill反映・スキル追加を次ラウンドから効かせる)
   const memoryFn = () => {
     const parts = [buildMemoryContext(config.workspace), buildSkillsIndex(config.workspace)].filter(Boolean);

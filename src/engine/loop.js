@@ -93,6 +93,7 @@ function currentTaskContext(tasks, agent, messages) {
  * @property {(() => any[])|null} [drainInput] ターン境界で割込ませる入力の取り出し(steering)
  * @property {(() => boolean)|null} [peekInput] 未処理入力が待っているか(idle退場の抑制)
  * @property {number} [claimMissesLimit] 連続請求ミス何回でidle終了するか
+ * @property {((messages: any[]) => void)|null} [checkpointFn] ツール実行済み地点でスナップショットを保存するコールバック(イシュー#4)
  */
 
 /** @param {RunAgentLoopOptions} o */
@@ -107,6 +108,7 @@ export async function runAgentLoop({
   drainInput = null, // () => ターン境界で割込ませる入力の配列(steering)。呼ぶたに取り出す
   peekInput = null, // () => 未処理入力が待っているか(取り出さず覗くだけ)。idle退場の抑制に使う
   claimMissesLimit = 3, // 連続請求ミス何回でidle終了するか(追加ワーカーは1で早期退場)
+  checkpointFn = null, // (messages) => void ツール実行済み地点でスナップショットを保存する(イシュー#4)
 }) {
   if (!messages) {
     const sys = buildSystemPrompt(agent, shellKind);
@@ -186,7 +188,7 @@ export async function runAgentLoop({
       releaseClaims("モデルエラー");
       bus.emit("agent.status", { agent: agent.id, status: "error" });
       bus.emit("agent.error", { agent: agent.id, turn, error: err.message });
-      return { ok: false, error: err.message, seenBoard: seen };
+      return { ok: false, endedBy: "error", error: err.message, seenBoard: seen };
     }
     if (ledger) {
       ledger.add(agent.id, res.usage);
@@ -247,6 +249,9 @@ export async function runAgentLoop({
         }
       }
       messages.push(...reminders.splice(0));
+      // ラウンドcheckpoint(イシュー#4): ツール実行済み地点でスナップショット。
+      // 指定が無い(ワーカーラウンド等)場合は何もしない。
+      checkpointFn?.(messages);
       if (claimMisses >= claimMissesLimit) {
         // ユーザー入力が待っている/届けたばかりで未応答のときはidle退場しない。
         // 退場すると入力に答える前にラウンドが捨てられる(r7で実際に発生: ラウンド中のsayが

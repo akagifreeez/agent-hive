@@ -9,6 +9,7 @@
 // 制御構文(if/for/while)は普通のJS。型のある中間結果ではなく、blackboard上の実データを受け渡す。
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { validateSchema, findPlaceholders, parseJsonLoose, guardJson } from "./schema-guard.js";
 
 /**
  * ワークフロースクリプトへ渡すAPI群を組み立てる。
@@ -62,6 +63,22 @@ export function createWorkflowApi({ openThread, closeThread, say, tasks, sleep =
     status(project) {
       const c = counts(project);
       return { ...c, complete: c.total > 0 && c.open === 0 && c.claimed === 0 };
+    },
+    // 構造化出力のスキーマ強制(イシュー#9)。validate/parseJson/withGuardの3本立て:
+    // - validate(value, schema): JSON Schema風の軽量検証(違反の説明配列を返す)
+    // - parseJson(text): コードフェンス等を許容するルーズパース
+    // - withGuard({schema, run, ...}): 応答が不正なときにreasonsを添えて自動再走(既定3回)
+    validate: (value, schema) => validateSchema(value, schema),
+    findPlaceholders: (value, opts) => findPlaceholders(value, opts),
+    parseJson: (text) => parseJsonLoose(text),
+    async withGuard(o) {
+      return guardJson({
+        run: o.run,
+        schema: o.schema ?? null,
+        placeholder: o.placeholder ?? null,
+        maxAttempts: o.maxAttempts ?? 3,
+        log: (t) => log("[schema-guard] " + t),
+      });
     },
     log,
   };
