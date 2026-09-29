@@ -13,7 +13,8 @@ import { join } from "node:path";
  * @property {string|null} role 担当ロール(impl/review/lead等)。null=誰でも請求可
  * @property {string|null} project 文脈(取り組み名=スレッド名)
  * @property {string} acceptance 受け入れ基準
- * @property {string[]} dependsOn 依存タスクid(未完了があるとclaim不可)
+  * @property {string[]} dependsOn 依存タスクid(未完了があるとclaim不可)
+ * @property {string|null} model リーダーが指定した代替モデルref(#12)。null=既定モデル
  * @property {boolean} blocked 依存未完了でclaim不可のときtrue(openのみ計算)
  * @property {string} summary 本文の要約(先頭の実質行)
  * @property {string} path タスクファイルのパス
@@ -42,10 +43,10 @@ export class TaskBlackboard {
    */
   // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
   // acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
-  create({ id, role, body, project = "", acceptance = "", dependsOn = [], createdBy = null }) {
+  create({ id, role, body, project = "", acceptance = "", dependsOn = [], createdBy = null, model = null }) {
     const f = join(this.open, `${id}.md`);
     if (existsSync(f)) return false;
-    const meta = metaLines(project, role, acceptance, dependsOn);
+    const meta = metaLines(project, role, acceptance, dependsOn, model);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
     if (createdBy) this.createdBy.set(id, createdBy);
     this.bus?.emit("task.created", { taskId: id, project: String(project ?? "") });
@@ -53,10 +54,10 @@ export class TaskBlackboard {
   }
 
   // スポーンなどで最初から請求済みとしてタスクを投入する(ブリーフ=そのエージェントの担当)
-  assign({ agentId, taskId, body, project = "" }) {
+  assign({ agentId, taskId, body, project = "", model = null }) {
     const f = join(this.claimed, `${agentId}--${taskId}.md`);
     if (existsSync(f)) return false;
-    const meta = metaLines(project, null);
+    const meta = metaLines(project, null, "", [], model);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
     return true;
   }
@@ -342,7 +343,7 @@ export function detectTaskOverlap(newBody, tasksList) {
 
 export function readMeta(file) {
   try {
-    const meta = { role: null, project: "", acceptance: "", dependsOn: [] };
+    const meta = { role: null, project: "", acceptance: "", dependsOn: [], model: null };
     for (const l of readFileSync(file, "utf8").split("\n")) {
       if (!l.trim()) break;
       const r = l.match(/^role:\s*(.+)$/);
@@ -353,10 +354,12 @@ export function readMeta(file) {
       if (a) meta.acceptance = a[1].trim();
       const d = l.match(/^depends_on:\s*(.+)$/);
       if (d) meta.dependsOn = String(d[1]).split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+      const mo = l.match(/^model:\s*(.+)$/);
+      if (mo) meta.model = mo[1].trim() || null;
     }
     return meta;
   } catch {
-    return { role: null, project: "", acceptance: "", dependsOn: [] };
+    return { role: null, project: "", acceptance: "", dependsOn: [], model: null };
   }
 }
 
@@ -368,7 +371,7 @@ function dependsLine(dependsOn) {
   return ids.length ? `depends_on: ${ids.join(",")}` : "";
 }
 
-function metaLines(project, role, acceptance = "", dependsOn = []) {
+function metaLines(project, role, acceptance = "", dependsOn = [], model = null) {
   const lines = [];
   const proj = String(project ?? "").trim().replace(/[\r\n]/g, "");
   if (proj) lines.push(`project: ${proj.slice(0, 60)}`);
@@ -378,6 +381,9 @@ function metaLines(project, role, acceptance = "", dependsOn = []) {
   if (acc) lines.push(`acceptance: ${acc}`);
   const dep = dependsLine(dependsOn);
   if (dep) lines.push(dep);
+  // リーダーが特定タスクだけ代替モデルを指定(#12)。1行メタ
+  const mo = String(model ?? "").trim().replace(/[\r\n]/g, "");
+  if (mo) lines.push(`model: ${mo.slice(0, 80)}`);
   return lines.length ? lines.join("\n") + "\n" : "";
 }
 

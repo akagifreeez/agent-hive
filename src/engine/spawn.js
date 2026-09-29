@@ -2,8 +2,10 @@
 // 階層(メイン→サブ→作業員)は「仕事の組織化」だけに使い、コミュニケーションは
 // 全レベルが同じボードで合流する(報告は必ずボード/親への秘密チャネルは作らない)。
 import { join, resolve } from "node:path";
+import { readdirSync } from "node:fs";
 import { createWorktree } from "./worktree.js";
 import { createTools } from "./tools.js";
+import { readMeta } from "./tasks.js";
 import { runAgentLoop, buildSystemPrompt } from "./loop.js";
 import { runCommand } from "./exec.js";
 
@@ -18,6 +20,18 @@ const WORKER_PERSONA = (displayName, role) => `# ${displayName}(スポーンさ�
 - 追加の仕事が必要になったら create_task で起票し、ボードでも告知する。
 - 困ったらボードで質問する(親に直接ではなく全員に見える形で)。
 `;
+
+// 請求中ブリーフタスクのメタからmodel指定を読む(#12)。無ければnull(既定モデル)
+function readTaskModel(tasks, agentId) {
+  try {
+    const dir = join(tasks.dir, "claimed");
+    const f = readdirSync(dir).find((x) => x === `${agentId}--spawn-${agentId}.md`);
+    if (!f) return null;
+    return readMeta(join(dir, f)).model ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export class SpawnManager {
   constructor({
@@ -101,7 +115,9 @@ export class SpawnManager {
 
   async runAgent(agent, worktreePath, brief, board = null) {
     const b = board ?? this.board;
-    const model = this.modelFactory(agent);
+    // タスクにmodel指定があればそれを優先(#12: リーダーが特例で指定)。無ければ既定どおり
+    const taskModel = readTaskModel(this.tasks, agent.id);
+    const model = this.modelFactory({ ...agent, model: taskModel ?? agent.model });
     const tools = createTools({
       agent,
       workspace: worktreePath,
