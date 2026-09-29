@@ -129,7 +129,7 @@ test("extractForm: form_index無指定で最初のフォーム、orderは1始ま
   assert.deepEqual(form.fields.map((f) => f.name), ["csrf", "user", "pass", "role", "save"]);
   assert.equal(form.fields.find((f) => f.name === "csrf").value, "tok-123");
   assert.equal(form.fields.find((f) => f.name === "role").value, "viewer");
-  assert.equal(form.fields.find((f) => f.name === "user").order, 1);
+  assert.equal(form.fields.find((f) => f.name === "user").order, 2); // csrf(hidden)含む通し番号
   assert.ok(extractForm(PAGE_HTML, "http://127.0.0.1:9/x.html", 2) === null);
 });
 
@@ -155,7 +155,7 @@ test("buildSubmission: method/url/body/content-typeを組み立て(GETはクエ�
   assert.match(post.body, /csrf=tok-123/); // hidden含めて送る
 
   const page = parsePage(`<form method="get" action="/search"><input name="q" value=""></form>`, "http://127.0.0.1:9/");
-  const get = buildSubmission(extractForm(page.html, "http://127.0.0.1:9/", null), { q: "hive" });
+  const get = buildSubmission(extractForm(page.raw, "http://127.0.0.1:9/", null), { q: "hive" }); // page.raw=元HTML
   assert.equal(get.method, "GET");
   assert.equal(get.url, "http://127.0.0.1:9/search?q=hive");
   assert.equal(get.body, null);
