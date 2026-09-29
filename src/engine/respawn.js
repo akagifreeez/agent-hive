@@ -9,11 +9,15 @@ import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runCommand } from "./exec.js";
 
-// パス比較用: OS差(Windowsの\)を吸収して小文字化して比較する
+// パス比較用: git worktree listの絶対パスと、tmpdir由来で8.3短縮名を含みうるこちらのパスを、
+// 「末尾2要素(親ディレクトリ名/エージェントid)」の一致で判定する(worktreeRoot/<id>構造が前提)。
 /** @param {string} a @param {string} b */
 function samePath(a, b) {
-  const norm = (x) => { let y = String(x).replaceAll("\\", "/").replace(/[/]+$/, "").toLowerCase(); try { y = realpathSync(y).replaceAll("\\", "/").toLowerCase(); } catch { /* 存在しないパスはそのまま */ } return y; };
-  return norm(a) === norm(b);
+  const tail2 = (x) => {
+    const parts = String(x).replaceAll("\\", "/").split("/").filter(Boolean);
+    return parts.slice(-2).join("/").toLowerCase();
+  };
+  return tail2(a) === tail2(b);
 }
 
 /**
@@ -86,7 +90,7 @@ export async function respawnUnfinishedWork({ mainWorkspace, worktreeRoot, tasks
         }
         continue;
       }
-      if (f.merged) continue; // 取り込み済み: 再起票の必要なし
+      if (f.merged && !f.dirty) continue; // 取り込み済みかつ未コミット無し: 再起票の必要なし
       // 再起票: idにHEAD短縮SHAを含めて冪等にする(同じ位置なら二重起票しない)
       const taskId = `respawn-${agentId}-${f.head || "dirty"}`.slice(0, 80);
       const body = [
