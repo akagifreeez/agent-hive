@@ -1520,6 +1520,13 @@ async function handleCommand(text) {
     const custom = Object.entries(lastState?.commands ?? {});
     if (custom.length) rows.push(...custom.map(([c, d]) => `/${c} — ${d}(カスタム)`));
     post("コマンド一覧:\n" + rows.join("\n"));
+  } else if (cmd === "discuss") {
+    // モデル横断ディスカッション: 接続済みプロバイダの代表モデル同士が1つのスレッドで議論する
+    const topic = args.join(" ");
+    if (!topic) { post("論点を指定してください(/discuss <論点>)"); return; }
+    const r = await (await hfetch("/api/discuss", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic }) })).json();
+    if (r.error) { post(`エラー: ${r.error}`); return; }
+    post(`ディスカッションを開始しました(#${r.thread})\n参加: ${r.participants.join(", ")}${r.notes?.length ? `\n除外: ${r.notes.join(" / ")}` : ""}\nスレッド「${r.thread}」で発言が流れます。`);
   } else if (cmd === "session" || cmd === "sessions") {
     const arg = text.slice(("/" + cmd).length).trim();
     const [op, ...rest] = arg.split(/\s+/);

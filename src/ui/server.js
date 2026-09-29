@@ -80,9 +80,10 @@ export function newUiToken() {
  * @param {() => Object[]} [o.onMcpList]
  * @param {(req: Object) => Promise<Object>} [o.onMcpAdd]
  * @param {(req: Object) => Object} [o.onMcpRemove]
+ * @param {(req: {topic: string, refs?: string[], rounds?: number}) => {ok?: boolean, error?: string, thread?: string, participants?: string[]}} [o.onDiscuss]
  * @returns {Promise<Object>} サーバーハンドル(port/close等)
  */
-export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null, onMcpList = null, onMcpAdd = null, onMcpRemove = null }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null, onMcpList = null, onMcpAdd = null, onMcpRemove = null, onDiscuss = null }) {
   const startedAt = Date.now();
   // UIトークン。環境変数 HIVE_UI_TOKEN(CLI等の外部クライアント用)で上書きできる
   const uiToken = process.env.HIVE_UI_TOKEN || newUiToken();
@@ -285,14 +286,15 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   for (const [type, fn] of Object.entries(record)) bus.on(type, fn);
 
   // タスクの直接操作(チャットを介さずblackboardのファイルを触る。トークン消費ゼロ)
-  function handleTaskAction({ action, id, agent, role, body, project, path, acceptance }) {
+  function handleTaskAction({ action, id, agent, role, body, project, path, acceptance, depends_on }) {
     if (action === "create") {
       const taskBody = String(body ?? "").trim();
       if (!taskBody) return { ok: false, error: "bodyが空です" };
       let taskId = String(id ?? "").trim();
       if (!taskId) taskId = `task-${Date.now().toString(36)}`;
       if (!/^[a-z0-9][a-z0-9-]*$/.test(taskId)) return { ok: false, error: "task_idは英小文字数字とハイフン" };
-      if (!tasks.create({ id: taskId, role: role ? String(role) : null, project: String(project ?? "").trim(), body: taskBody, acceptance: acceptance ? String(acceptance) : "" })) return { ok: false, error: `task_id ${taskId} は既に存在します` };
+      const dependsOn = Array.isArray(depends_on) ? depends_on.map((s) => String(s ?? "").trim()).filter(Boolean) : [];
+      if (!tasks.create({ id: taskId, role: role ? String(role) : null, project: String(project ?? "").trim(), body: taskBody, acceptance: acceptance ? String(acceptance) : "", dependsOn })) return { ok: false, error: `task_id ${taskId} は既に存在します` };
       return { ok: true, id: taskId };
     }
     if (action === "release") {
@@ -463,6 +465,22 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         }
         const all = [...live.board].sort((a, b) => a.id - b.id);
         return json(res, { posts: all.slice(-200), total: boardStore.total() });
+      }
+      if (url.pathname === "/api/discuss" && req.method === "POST" && onDiscuss) {
+        // モデル横断ディスカッションの起動(/discussコマンド)。論点を指定すると
+        // 接続済みプロバイダの代表モデル同士が1つのスレッドで議論する(エージェントを起こさない)
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const r = onDiscuss(JSON.parse(body || "{}"));
+            if (!r || r.error) throw new Error(r?.error ?? "失敗しました");
+            json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
       }
       if (url.pathname === "/api/thread" && req.method === "POST" && onThread) {
         let body = "";

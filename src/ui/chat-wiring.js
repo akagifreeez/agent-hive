@@ -9,6 +9,7 @@ export function chatUiHandlers(getController) {
     onSay: (text, thread) => c()?.say(text, thread),
     onAttach: (path, dataUrl, note, thread) => c()?.attachImage(note, dataUrl, thread, path),
     onThread: (req) => c()?.openThread(req),
+    onDiscuss: (req) => c()?.runDiscussion(req),
     onCloseThread: (req) => c()?.closeThread(req),
     onFolder: (req) => c()?.setThreadFolder(req),
     onModel: (patch) => c()?.setModel(patch),

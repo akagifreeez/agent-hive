@@ -10,10 +10,13 @@ import { runAgentLoop } from "./engine/loop.js";
 import { PermissionGate } from "./engine/permissions.js";
 import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
 import { setupWorktrees } from "./engine/worktree.js";
+import { respawnUnfinishedWork } from "./engine/respawn.js";
 import { runCommand } from "./engine/exec.js";
 import { UsageLedger } from "./engine/usage.js";
 import { OpenAIModel } from "./model/openai.js";
 import { createModelFactory } from "./model/factory.js";
+import { buildCatalog, resolveModel, resolveAuthValue } from "./model/catalog.js";
+import { hasOAuthEntry } from "./model/openai-auth.js";
 
 // 旧来のrunner.js内実装をsrc/model/factory.jsへ移設済み。api(ワイヤ形式)で
 // アダプタを選択する新版(agent.modelは"provider/model"でもベアIDでもよい)。
@@ -63,6 +66,21 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   }
 
   const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
+  // 起動時のクラッシュ復旧スキャン(#7): 前回プロセス死で中断したworktree差分から
+  // 未完了作業を再起票し、変更ゼロの放棄ブランチを掃除(提案/オプションで自動)する。
+  // 失敗しても起動は止めない(スキャンは最善努力)。
+  try {
+    const rr = await respawnUnfinishedWork({
+      mainWorkspace: config.workspace, worktreeRoot, tasks,
+      board: mainBoard, bus,
+      opts: { cleanup: Boolean(config.chat?.respawn?.cleanup) },
+    });
+    if (rr.respawned.length) console.log(`[agent-hive] 起動時: 未完了のworktree作業を再起票しました(${rr.respawned.join(", ")})`);
+    if (rr.swept.length) console.log(`[agent-hive] 起動時: 放棄worktree/ブランチを掃除しました(${rr.swept.join(", ")})`);
+  } catch (err) {
+    bus.emit("scenario.warn", { message: `起動時スキャンに失敗(起動は続行): ${err instanceof Error ? err.message : err}` });
+  }
+
   // 永続記憶(memory/)+スキル索引を毎回読み直す(distill反映・スキル追加を次ラウンドから効かせる)
   const memoryFn = () => {
     const parts = [buildMemoryContext(config.workspace), buildSkillsIndex(config.workspace)].filter(Boolean);
@@ -267,7 +285,8 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     const open = list.open;
     for (const [name, alive] of aliveWorkers) {
       const th = threads.get(name);
-      if (!th || th.host.paused) continue; // 停止中スレッドは増員しない
+      // host無しスレッド(ディスカッション等・タスク請求なし)は増員対象外
+      if (!th || !th.host || th.host.paused) continue; // 停止中スレッドは増員しない
       const nOpen = open.filter((t) => (t.project || "") === name).length;
       const desired = nOpen === 0 ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil(nOpen / 2));
       if (alive.size >= desired || manager.live.size >= globalCap) continue;
@@ -442,7 +461,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     },
     say: (text, thread = null) => {
       const t = thread ? threads.get(thread) : null;
-      if (t) return t.host.say(text);
+      if (t) return t.host ? t.host.say(text) : { ok: false, error: `スレッド ${thread} はワーカーを持たないためsayできません` };
       return leadHost.say(text);
     },
     attachImage: (note, dataUrl, thread = null, path = null) => {
@@ -492,7 +511,11 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       const api = createWorkflowApi({
         openThread,
         closeThread,
-        say: (text, thread) => (thread ? threads.get(thread)?.host : leadHost).say(text, thread),
+        say: (text, thread) => {
+          const h = thread ? threads.get(thread)?.host : leadHost;
+          if (!h) return { ok: false, error: `スレッド ${thread} はワーカーを持たない(host無し)ため、sayできません` };
+          return h.say(text, thread);
+        },
         tasks,
         bus,
         log,
@@ -522,10 +545,92 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     setThreadFolder,
     setThreadPaused,
     listThreads: () => [...threads.keys()],
+    runDiscussion: (req) => {
+      // モデル横断ディスカッション: 接続済みプロバイダの代表モデル同士を1つのボードで議論させる。
+      // host無しのBoard単体スレッド(タスク請求なし)なので、発言分のトークンだけで完結する
+      const topic = String(req?.topic ?? "").trim();
+      if (!topic) return { error: "論点が空です(/discuss <トピック>)" };
+      const refs = Array.isArray(req?.refs) ? req.refs.map(String) : null;
+      const rounds = Math.max(1, Math.min(Number(req?.rounds ?? 2), 5));
+      const name = `discuss-${Date.now().toString(36)}`;
+      const board = new Board(bus, name, join(stateDir, `board-${name}.jsonl`));
+      threads.set(name, { name, goal: `ディスカッション: ${topic}`, folder: "discussion", host: null, board });
+      writeRegistry();
+      bus.emit("thread.opened", { name, goal: `ディスカッション: ${topic}`, folder: "discussion", agents: [] });
+      // 接続済みプロバイダの代表モデル(先頭行)を参加者として構築する(未接続は除外)
+      const factory = createModelFactory(config);
+      const catalog = buildCatalog(config.models);
+      const baseDirs = [ROOT, dataDir()];
+      const participants = [];
+      const notes = [];
+      const providerIds = refs ? [...new Set(refs.map((r) => String(r).split("/")[0]))] : Object.keys(catalog.providers);
+      for (const pid of providerIds) {
+        const p = catalog.providers[pid];
+        if (!p) { notes.push(`${pid}: 未知のプロバイダ(除外)`); continue; }
+        try {
+          const spec = resolveModel(catalog, (refs ?? []).find((r) => String(r).startsWith(pid + "/")) ?? `${pid}/${(p.models ?? [])[0]?.id}`);
+          const authOk = spec.provider.api === "openai-chatgpt-responses"
+            ? hasOAuthEntry({ provider: spec.provider.id, file: spec.provider.auth?.file ?? `state/models-${spec.provider.id}.oauth.json` }, baseDirs)
+            : Boolean(resolveAuthValue(spec.provider, baseDirs));
+          if (!authOk) { notes.push(`${p.name ?? pid}: 未接続(除外)`); continue; }
+          participants.push({
+            id: `dis-${pid}`, provider: pid, ref: `${spec.provider.id}/${spec.model.id}`,
+            model: factory({ model: `${spec.provider.id}/${spec.model.id}` }),
+          });
+        } catch (err) {
+          notes.push(`${pid}: ${err.message}(除外)`);
+        }
+      }
+      if (participants.length < 2) {
+        threads.delete(name);
+        return { error: `参加できるモデルが2つ未満です(${notes.join(" / ") || "接続状況を確認"})` };
+      }
+      void runDiscussionLoop({ board, participants, topic, rounds }).catch((err) => {
+        board.post("system", `[ディスカッション異常] ${err.message}`);
+      });
+      return { ok: true, thread: name, participants: participants.map((p) => p.ref), notes };
+    },
     manager,
     mcpHosts,
     bus,
   };
+}
+
+// ===== モデル横断ディスカッション =====
+// 接続済みプロバイダの代表モデル同士を1つのボードで議論させる。
+// 各参加者はボードの新着を読んで応答する(順番に発言・指定ラウンド数だけ周回)。
+// 最後に先頭参加者が結論をまとめて投稿する。
+export async function runDiscussionLoop({ board, participants, topic, rounds = 2 }) {
+  board.post("system", `[ディスカッション開始] 論点: ${topic}\n参加: ${participants.map((p) => p.ref).join(", ")} / ${rounds}ラウンド`);
+  const seen = new Map(participants.map((p) => [p.id, board.lastId()]));
+  for (let round = 1; round <= rounds; round++) {
+    for (const p of participants) {
+      const fresh = board.since(seen.get(p.id) ?? 0).filter((x) => x.from !== p.id);
+      if (fresh.length) seen.set(p.id, fresh[fresh.length - 1].id);
+      const transcript = fresh.map((x) => `${x.from}: ${x.text}`).join("\n---\n").slice(0, 8000);
+      const prompt = round === 1
+        ? `論点「${topic}」について、あなたの立場から最初の意見を述べてください。日本語・600字以内。`
+        : `これまでの議論:\n${transcript}\n\n論点「${topic}」について、他者の意見を受けた反論・補足・合意のいずれかを述べてください。日本語・600字以内。`;
+      try {
+        const res = await p.model.chat({ messages: [{ role: "user", content: prompt }] });
+        if (res.content) board.post(p.id, res.content);
+        else board.post("system", `[ディスカッション] ${p.ref} から空応答(スキップ)`);
+      } catch (err) {
+        board.post("system", `[ディスカッション] ${p.ref} の発言に失敗: ${String(err.message ?? err).slice(0, 150)}`);
+      }
+    }
+  }
+  // まとめ: 先頭参加者が結論を出す
+  const all = board.posts.map((x) => `${x.from}: ${x.text}`).join("\n---\n");
+  try {
+    const res = await participants[0].model.chat({
+      messages: [{ role: "user", content: `論点「${topic}」の議論全体を、結論・合意事項・残る懸念の3部構成でまとめてください。日本語。\n\n${all.slice(-8000)}` }],
+    });
+    board.post("system", `[結論] ${res.content ?? "(まとめの生成に失敗)"}`);
+  } catch (err) {
+    board.post("system", `[ディスカッション] まとめの生成に失敗: ${String(err.message ?? err).slice(0, 150)}`);
+  }
+  board.post("system", "[ディスカッション終了]");
 }
 
 export async function runScenario({ config, modelFactory, bus = new Bus() }) {
