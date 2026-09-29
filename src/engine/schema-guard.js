@@ -150,7 +150,7 @@ export function checkStructured(value, opts = {}) {
  * 再走付きガード: run(attempt)を呼び、応答テキストをparseJsonLoose→checkStructuredで検証。
  * 不正のときはreasonsを添えて再走(最大maxAttempts回)。全滅時は最後の検証結果を例外にする。
  * @param {Object} o
- * @param {() => Promise<string>} o.run 試行ごとに応答テキスト(=JSON文字列)を返す関数。引数はattempt(1始まり)
+ * @param {(attempt: number) => Promise<string>|string} o.run 試行ごとに応答テキスト(=JSON文字列)を返す関数。引数はattempt(1始まり)
  * @param {SchemaLike|null} [o.schema]
  * @param {{ forbidStrings?: string[], forbidSingleChar?: boolean }} [o.placeholder]
  * @param {number} [o.maxAttempts] 既定3
