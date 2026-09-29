@@ -91,3 +91,9 @@
 - **テストの期待値は「最後に緑になった契約」に寄せて一括統一する**: browser-tools断片リンク(href:null保持⇔除外)とsubmit報告書式(送信:/method:)は実装・テストが交互に書き換わり退行を繰り返した。修正時は実装+テストを同じコミットで揃え、コメントに契約行(例: 「断片は遷移候補から除外(e80e512)」)を明記する。途中の暫定期間に発見器がreview-changes/fix-を大量起票する。
 - **TZ境界のテスト固定は3環境で検証する**: usage集計は最終形として localDateKey()(ローカル日付)に実装・書込側が統一済み(UTC基準という一時案は撤去済み)。テスト期待値も実装と同一の関数から生成し、TZ=Asia/Tokyo/UTC/America/Los_Angelesの3環境でpassを確認するのが検証の証跡。1環境だけでは深夜帯の不具合を取りこぼす(2026-09 fix-usage-aggregate-tz)。
 - **checkpoint/resume実装の注意**: 復元後にcheckpointファイルを必ず削除(残すとmodelエラー→復元→失敗の無限ループ)。checkpointFnはツール実行済み地点で呼ぶ。モデル異常以外(ツール打ち切り・予算停止)は対象外という設計判断。
+
+# 2026-09 issue-throttle系列ラウンドの追加知見(ガンマdistill)
+
+- **実装者がapprove前に退場するとapproveが失敗する**: finish_taskの自動マージでブランチ(agent/<id>)が消えるため、検証者のapprove_taskが「not something we can merge」で落ちる(タスクは実装済み・main反映済みなのに帳簿がopenへ戻る)。復旧手順: (1)検証者がマージ済みmainで実態検証(テスト実行+コード確認) (2)実装者(または誰か)へ「自worktreeで git merge main → タスク再請求 → finish_task(no-opマージで確定)」を依頼 (3)approveで承認。実装者が全員退場済みなら、検証者がclaim→finish(コード差分ゼロを明示)するのが最短。
+- **古い分岐の放棄ブランチは原則マージしない(巻き戻しリスク)**: クラッシュ復旧(respawn-*)で請求したブランチが古い世代(stability-r3等)だと、マージ時に113ファイル/約-1万行の巻き戻し差分となり最新機能(スロットリング等)を破壊しうる。放棄判断の検定手順: (1)merge-baseとbranch先頭の日付/コミットで分岐世代を確認 (2)`git diff main <branch>` の二点間diffで「機能の独自追加」を列挙(mainとの三点間diffは新旧混合で見誤る) (3)各機能が現mainに改善形で存在するか確認(killDevserverTree等の強化版) (4)関連テストを現mainで実行して緑を証跡にする → 放棄判断はボードへ根拠付きで記録し、worktree/ブランチは掃除タスクへ委ねる。完了条件は「取り込み or 放棄判断の記録」なので、記録だけでfinishしてよい。
+- **leadロール(進行・調整)はreviewタスクを請求できない**: 発見器が起票するverify-*はrole:review固定のため、leadはclaim不可(approveは実装者でなければ可)。verify滞留はrole:review持ちのワーカーへボードで依頼するか、リーダーがroleを緩める。claim空転が続くときは診断文の「未着手一覧」でrole不一致を確認してから打ち切る(claimMiss診断と併用)。
