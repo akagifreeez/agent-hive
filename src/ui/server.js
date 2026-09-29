@@ -1275,7 +1275,7 @@ function persistUsage(workspace, entry) {
 // traceFileはテスト差し替え用(省略時は通常の場所)。壊れた行は監査APIと同じく無視する。
 /**
  * @param {string} workspace
- * @param {{agent?: string|null, fromTurn?: number|null, toTurn?: number|null, file?: string|null}} [opts]
+ * @param {{agent?: string|null, fromTurn?: string|number|null, toTurn?: string|number|null, file?: string|null}} [opts]
  * @returns {{series: Array<{agent: string, points: Array<{ts: string, turn: number, prompt: number, completion: number, reasoning: number, totalTokens: number}>, totalTokens: number}>, total: {turns: number, totalTokens: number, byAgent: Record<string, number>}, lastTs: string|null}}
  */
 export function analyzeUsageTrace(workspace, opts = {}) {
