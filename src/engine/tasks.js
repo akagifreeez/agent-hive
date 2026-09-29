@@ -339,7 +339,7 @@ export function detectTaskOverlap(newBody, tasksList) {
 
 export function readMeta(file) {
   try {
-    const meta = { role: null, project: "", acceptance: "" };
+    const meta = { role: null, project: "", acceptance: "", dependsOn: [] };
     for (const l of readFileSync(file, "utf8").split("\n")) {
       if (!l.trim()) break;
       const r = l.match(/^role:\s*(.+)$/);
@@ -348,11 +348,21 @@ export function readMeta(file) {
       if (p) meta.project = p[1].trim();
       const a = l.match(/^acceptance:\s*(.+)$/);
       if (a) meta.acceptance = a[1].trim();
+      const d = l.match(/^depends_on:\s*(.+)$/);
+      if (d) meta.dependsOn = String(d[1]).split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
     }
     return meta;
   } catch {
-    return { role: null, project: "", acceptance: "" };
+    return { role: null, project: "", acceptance: "", dependsOn: [] };
   }
+}
+
+// 依存のメタ行(idは英小文字数字とハイフンのみ=二重ハイフン区切りのファイル名を壊さない)
+function dependsLine(dependsOn) {
+  const ids = [...new Set((dependsOn ?? [])
+    .map((s) => String(s ?? "").trim().replace(/[\r\n]/g, ""))
+    .filter((s) => /^[a-z0-9][a-z0-9-]*$/.test(s)))];
+  return ids.length ? `depends_on: ${ids.join(",")}` : "";
 }
 
 function metaLines(project, role, acceptance = "", dependsOn = []) {
@@ -366,14 +376,6 @@ function metaLines(project, role, acceptance = "", dependsOn = []) {
   const dep = dependsLine(dependsOn);
   if (dep) lines.push(dep);
   return lines.length ? lines.join("\n") + "\n" : "";
-}
-
-// 依存のメタ行(idは英小文字数字とハイフンのみ=二重ハイフン区切りのファイル名を壊さない)
-function dependsLine(dependsOn) {
-  const ids = [...new Set((dependsOn ?? [])
-    .map((s) => String(s ?? "").trim().replace(/[\r\n]/g, ""))
-    .filter((s) => /^[a-z0-9][a-z0-9-]*$/.test(s)))];
-  return ids.length ? `depends_on: ${ids.join(",")}` : "";
 }
 
 function appendNote(file, note) {
