@@ -57,3 +57,19 @@
   - data/nc手持ちGFS資産: 17,641ファイル=約1,470サイクル(f000〜f033の12ステップ構成・先頭2022090100・末尾2026092800)。gamma実測→beta同値確認。遡及学習の資産は健全。
 
 - **finish_taskの台帳lapseで発見器が同じタスクを再起票し続ける**(2026-09 weather-ai-researchの実害): distill-learningsで「作業完了→finish_taskが『そのタスクは請求していません』で失敗」(請求状態のlapse)になると、実体成果物がmain反映済みでも処理済み地点が前進せず、fix-*/review-*/distill-系の再通知がループする。対処: (1)finish失敗時はclaimし直してからfinishする(lapse放置しない) (2)どうしても復帰できない場合はボードで訂正報告し、リード権限でopen復帰→再finish(またはclose時の地点前進)を依頼する (3)再通知が続く間は gather_context で open=0 を実証し、全員合意で「既消化の再配信」と明示してからclaim空転を打ち切る。
+
+# 決定事項(2026-09 issue系列ラウンドで確定)
+
+- **create_taskにdepends_on追加(イシュー#2)**: create が dependsOn(配列)を受け、メタ行 depends_on として保存。claim時にcanClaim()で「未完了依存があれば立候補しない」。循環依存は依存を無視して立候補不可(デッドロック防止)、自己依存は依存を無視して着手可。list()はdependsOn/blockedフィールドを返す。UIはタスク行「依存待ち:id」表示+フォーム入力欄+ /api/tasks create の depends_on 通過。テスト test/task-depends.test.js+task-depends-ui.test.js(2026-09)。
+- **プロバイダ横断スロットリング(イシュー#1)**: src/model/throttle.js に gateProvider(送信前待ち)/noteProviderRateLimited(429/529時・Retry-Afterは単調延長・上限5分)/clearProviderRateLimit(成功時)。全アダプタ(openai/anthropic-messages/openai-chatgpt)が同一baseUrl単位でクールダウン共有。「429を見た呼び出しだけ」でなく同プロバイダ全員が待つ設計。テスト test/throttle.test.js(2026-09)。
+- **usage集計はローカル日付基準(イシュー#6)**: aggregateUsage/persistUsageとも localDateKey()(UTC ISOから変更)に統一。書き込み側と集計側の日付キー生成を1関数へ寄せ、深夜帯の「今日」バケット落ちを構造的に防止。usage.round/summaryにthread(無ければ__main__)+dateを付け、日別/スレッド別/日別xスレッドのmatrixを集計。テストはTZ境界固定(TZ差3種で検証)(2026-09)。
+- **ラウンドcheckpoint/resume(イシュー#4)**: ツール実行済み地点で checkpointFn?.(messages) を呼び、state/checkpoint-<id>.json へ tmp+rename原子書込。model.chat失敗(endedBy:"error")時のみ loadCheckpoint→memories差し替え→checkpoint削除して次ラウンド再開。正常系・checkpointFn未指定は従来どおり。**checkpoint削除は復元後(残すと失敗無限ループ)**。テスト test/checkpoint.test.js(2026-09)。
+- **CLI --chat通知チャネル(イシュー#11)**: wireCliNotify(bus,{longTaskSec}) が permission.request/merge.completed/長時間タスク完了をコンソールへ出力し、onNotify追加配信で監視(/api/monitor)経由にも流す。UIサーバー側からの再wireは二重出力ガード(__cliNotifyWired)で冪等。デスクトップ通知(desktop/main.js)と併存可。テスト test/notify.test.js(2026-09)。
+- **worktreeの未マージ保持(イシュー#7)**: hasUnmergedWork() でコミット済み・未マージのworktreeをsetupWorktrees/createWorktreeが削除せず保持(onKept告知)。未コミットの下書きのみは保持対象外(直呼び契約)。起動シーケンスは setupWorktrees→respawnUnfinishedWork の順で、未完了作業から respawn-<agentId>-<head|dirty> タスクを自動起票、変更なしブランチは放棄候補として報告(chat.respawn.cleanup=trueで掃除)(2026-09)。
+
+# 運用教訓(2026-09 issue系列ラウンド)
+
+- **検証済みタスクが「退場→自動解放→再スポーン」ループに入る**: 検証だけしてfinish→退場した作業者のタスクが自動解放でopenへ戻り、追加ワーカーが連続スポーンされる(2026-09 issue-dependsでimpl-1/5/7/8/10/11/12がループ、実害はトークン浪費のみ)。対策の方向: (1)リーダーがverify-*承認時に該当implタスクを明示クローズ (2)「実装差分ゼロなら検証者がapproveまで実施してよい」運用をリードが明示 (3)作業者側は請求時にタスクが既にmain反映済みなら検証→approveまで通す。スレッドごとに複数ロールが混在すると主担当交代が揺れるため、impl→review→approveの役割固定が有効。
+- **validate後のタスクは「実装済み」を前提に検証する**: 請求したタスクが既にmain反映済み(codemerge済み)の場合は、worktree差分ゼロを確認→受け入れ基準テストの再実行で証跡→「追加コミット不要」と明示してfinish/approveするのが定型。コードを重複実装しない。
+- **usage等の時刻境界テストはUTC/ローカル混在でflakyになる**: new Date()から生成した日付期待値は実行時刻(TZ・日をまたぐ時刻帯)でズレる。テスト側はTZ環境変数を明示固定するか、期待値も実装と同一の関数(localDateKey等)から生成する(2026-09 issue-costで実害→解決済み)。
+- **ボード投稿は自身のスレッドへ投稿すると自分のボードに載らない**: to_thread指定時の注意。lead報告の取りこぼしがあったら他スレッドの投稿を見る(gather_context source=threads)。
