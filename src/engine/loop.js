@@ -204,8 +204,14 @@ export async function runAgentLoop({
     bus.emit("agent.turn", { agent: agent.id, turn, content: res.content ?? "", reasoning: res.reasoning ?? "" });
 
     if (res.toolCalls.length > 0) {
-      // GLM/OpenRouterはcontent:nullのassistantメッセージを拒むため文字列に正規化
-      messages.push({ role: "assistant", content: res.raw.content ?? "", tool_calls: res.raw.tool_calls });
+      // GLM/OpenRouterはcontent:nullのassistantメッセージを拒むため文字列に正規化。
+      // 呼び出しは共通形 res.toolCalls から組み立てる(rawはワイヤ形式ごとに形が違うため依存しない:
+      // OpenAI=OpenAI形 / anthropic-messages={stop_reason,blocks} / chatgpt-responses=completed)
+      const calls = (res.toolCalls ?? []).map((tc) => ({
+        id: tc.id, type: "function",
+        function: { name: tc.name, arguments: typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments ?? {}) },
+      }));
+      messages.push({ role: "assistant", content: res.content ?? "", tool_calls: calls });
       const reminders = []; // 暴走検知のリマインダ(全ツール結果の後にまとめて注入)
       let warningsThisTurn = 0;
       for (const tc of res.toolCalls) {

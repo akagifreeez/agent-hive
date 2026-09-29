@@ -15,6 +15,7 @@ import { openInBrowser } from "../engine/browser.js";
 import { PermissionGate } from "../engine/permissions.js";
 import { ROOT, dataDir } from "../config.js";
 import { modelStateInfo, resolveDefaultSpec, probeModel, startOpenAIAuth } from "../model/factory.js";
+import { buildCatalog } from "../model/catalog.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
@@ -820,9 +821,17 @@ function saveApiKey(body, config) {
   const pid = String(body.provider ?? "").trim();
   let rel;
   if (pid) {
-    // 生のproviders設定へ書く(buildCatalogの戻しはコピーなので、そこへ書いても実行中configに反映されない)
-    const raw = config.models?.providers?.[pid];
-    if (!raw) return { ok: false, error: `未知のプロバイダ "${pid}"` };
+    let raw = config.models?.providers?.[pid];
+    if (!raw) {
+      // 内蔵カタログのみのプロバイダ(anthropic等・設定JSONに明記なし)も保存できるようにする:
+      // 実行中configへ最小限の定義を足す(鍵自体はstate配下の暗黙ファイルに置くため再起動後も有効)
+      const cp = buildCatalog(config.models).providers[pid];
+      if (!cp) return { ok: false, error: `未知のプロバイダ "${pid}"` };
+      raw = { id: pid, baseUrl: cp.baseUrl, api: cp.api, auth: {}, models: cp.models ?? [] };
+      if (!config.models) config.models = { default: null, fallbacks: null, providers: {} };
+      if (!config.models.providers) config.models.providers = {};
+      config.models.providers[pid] = raw;
+    }
     if (!raw.auth) raw.auth = {};
     if (raw.auth.value) return { ok: false, error: `プロバイダ "${pid}" は設定に直値の鍵があるため上書きできません` };
     if (raw.auth.env && process.env[raw.auth.env] && !raw.auth.file) return { ok: false, error: `プロバイダ "${pid}" は環境変数 ${raw.auth.env} で運用中です(env側を更新してください)` };

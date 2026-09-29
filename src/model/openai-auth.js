@@ -6,7 +6,7 @@
 // クレーム"https://api.openai.com/auth".chatgpt_account_idから抽出する。
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 export const OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"; // Codex CLI公式クライアント
@@ -216,11 +216,13 @@ export function readTokenStore(file, baseDirs = []) {
   return {};
 }
 
-/** トークンストアへ書き戻す(0600相当の配慮はWindowsでは不要。dataDir配下はgit除外領域)。 */
+/** トークンストアへ書き戻す。リフレッシュトークンを含むため0600(新規作成時のモード)+
+ * 既存ファイルへのchmod(Linuxのumask 022で0644になるのを防ぐ。Windowsではmode無視=無害)。 */
 export function writeTokenStore(file, store, baseDirs = []) {
   const target = resolve(baseDirs[baseDirs.length - 1] ?? process.cwd(), file);
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, JSON.stringify(store, null, 1));
+  writeFileSync(target, JSON.stringify(store, null, 1), { mode: 0o600 });
+  try { chmodSync(target, 0o600); } catch { /* Windowsでは不要 */ }
 }
 
 /** 有効なaccess tokenを取得する(期限切れならリフレッシュして保存し直す)。

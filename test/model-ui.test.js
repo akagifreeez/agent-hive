@@ -141,6 +141,46 @@ test("設定API: /api/model-test は未知プロバイダでconfigエラー", as
   }
 });
 
+test("設定API: 内蔵プロバイダ(anthropic)にも鍵を保存でき、暗黙ファイル経由で疎通する", async () => {
+  const ws = mktmp();
+  const dataDir = mktmp();
+  const prev = process.env.HIVE_DATA;
+  process.env.HIVE_DATA = dataDir;
+  const origFetch = globalThis.fetch;
+  try {
+    const config = mkConfig(ws);
+    const ui = await startUiTokenized(startUi, { config, bus: new Bus(), autoStart: false });
+    const base = `http://127.0.0.1:${config.ui.port}`;
+    const post = (path, body) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json", "x-hive-token": ui.token }, body: JSON.stringify(body) });
+
+    // builtinのみのプロバイダ(設定JSONに明記なし)への保存が「未知のプロバイダ」にならない
+    const rk = await (await post("/api/key", { provider: "anthropic", key: "sk-ant-api03-test-12345678" })).json();
+    assert.equal(rk.ok, true, JSON.stringify(rk));
+    assert.ok(existsSync(join(dataDir, "state", "models-anthropic.key")), "state配下の暗黙ファイルに保存");
+
+    // プローブ: resolveAuthValueの暗黙ファイル経由で鍵が拾われ、anthropicワイヤが応答する
+    globalThis.fetch = async (url, opts) => {
+      const s = String(url);
+      if (s.includes("/api/")) return origFetch(url, opts);
+      if (s.includes("api.anthropic.com")) {
+        return { ok: true, json: async () => ({ type: "message", content: [{ type: "text", text: "pong" }], usage: { input_tokens: 1, output_tokens: 1 } }) };
+      }
+      return { ok: true, json: async () => ({ choices: [{ message: { content: "pong" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }) };
+    };
+    const r2 = await (await post("/api/model-test", { provider: "anthropic" })).json();
+    assert.equal(r2.ok, true, JSON.stringify(r2));
+    assert.match(r2.ref, /^anthropic\/claude-/);
+
+    ui.close();
+  } finally {
+    globalThis.fetch = origFetch;
+    if (prev === undefined) delete process.env.HIVE_DATA;
+    else process.env.HIVE_DATA = prev;
+    rmSync(ws, { recursive: true, force: true });
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 test("設定API: /api/openai-auth は認証URLを発行し、手動貼り付けでトークン保存・疎通まで通る", async () => {
   const ws = mktmp();
   const dataDir = mktmp();

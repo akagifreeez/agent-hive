@@ -71,6 +71,7 @@ export function resolveModel(catalog, refStr = null) {
 /** プロバイダの認証値を解決する(value > env > file)。旧resolveApiKeyの一般化。
  * auth.type="oauth"のプロバイダはここでは解決しない(トークンストア経由=src/model/openai-auth.js)。
  * fileはROOTとdataDir両方を試す(開発時はリポジトリ基準・梱包時はuserData基準)。
+ * auth未指定の内蔵プロバイダ向けに、設定UIが保存する暗黙の鍵ファイル(state/models-<id>.key)も見る。
  * @param {ProviderCfg} provider @param {string[]} [baseDirs] @returns {string|null} */
 export function resolveAuthValue(provider, baseDirs = []) {
   const a = provider.auth ?? {};
@@ -83,6 +84,13 @@ export function resolveAuthValue(provider, baseDirs = []) {
       if (existsSync(f)) {
         try { return readFileSync(f, "utf8").trim() || null; } catch { return null; }
       }
+    }
+  }
+  // 暗黙の置き場所: 設定UIから保存された鍵。authを書かなくても保存→再起動で拾える
+  for (const base of baseDirs) {
+    const f = resolve(base, `state/models-${provider.id}.key`);
+    if (existsSync(f)) {
+      try { return readFileSync(f, "utf8").trim() || null; } catch { return null; }
     }
   }
   return null;
