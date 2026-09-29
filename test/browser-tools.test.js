@@ -165,7 +165,7 @@ test("buildSubmission: method/url/body/content-typeを組み立て(GETはクエ�
   assert.doesNotThrow(() => buildSubmission(form, {}, { selector: "user" }));
 });
 
-test("browserFetch: ローカルサーバーからGETし、page+rawが返る(絶対URL必須)", async () => {
+test("browserFetch: ローカルサーバーからGETし、page+rawが返る(絶対URL必須)", async (t) => {
   const { server, base } = await startLocalServer(t, { "/page.html": { body: PAGE_HTML } });
   const r = await browserFetch(`${base}/page.html`);
   assert.equal(r.ok, true);
@@ -179,7 +179,7 @@ test("browserFetch: ローカルサーバーからGETし、page+rawが返る(絶
   server.close();
 });
 
-test("browserExtract: 取得→抽出が1呼び出しで通る(url+selector)", async () => {
+test("browserExtract: 取得→抽出が1呼び出しで通る(url+selector)", async (t) => {
   const { server, base } = await startLocalServer(t, { "/page.html": { body: PAGE_HTML } });
   const r = await browserExtract({ url: `${base}/page.html`, selector: "h1" });
   assert.equal(r.ok, true);
@@ -187,7 +187,7 @@ test("browserExtract: 取得→抽出が1呼び出しで通る(url+selector)", a
   server.close();
 });
 
-test("browserSubmit: POSTでフォーム送信でき、303はlocation追従して取れる", async () => {
+test("browserSubmit: POSTでフォーム送信でき、303はlocation追従して取れる", async (t) => {
   const { server, base } = await startLocalServer(t, {
     "/login": { echoBody: true, contentType: "text/html; charset=utf-8" },
   });
@@ -203,7 +203,7 @@ test("browserSubmit: POSTでフォーム送信でき、303はlocation追従し�
   server.close();
 });
 
-test("browserSubmit: 303 See Other はlocationへ追従して最終応答を返す", async () => {
+test("browserSubmit: 303 See Other はlocationへ追従して最終応答を返す", async (t) => {
   const { server, base } = await startLocalServer(t, {
     "/login": { seeOther: "/done.html" },
     "/done.html": { body: "<h1>完了</h1>" },
@@ -214,7 +214,7 @@ test("browserSubmit: 303 See Other はlocationへ追従して最終応答を返�
   server.close();
 });
 
-test("browserSubmit: セレクタ一致なし・フォームなしは送信しない", async () => {
+test("browserSubmit: セレクタ一致なし・フォームなしは送信しない", async (t) => {
   const { server, base } = await startLocalServer(t, { "/login": { echoBody: true } });
   const noSel = await browserSubmit({ html: PAGE_HTML, base_url: `${base}/`, values: {}, selector: "nosuch" });
   assert.equal(noSel.ok, false);
