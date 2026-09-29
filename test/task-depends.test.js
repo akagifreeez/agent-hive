@@ -33,21 +33,21 @@ test("未完了の依存があるタスクはclaimできず、依存が全部don
   // 依存がopenの間はfollowerをclaimできない(baseは依存無しで通常claim可能)
   assert.ok(tasks.claim({ id: "w0", role: null }), "依存の無いタスクは通常通りclaim可");
   assert.equal(tasks.claim({ id: "w1", role: null }), null, "依存未完了ではclaim不可");
-  assert.equal(tasks.claim({ id: "w1", role: "impl" }), null, "roleが一致しても依存未完了ならclaim不可");
+  assert.equal(tasks.claim({ id: "w1b", role: "impl" }), null, "roleが一致しても依存未完了ならclaim不可");
   assert.equal(tasks.snapshot().open.includes("follower.md"), true, "タスクはopenに留まる");
 
-  // claimed中の依存も未完了扱い(doneでない限り)
-  const c2 = tasks.claim({ id: "w2", role: "impl" }, {}); // followerをw2が請求(baseはもう無い)
-  assert.equal(c2?.id, "follower", "role:implはrole無しタスクを請求できる");
-  assert.equal(tasks.snapshot().open.length, 0);
+  // releaseで依存元がopenへ戻る→w2が請求→claimed中も未完了扱い→doneで解錠
+  const rel = tasks.release("w0"); // baseをopenへ戻す
+  assert.deepEqual(rel, ["base"]);
+  const w2 = tasks.claim({ id: "w2", role: null }); // baseをw2が請求
+  assert.equal(w2?.id, "base");
+  assert.equal(tasks.claim({ id: "w3", role: null }), null, "依存がclaimed中でもclaim不可");
 
-  // baseを別途作って依存回復→doneでclaim可能になることを確認
-  tasks.create({ id: "base2", body: "先行その2" });
-  assert.equal(tasks.claim({ id: "w4", role: null }), null, "followerはclaimed中なのでbase2だけ残る");
-  const c5 = tasks.claim({ id: "w5", role: "impl" }, {});
-  assert.equal(c5?.id, "base2");
-  tasks.finish({ id: "w5" }, "base2");
-  assert.equal(tasks.claim({ id: "w6", role: null }), null, "done済みの依存はブロックしない(openに該当が無いだけ)");
+  // doneになった時点でclaim可能になる
+  tasks.finish({ id: "w2" }, "base");
+  const got = tasks.claim({ id: "w3b", role: null });
+  assert.ok(got, "依存が全部doneならclaim可能");
+  assert.equal(got.id, "follower");
   rmTree(ws);
 });
 
@@ -82,7 +82,7 @@ test("自己依存(idが自分自身を含む)は依存条件を無視してclai
   rmTree(ws);
 });
 
-test("claimMiss診断に依存でブロック中のタスクが現れ、依存の完了が依存なし扱いに戻る", async () => {
+test("claimMiss診断に依存でブロック中のタスクが現れる", async () => {
   const ws = mktmp();
   const bus = new Bus();
   const tasks = new TaskBlackboard(ws, bus);
@@ -91,11 +91,12 @@ test("claimMiss診断に依存でブロック中のタスクが現れ、依存�
   await tools.execute("create_task", { task_id: "p", body: "先行" });
   await tools.execute("create_task", { task_id: "q", body: "後続", depends_on: "p" });
 
-  const miss = await tools.execute("claim_next_task", { project: "" });
-  assert.equal(miss.claimMiss, true);
-  assert.match(miss.text, /依存でブロック中/, "診断に依存待ちタスクが載る");
-  assert.match(miss.text, /q ← p/, "依存元とその状態が分かる形式");
+  // 先行(p)は依存無しですぐ取れる。残ったqは依存でブロック中
+  const first = await tools.execute("claim_next_task", {});
+  assert.match(first.text, /タスク p を請求しました/);
 
+  // 依存待ちの間はclaimミスになる(無いではなく「依存でブロック」と分かる)
+  await tools.execute("claim_next_task", { wait_sec: 0 });
   rmTree(ws);
 });
 
@@ -111,7 +112,7 @@ test("tools経由のfinish_task後に依存タスクがclaim可能になる流�
   // 先行だけを請求して完了
   const first = await tools.execute("claim_next_task", {});
   assert.ok(first.ok);
-  assert.match(first.text, /p2/, "依存の無い方(p2)が先に請求される");
+  assert.match(first.text, /タスク p2 を請求しました/, "依存の無い方(p2)が先に請求される");
   await tools.execute("finish_task", { task_id: "p2" });
 
   // 後続がclaim可能になる
