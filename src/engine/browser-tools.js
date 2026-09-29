@@ -84,7 +84,7 @@ function btFormFields(formInner) {
  * HTMLをページ情報へ構造化する。
  * @param {string} html 生HTML
  * @param {string} baseUrl 絶対URL(相対リンク解決の基準)
- * @returns {{url: string, title: string, headings: string[], links: Array<{text: string, href: string|null}>, forms: Array<{index: number, method: string, action: string, html: string, fields: Array<{name: string, type: string, value: string, options?: string[], order: number}>}>, text: string, raw: string}}
+ * @returns {{url: string, title: string, headings: string[], links: Array<{text: string, href: string|null}>, forms: Array<{index: number, method: string, methodRaw?: string, action: string, html: string, fields: Array<{name: string, type: string, value: string, options?: string[], order: number}>}>, text: string, raw: string}}
  */
 export function parsePage(html, baseUrl) {
   const src = String(html ?? "");
@@ -119,6 +119,7 @@ export function parsePage(html, baseUrl) {
     forms.push({
       index: forms.length + 1,
       method: methodRaw || "GET",
+      methodRaw,
       action: normalizeUrl(actionRaw || base, base) ?? base,
       html: fm[2] ?? "",
       fields: btFormFields(fm[2] ?? ""),
