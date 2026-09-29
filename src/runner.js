@@ -269,7 +269,8 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     const open = list.open;
     for (const [name, alive] of aliveWorkers) {
       const th = threads.get(name);
-      if (!th || th.host.paused) continue; // 停止中スレッドは増員しない
+      // host無しスレッド(ディスカッション等・タスク請求なし)は増員対象外
+      if (!th || !th.host || th.host.paused) continue; // 停止中スレッドは増員しない
       const nOpen = open.filter((t) => (t.project || "") === name).length;
       const desired = nOpen === 0 ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil(nOpen / 2));
       if (alive.size >= desired || manager.live.size >= globalCap) continue;
@@ -444,7 +445,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     },
     say: (text, thread = null) => {
       const t = thread ? threads.get(thread) : null;
-      if (t) return t.host.say(text);
+      if (t) return t.host ? t.host.say(text) : { ok: false, error: `スレッド ${thread} はワーカーを持たないためsayできません` };
       return leadHost.say(text);
     },
     attachImage: (note, dataUrl, thread = null, path = null) => {
@@ -494,7 +495,11 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       const api = createWorkflowApi({
         openThread,
         closeThread,
-        say: (text, thread) => (thread ? threads.get(thread)?.host : leadHost).say(text, thread),
+        say: (text, thread) => {
+          const h = thread ? threads.get(thread)?.host : leadHost;
+          if (!h) return { ok: false, error: `スレッド ${thread} はワーカーを持たない(host無し)ため、sayできません` };
+          return h.say(text, thread);
+        },
         tasks,
         bus,
         log,
