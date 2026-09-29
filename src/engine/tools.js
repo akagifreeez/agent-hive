@@ -7,6 +7,7 @@ import { runCommand, detectShell } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
 import { readMeta, detectTaskOverlap } from "./tasks.js";
 import { readSkill } from "./skills.js";
+import { browserFetch, browserExtract, browserSubmit } from "./browser.js";
 
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
