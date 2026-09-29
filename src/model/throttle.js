@@ -7,13 +7,14 @@
 // クールダウン明けまで待つ(明けた瞬間に全員が同時に通ると再び連鎖するため、待ちの先頭に
 // 短いジッタを足す: computeRetryDelayと同じ方針)。既存のRetry-After対応と統合:
 // note()にはアダプタがparseRetryAfterMsで抽出したRetry-Afterを渡す(妥当性判定はcomputeRetryDelayと同基準)。
-import { MAX_REASONABLE_RETRY_AFTER_MS, modelSleep } from "./openai.js";
+import { modelSleep } from "./openai.js";
 
 // baseUrl => { until: number(エポックms), retryAfterMs?: number }
 const cooldowns = new Map();
 
-// クールダウンの上限(Retry-Afterの妥当上限と統一。妙な大値で全員停止させない)
-export const THROTTLE_MAX_COOLDOWN_MS = MAX_REASONABLE_RETRY_AFTER_MS;
+// クールダウンの上限。openai.jsのRetry-After妥当上限(MAX_REASONABLE_RETRY_AFTER_MS=5分)と
+// 同値を保つ(妙な大値で全員停止させない)。非export定数なので数値を同期して持つ。
+export const THROTTLE_MAX_COOLDOWN_MS = 5 * 60_000;
 // 429/529を受けなかった場合の既定クールダウン(Retry-After無し時の下限保証)
 export const THROTTLE_DEFAULT_COOLDOWN_MS = 5_000;
 // gate待ち先頭ジッタの上限。明けの一瞬に全員が突撃して429連鎖が再発するのを避ける
