@@ -845,9 +845,138 @@ function renderCtx(state) {
   if (ctxTab === "agents") renderAgentsTab(body, state);
   if (ctxTab === "files") renderFilesTab(body);
   if (ctxTab === "status") renderStatusTab(body);
+  if (ctxTab === "status") { const traceBox = document.createElement("div"); traceBox.id = "usage-trace"; body.appendChild(traceBox); renderUsageTrace(body); }
   if (ctxTab === "memory") renderMemoryTab(body);
   if (ctxTab === "audit") renderAuditTab(body);
   if (ctxTab === "term") renderTerminalTab();
+}
+
+/* ================= トレース: ワーカー別トークン消費推移(イシュー#15) ================= */
+// データ源は /api/usage-trace(state/usage-trace/usage-trace.jsonlの解析結果)。
+// フィルタの入力変更時のみ再取得し、SVG折れ線で各ワーカーの合計トークンをターン別に描く。
+let usageTraceFilter = { agent: "", fromTurn: "", toTurn: "" };
+async function renderUsageTrace(body) {
+  const head = document.createElement("div");
+  head.className = "sec";
+  head.textContent = "トレース(ワーカー別トークン消費推移)";
+  body.appendChild(head);
+  // フィルタ行: エージェント選択+ターン範囲
+  const bar = document.createElement("div");
+  bar.className = "usage-trace-filter";
+  bar.style.cssText = "display:flex;gap:6px;align-items:center;margin-bottom:6px;font-size:11px;flex-wrap:wrap;";
+  const sel = document.createElement("select");
+  sel.style.cssText = "background:var(--recess);border:1px solid var(--separator);color:var(--label);border-radius:4px;padding:2px 6px;font-size:11px;";
+  const fromInp = document.createElement("input");
+  const toInp = document.createElement("input");
+  for (const [el, ph] of [[fromInp, "開始turn"], [toInp, "終了turn"]]) {
+    el.type = "number"; el.min = "1"; el.placeholder = ph; el.value = usageTraceFilter[el === fromInp ? "fromTurn" : "toTurn"] ?? "";
+    el.style.cssText = "width:74px;background:var(--recess);border:1px solid var(--separator);color:var(--label);border-radius:4px;padding:2px 6px;font-size:11px;";
+  }
+  const note = document.createElement("span");
+  note.className = "hint";
+  const loadData = async () => {
+    const qs = new URLSearchParams();
+    if (usageTraceFilter.agent) qs.set("agent", usageTraceFilter.agent);
+    if (usageTraceFilter.fromTurn) qs.set("fromTurn", usageTraceFilter.fromTurn);
+    if (usageTraceFilter.toTurn) qs.set("toTurn", usageTraceFilter.toTurn);
+    try {
+      return await (await hfetch("/api/usage-trace" + (qs.toString() ? "?" + qs.toString() : ""))).json();
+    } catch { return null; }
+  };
+  // エージェント選択肢はフィルタ無しで全件を一度取る(全ワーカーが選べるように)
+  let all = null;
+  try { all = await (await hfetch("/api/usage-trace")).json(); } catch {}
+  const agents = (all?.total?.byAgent ? Object.keys(all.total.byAgent) : []).sort();
+  sel.innerHTML = "<option value=''>全ワーカー</option>" + agents.map((a) => "<option value=\"" + escapeHtml(a) + "\"" + (a === usageTraceFilter.agent ? " selected" : "") + ">" + escapeHtml(a) + "</option>").join("");
+  const apply = () => {
+    usageTraceFilter = { agent: sel.value, fromTurn: fromInp.value, toTurn: toInp.value };
+    renderCtx(lastState);
+  };
+  sel.onchange = apply;
+  fromInp.onchange = apply;
+  toInp.onchange = apply;
+  bar.append(sel, fromInp, document.createTextNode("〜"), toInp, note);
+  body.appendChild(bar);
+  const data = all && !usageTraceFilter.agent && !usageTraceFilter.fromTurn && !usageTraceFilter.toTurn ? all : await loadData();
+  if (!data || !data.series || !data.series.length) {
+    note.textContent = "トレースはまだありません。";
+    return;
+  }
+  note.textContent = data.total.turns + "ターン / 合計" + data.total.totalTokens.toLocaleString() + "トークン";
+  const view = document.createElement("div");
+  view.className = "usage-trace-view";
+  view.appendChild(renderTraceChart(data));
+  // 凡例テーブル(ワーカー別の合計。消費の大きい順)
+  const tbl = document.createElement("table");
+  tbl.className = "usage-tbl";
+  tbl.style.cssText = "margin-top:6px;";
+  tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  for (const s of data.series) {
+    const tr = document.createElement("tr");
+    const nm = document.createElement("td");
+    const dot = document.createElement("span");
+    dot.style.cssText = "display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:" + traceColor(s.agent) + ";vertical-align:middle;";
+    nm.appendChild(dot);
+    nm.appendChild(document.createTextNode(s.agent));
+    const tn = document.createElement("td"); tn.textContent = String(s.points.length);
+    const tt = document.createElement("td"); tt.textContent = s.totalTokens.toLocaleString();
+    tr.append(nm, tn, tt);
+    tb.appendChild(tr);
+  }
+  tbl.appendChild(tb);
+  view.appendChild(tbl);
+  body.appendChild(view);
+}
+
+// ワーカー識別色(agentHueと同じハッシュ)をSVG用の実色へ
+function traceColor(id) {
+  return "hsl(" + agentHue(id) + ", 55%, 60%)";
+}
+
+// SVG折れ線グラフ: x=ターン、y=合計トークン。依存なし(外部ライブラリ無し)。
+function renderTraceChart(data) {
+  const W = 560, H = 180, PL = 44, PR = 8, PT = 8, PB = 20;
+  const allPts = data.series.reduce((a, s) => a.concat(s.points), []);
+  const maxVal = Math.max.apply(null, [1].concat(allPts.map((p) => p.totalTokens)));
+  const maxTurn = Math.max.apply(null, [1].concat(allPts.map((p) => p.turn)));
+  const minTurn = Math.min.apply(null, allPts.map((p) => p.turn).concat([maxTurn]));
+  const x = (t) => PL + (maxTurn === minTurn ? (W - PL - PR) / 2 : ((t - minTurn) / (maxTurn - minTurn)) * (W - PL - PR));
+  const y = (v) => PT + (1 - v / maxVal) * (H - PT - PB);
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  svg.style.cssText = "width:100%;max-width:640px;background:var(--recess);border:1px solid var(--separator);border-radius:6px;";
+  const el = (tag, attrs, text) => {
+    const e = document.createElementNS(NS, tag);
+    for (const k of Object.keys(attrs)) e.setAttribute(k, String(attrs[k]));
+    if (text != null) e.textContent = text;
+    svg.appendChild(e);
+    return e;
+  };
+  // 横グリッド+目盛(0〜maxValを4分割)
+  for (let i = 0; i <= 4; i++) {
+    const v = (maxVal / 4) * i;
+    el("line", { x1: PL, x2: W - PR, y1: y(v), y2: y(v), stroke: "var(--separator)", "stroke-width": 1 });
+    el("text", { x: PL - 4, y: y(v) + 3, "text-anchor": "end", "font-size": 9, fill: "var(--label-tertiary)" }, v >= 1000 ? (v / 1000) + "k" : String(Math.round(v)));
+  }
+  // x軸のターン目盛(目安5本以内)
+  const step = Math.max(1, Math.ceil((maxTurn - minTurn) / 4));
+  for (let t = minTurn; t <= maxTurn; t += step) {
+    el("text", { x: x(t), y: H - 6, "text-anchor": "middle", "font-size": 9, fill: "var(--label-tertiary)" }, "t" + t);
+  }
+  // 各ワーカーの折れ線+点(ホバーで内訳)
+  for (const s of data.series) {
+    const pts = s.points.map((p) => x(p.turn) + "," + y(p.totalTokens)).join(" ");
+    el("polyline", { points: pts, fill: "none", stroke: traceColor(s.agent), "stroke-width": 1.6, "stroke-linejoin": "round" });
+    for (const p of s.points) {
+      const c = el("circle", { cx: x(p.turn), cy: y(p.totalTokens), r: 2.6, fill: traceColor(s.agent) });
+      const title = document.createElementNS(NS, "title");
+      title.textContent = s.agent + " turn" + p.turn + ": " + p.totalTokens.toLocaleString() + "tok (prompt " + p.prompt + " / completion " + p.completion + " / reasoning " + p.reasoning + ")";
+      c.appendChild(title);
+    }
+  }
+  return svg;
 }
 
 function renderTasksTab(body, state) {
