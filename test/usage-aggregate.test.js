@@ -73,15 +73,18 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
   const th = Object.fromEntries(agg.byThread.map((r) => [r.thread, r]));
   assert.equal(th["__main__"].calls, 7);
   assert.ok(Math.abs(th["__main__"].costUsd - 1.2) < 1e-9, "mainのcost合計");
-  assert.equal(th["issue-x"].calls, 7);
-  assert.ok(Math.abs(th["issue-x"].costUsd - 1.3) < 1e-9, "issue-xのcost合計");
+  assert.equal(th["issue-x"].calls, 8);
+  assert.ok(Math.abs(th["issue-x"].costUsd - 1.4) < 1e-9, "issue-xのcost合計");
   assert.ok(!th["__main__"].agentIds.includes("issue-x-alpha"), "スレッド別のエージェント一覧は自分のスレッド分だけ");
   assert.ok(th["issue-x"].agentIds.includes("issue-x-alpha"));
   // 日別xスレッド
   const key = (date, thread) => `${date}|${thread}`;
   const m = Object.fromEntries(agg.matrix.map((r) => [key(r.date, r.thread), r]));
+  // 今日のスレッド別内訳: __main__はleadラウンドのみ(calls=2)、issue-xはalpha(推測)3+thread付き1で4
   const todayMain = m[key(now.toISOString().slice(0, 10), "__main__")];
-  assert.ok(todayMain && todayMain.calls === 4, "今日のmain分はleadラウンドのみ(calls=4)");
+  assert.ok(todayMain && todayMain.calls === 2, "今日のmain分はleadラウンドのみ(calls=2)");
+  const todayX = m[key(now.toISOString().slice(0, 10), "issue-x")];
+  assert.ok(todayX && todayX.calls === 4, "今日のissue-x分はalpha(推測)3+thread付き1(calls=4)");
 });
 
 test("aggregateUsage: 空や形状不良のhistoryでも安全に空集計を返す", () => {
@@ -120,7 +123,7 @@ test("usage.json: usage.round/summaryの蓄積に日付とスレッド名が付�
     const th = Object.fromEntries(aggregate.byThread.map((r) => [r.thread, r]));
     assert.equal(th["issue-y"].calls, 2);
     assert.equal(th["issue-y"].costUsd, 0.2);
-    assert.equal(th["__main__"].calls, 2, "mainのroundとsummaryの両方を集計");
+    assert.equal(th["__main__"].calls, 4, "mainのround(1)+summary(3)の両方を集計");
     assert.equal(th["__main__"].costUsd, 0.4);
   } finally {
     try { ui.close(); } catch {}
