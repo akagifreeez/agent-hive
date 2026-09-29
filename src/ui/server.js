@@ -262,7 +262,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     },
     "scenario.started": (p) => { live.scenario = { name: p.name, phase: "running" }; },
     "usage.summary": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), totals: p.usage ?? null }),
-    "usage.round": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), agent: p.agent, endedBy: p.endedBy ?? "ok", totals: p.totals ?? null }),
+    "usage.round": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), agent: p.agent, thread: p.thread ?? '__main__', endedBy: p.endedBy ?? 'ok', totals: p.totals ?? null }),
     "scenario.finished": () => { if (live.scenario) live.scenario.phase = "done"; },
   };
   for (const [type, fn] of Object.entries(record)) bus.on(type, fn);
@@ -1183,7 +1183,10 @@ function persistUsage(workspace, entry) {
     mkdirSync(dir, { recursive: true });
       const file = join(dir, "usage.json");
       const history = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
-      history.push(entry);
+      // 日別・スレッド別集計(イシュー#6)用に日付とスレッド名を付けて蓄積する。
+      // thread無しの旧レコードとの互換は集計側(aggregateUsage)が__main__扱いで吸収。
+      const enriched = { ...entry, date: new Date().toISOString().slice(0, 10), thread: entry.thread ?? '__main__' };
+      history.push(enriched);
       writeFileSync(file, JSON.stringify(history.slice(-200), null, 1));
   } catch {}
 }
