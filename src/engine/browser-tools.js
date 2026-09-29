@@ -142,7 +142,16 @@ export function extractElements(page, filter = {}) {
   let index = 0;
   for (const type of want) {
     if (type === "link") {
-      for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href });
+      // リンクはrawから直接列挙する(断片#...はhref=nullで残す。遷移候補の一覧性優先)。javascript:等は除外
+      const aRe = new RegExp("<a\\\\s[^>]*?href=(?:\\\"([^\"]*)\\\"|\\'[^']*\\'|([^\\\\s>]+))[^>]*>(\\\\s\\\\S*?)</a\\\\s*>", "gi");
+      let am;
+      while ((am = aRe.exec(String(page.raw ?? ""))) && index < 100) {
+        const rawHref = am[1] ?? am[2] ?? am[3] ?? "";
+        const text = btStripTags(am[4]);
+        if (!text) continue;
+        if (/^(javascript|data|vbscript):/i.test(rawHref.trim())) continue;
+        out.push({ index: ++index, type, text, href: normalizeUrl(rawHref, page.url) });
+      }
     } else if (type === "form") {
       for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {
@@ -211,6 +220,9 @@ export function applyFormValues(form, values) {
  * 送信リクエストを組み立てる(GETはURL結合・POSTはurlenc)。
  * opts.selector指定時はフォームHTML内一致を検証し、無ければthrow(誤送信防止)。
  */
+const BS = String.fromCharCode(92); // バックスラッシュ(正規表現を文字列連結で組むための定数)
+const DQ = String.fromCharCode(34); // ダブルクォート
+const SQ = String.fromCharCode(39); // シングルクォート
 export function buildSubmission(form, values, opts = {}) {
   if (!form) throw new Error("フォームが見つかりません");
   const f = applyFormValues(form, values);
