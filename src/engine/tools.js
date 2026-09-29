@@ -596,6 +596,20 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           return { ok: false, text: `検索エラー: ${err.message}` };
         }
       }
+      case "browser_fetch": {
+        const url = String(args.url ?? "").trim();
+        if (!/^https?:\/\//i.test(url)) return { ok: false, text: "urlはhttp(s)の絶対URLで指定してください。" };
+        const r = await browserFetch(url);
+        return r.ok ? { ok: true, text: r.text } : { ok: false, text: r.text };
+      }
+      case "browser_extract": {
+        const r = await browserExtract(args ?? {});
+        return r.ok ? { ok: true, text: r.text } : { ok: false, text: r.text };
+      }
+      case "browser_submit": {
+        const r = await browserSubmit(args ?? {});
+        return r.ok ? { ok: true, text: r.text } : { ok: false, text: r.text };
+      }
       case "search_files": {
         const pattern = String(args.pattern ?? "");
         let re;
