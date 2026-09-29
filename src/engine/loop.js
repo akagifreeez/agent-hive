@@ -2,7 +2,8 @@
 // 仕事の発見と請求(claim)はAI自身が claim_next_task ツールで行う。
 // コンテキスト管理はZCode compact/準拠: microcompact(全ターン)→autocompact(閾値超過時)。
 // 予算(トークン)超過と idle(連続請求失敗)はエンジンが強制終了する。
-import { readFileSync } from "node:fs";
+import { readFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 import {
   microcompact,
   shouldAutocompact,
@@ -196,6 +197,34 @@ export async function runAgentLoop({
     }
     runTokens += (res.usage?.promptTokens ?? 0) + (res.usage?.completionTokens ?? 0);
     lastPromptTokens = res.usage?.promptTokens ?? 0;
+    // トークン内訳のトレース記録(消費分析用)。state/usage-trace.jsonl に1行ずつ追記する。
+    // prompt/completion/reasoningの内訳+コンテキストの概算サイズ(messages合計文字数)を記録する。
+    try {
+      const traceDir = "state";
+      mkdirSync(traceDir, { recursive: true });
+      const ctxChars = messages.reduce((n, m) => n + String(m.content ?? "").length, 0);
+      appendFileSync(join(traceDir, "usage-trace.jsonl"), JSON.stringify({
+        ts: new Date().toISOString(), agent: agent.id, turn,
+        prompt: res.usage?.promptTokens ?? 0,
+        completion: res.usage?.completionTokens ?? 0,
+        reasoning: res.usage?.reasoningTokens ?? 0,
+        ctxChars, msgCount: messages.length,
+      }) + "\n");
+    } catch { /* トレースの失敗でループを止めない */ }
+    // トークン内訳のトレース記録(消費分析用)。state/usage-trace.jsonl に1行ずつ追記する。
+    // prompt/completion/reasoningの内訳+コンテキストの概算サイズ(messages合計文字数)を記録する。
+    try {
+      const traceDir = board.persistPath ? dirname(board.persistPath) : "state";
+      mkdirSync(traceDir, { recursive: true });
+      const ctxChars = messages.reduce((n, m) => n + String(m.content ?? "").length, 0);
+      appendFileSync(join(traceDir, "usage-trace.jsonl"), JSON.stringify({
+        ts: new Date().toISOString(), agent: agent.id, turn,
+        prompt: res.usage?.promptTokens ?? 0,
+        completion: res.usage?.completionTokens ?? 0,
+        reasoning: res.usage?.reasoningTokens ?? 0,
+        ctxChars, msgCount: messages.length,
+      }) + "\n");
+    } catch { /* トレースの失敗でループを止めない */ }
     // サーバー側web_searchが走ったら活動ログへ(ZCodeの検索表示相当)
     if (res.searches?.length) {
       bus.emit("agent.search", {

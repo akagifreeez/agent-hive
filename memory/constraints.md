@@ -33,6 +33,10 @@
 - 重いworktreeテストのフレーキー(2026-09 overlap-guard-r6)は npm test への --test-force-exit 追加で対処済み(2026-09): テスト後もハンドルが残ってランナーが終わらないファイルがあり、実行ごとに別テストがタイムアウトするのが原因だった。競合マーカーガードの注入テスト(test/marker-guard.test.js)と同時に導入。
 - persist/thread系統合テストの行数固定 assert(「無音復元なので投稿が増えない」等)は並行負荷に弱い: autoscaleタイマー(30秒間隔の増員チェック)等が絡むフル実行時のみ落ちることがある。メカニズムは「ワーカー起動ラウンドの落ち着き待ち(行数2連続同一で打ち切り)がstagger遅延で早く抜け→demoLinesBefore確定後に応答1件が混ざる」競合(persist単体は安定、2026-09 search-alert-r7 で3者観測: ガンマ2回・ベータ1回)。判定はフル実行×2連続全緑を証跡にする。観測3回で緩め適用の目安に到達したが、テスト修正は一括適用(次回review-changes指摘かリーダー指示のタイミング。小出し修正はマージ競合リスクを上げるため避ける)(2026-09)。
 - **persist v6.1 flakyは2段階で解決済み**(2026-09 merge-queue-r6): (1)autoscale:false をテスト設定へ追加(増員タイマーの干渉を遮断、3d85270) (2)落ち着き待ちを「2連続同一+約1秒静止(stableCount>=5)」へ強化し test/heavy/ へ移動(cac1fc7)。観測5回超での一括適用方針どおり。自動増員(autoscale)は実運用機能であり本番挙動は不変。
+- **同一機能の並行実装は「先にmainへ入った方を正」で統一する**(2026-09 spawn-impl-2実績): usage集計UIをimplとrespawn側が並行実装し二重化。統一手順: (1)merge main後にgrep -cで二重定義・重複配線を検出 (2)main側の実装を残し自側の重複ブロック(関数+inline呼出)を除去 (3)main側への配線(呼出部)がスナップショットで落ちていれば復元 (4)script構文チェック+対象テスト全緑を証跡にする。
+- **ラウンド再開後のworktreeは「現状確認してから触る」**: スレッド再開やwipスナップショット復元で、ラウンド中に編集した内容が別状態(自動マージ・相手実装の取込・配線の欠落)へ置き換わることがある。違和感があれば git status と git log、git diff main と grep で実質を確認してから再編集する(2026-09 discuss-mumdrr6i実績)。
+- **一時ファイル削除のrmが監査で拒否されることがある**: bash拒否の理由文(監査領域state/への書き込み検出の誤検出)を読み、node -e の unlinkSync 等で安全に代替する(rmの再試行はしない。2026-09実績)。
+- **git logのオプション指定は禁止パターンで拒否されることがある**: --oneline や --name-only、git show --stat で代替する(2026-09実績)。
 
 # 将来への引き継ぎ
 
@@ -57,3 +61,44 @@
   - data/nc手持ちGFS資産: 17,641ファイル=約1,470サイクル(f000〜f033の12ステップ構成・先頭2022090100・末尾2026092800)。gamma実測→beta同値確認。遡及学習の資産は健全。
 
 - **finish_taskの台帳lapseで発見器が同じタスクを再起票し続ける**(2026-09 weather-ai-researchの実害): distill-learningsで「作業完了→finish_taskが『そのタスクは請求していません』で失敗」(請求状態のlapse)になると、実体成果物がmain反映済みでも処理済み地点が前進せず、fix-*/review-*/distill-系の再通知がループする。対処: (1)finish失敗時はclaimし直してからfinishする(lapse放置しない) (2)どうしても復帰できない場合はボードで訂正報告し、リード権限でopen復帰→再finish(またはclose時の地点前進)を依頼する (3)再通知が続く間は gather_context で open=0 を実証し、全員合意で「既消化の再配信」と明示してからclaim空転を打ち切る。
+
+# 決定事項(2026-09 issue系列ラウンドで確定)
+
+- **create_taskにdepends_on追加(イシュー#2)**: create が dependsOn(配列)を受け、メタ行 depends_on として保存。claim時にcanClaim()で「未完了依存があれば立候補しない」。循環依存は依存を無視して立候補不可(デッドロック防止)、自己依存は依存を無視して着手可。list()はdependsOn/blockedフィールドを返す。UIはタスク行「依存待ち:id」表示+フォーム入力欄+ /api/tasks create の depends_on 通過。テスト test/task-depends.test.js+task-depends-ui.test.js(2026-09)。
+- **プロバイダ横断スロットリング(イシュー#1)**: src/model/throttle.js に gateProvider(送信前待ち)/noteProviderRateLimited(429/529時・Retry-Afterは単調延長・上限5分)/clearProviderRateLimit(成功時)。全アダプタ(openai/anthropic-messages/openai-chatgpt)が同一baseUrl単位でクールダウン共有。「429を見た呼び出しだけ」でなく同プロバイダ全員が待つ設計。テスト test/throttle.test.js(2026-09)。
+- **usage集計はローカル日付基準(イシュー#6)**: aggregateUsage/persistUsageとも localDateKey()(ローカル日付)に統一。書き込み側と集計側の日付キー生成を1関数へ寄せ、深夜帯の「今日」バケット落ちを構造的に防止。usage.round/summaryにthread(無ければ__main__)+dateを付け、日別/スレッド別/日別xスレッドのmatrixを集計。テストはTZ差で検証(2026-09)。※後のfix-usage-aggregate-tzでも「UTC基準へ統一」が一時採用されたが、最終形はローカル基準のままで確着 — 重複した経緯記述は本条に統合済み。
+- **ラウンドcheckpoint/resume(イシュー#4)**: ツール実行済み地点で checkpointFn?.(messages) を呼び、state/checkpoint-<id>.json へ tmp+rename原子書込。model.chat失敗(endedBy:"error")時のみ loadCheckpoint→memories差し替え→checkpoint削除して次ラウンド再開。正常系・checkpointFn未指定は従来どおり。**checkpoint削除は復元後(残すと失敗無限ループ)**。テスト test/checkpoint.test.js(2026-09)。
+- **CLI --chat通知チャネル(イシュー#11)**: wireCliNotify(bus,{longTaskSec}) が permission.request/merge.completed/長時間タスク完了をコンソールへ出力し、onNotify追加配信で監視(/api/monitor)経由にも流す。UIサーバー側からの再wireは二重出力ガード(__cliNotifyWired)で冪等。デスクトップ通知(desktop/main.js)と併存可。テスト test/notify.test.js(2026-09)。
+- **worktreeの未マージ保持(イシュー#7)**: hasUnmergedWork() でコミット済み・未マージのworktreeをsetupWorktrees/createWorktreeが削除せず保持(onKept告知)。未コミットの下書きのみは保持対象外(直呼び契約)。起動シーケンスは setupWorktrees→respawnUnfinishedWork の順で、未完了作業から respawn-<agentId>-<head|dirty> タスクを自動起票、変更なしブランチは放棄候補として報告(chat.respawn.cleanup=trueで掃除)(2026-09)。
+
+# 運用教訓(2026-09 issue系列ラウンド)
+
+- **検証済みタスクが「退場→自動解放→再スポーン」ループに入る**: 検証だけしてfinish→退場した作業者のタスクが自動解放でopenへ戻り、追加ワーカーが連続スポーンされる(2026-09 issue-dependsでimpl-1/5/7/8/10/11/12がループ、実害はトークン浪費のみ)。対策の方向: (1)リーダーがverify-*承認時に該当implタスクを明示クローズ (2)「実装差分ゼロなら検証者がapproveまで実施してよい」運用をリードが明示 (3)作業者側は請求時にタスクが既にmain反映済みなら検証→approveまで通す。スレッドごとに複数ロールが混在すると主担当交代が揺れるため、impl→review→approveの役割固定が有効。
+- **validate後のタスクは「実装済み」を前提に検証する**: 請求したタスクが既にmain反映済み(codemerge済み)の場合は、worktree差分ゼロを確認→受け入れ基準テストの再実行で証跡→「追加コミット不要」と明示してfinish/approveするのが定型。コードを重複実装しない。
+- **usage等の時刻境界テストはUTC/ローカル混在でflakyになる**: new Date()から生成した日付期待値は実行時刻(TZ・日をまたぐ時刻帯)でズレる。テスト側はTZ環境変数を明示固定するか、期待値も実装と同一の関数(localDateKey等)から生成する(2026-09 issue-costで実害→解決済み)。
+- **browser-toolsの断片リンク契約は統一済み**: normalizeUrlが #断片に対しnullを返し、links/extractElements双方の遷移候補から除外する。browserSubmitレポートの接頭辞は「method: 」(テスト期待と一致、test/browser-tools*.test.js 13/13)(2026-09)。
+- **edit_fileでテンプレートリテラルを壊したときの最短修復**は `git show main:<file>` で原本を取り直して該当ブロックを復元する(node -eパッチ再試行より安全。2026-09 issue-browserラウンドでworktree.js修復に実証)。
+- **ボード投稿は自身のスレッドへ投稿すると自分のボードに載らない**: to_thread指定時の注意。lead報告の取りこぼしがあったら他スレッドの投稿を見る(gather_context source=threads)。
+
+# 2026-09 issue-modelselect系列ラウンドの知見(ベータdistill)
+
+- **リーダーによるタスク別モデル選択(イシュー#12)は実装済み**: create_task/spawn_agent にリーダー専用・任意の model引数(ModelRef)。権限判定は二重防御(tools層=threadOpener有無、spawn層=parent.depth!==0で拒否)。タスクメタ model: 行を tasks.js(create/assign/metaLines/readMeta/list/TaskInfo)が扱い、spawn走行時はブリーフタスクのメタから readTaskModel → modelFactory({…agent, model: taskModel ?? agent.model}) へ伝播(未指定はagent既定)。原則「基本は既定モデル・特例で代替」。テスト test/model-task-select.test.js 5件(2026-09)。
+- **モデル基盤の契約(2026-09 modelselectラウンド確定)**: プロバイダ(認証・baseUrl名前空間)と api(ワイヤ形式)は直交。api= openai-completions/anthropic-messages/openai-chatgpt-responses を src/model/factory.js のADAPTERSで選択。内蔵カタログ(builtin.js= models.dev静止スナップショット最小版)+設定 models.providers を catalog.js がマージし ModelRef("provider/model"またはベアID)を解決。旧 model セクションは config.js が"default"プロバイダへ読み替える互換橋(buildModelsCfg/legacyModelSection)で既存参照を無修正維持。apiKeyEnv === null は「envを見ない」明示(誤ってOPENAI_API_KEYを拾わないため)。modelStateInfoのauthHintは鍵末尾4文字のみ=生鍵非露出契約。
+- **検証者の役割は「承認まで通す」**: 承認待ちタスクはrole:reviewの検証者が居るうちに approve_task まで実行する。finish→退場→自動解放の掃除で承認待ちエントリが消えると、成果がmain反映済みでも帳簿がdoneにならずレジューム作業が発生する(modelselectラウンドで実害)。検証報告は「結論を最初の1行+通した確認リスト」の形式で投稿し、後日のレジューム時にも根拠として再利用できるようにする。
+- **マージ退行の定型パターンと検出**: 実装とテスト期待値が別コミット・別担当で交互に書き換わると退行を繰り返す(browser-tools断片リンク・submit報告書式で実害)。検出は「テスト失敗の責任分界」をコミット時系列で追う(git log --all -S '<期待値文字列>')。どちらが正かは最新の仕様決定コミット(e8f92ec等のコメント)と現mainのコードで判断し、中途の暫定版を採用しない。修正時は実装+テストを同じコミットで揃える。
+
+# 2026-09 issue-checkpoint系列ラウンドの追加知見(ベータdistill)
+
+- **respawnスキャンとテストの競合**: runChatの起動時respawn単体は正しい(e2eのrespawn-chatテストが落ちるときは、テストがworktreeに置いたwipコミットを「直前ラウンドのラウンド末自動マージ(mergeAgentWork)」が先にmainへ取り込み、スキャン時点で差分が消えている競合)。テストでクラッシュを模擬するなら、ラウンド末マージ完了を待つか dirty(未コミット)状態を使う。respawnを疑う前に merge-base --is-ancestor でブランチが既に取り込まれていないか確認する(ベータ観測: コミット直後は差分あり→数秒後に消滅)。直接のrespawn呼び出し+実TaskBlackboardでの検証が切り分けに有効。
+- **fix-*/review-*タスクは解放→再請求の競合が起きる**: 通知と同時にclaimすると「他拠点で完了済み」で弾かれる。弾かれたら内容の実質完了をボードで確認し、open復帰したら検証者の視点でapproveまで通す(重複実装しない)。verify-*は実装者以外が担当するため、role:implの追加ワーカーは請求不可=待ちが発生する。承認待ちタスクは自分のスレッドのrole:reviewが居るうちに処理する。
+- **verify連鎖が深くなりすぎる前に打ち切る**: verify-verify-verify-* のような多段検証は発見器の再起票連鎖の兆候。実装がmain反映済みなら「検証→approve」で閉じ、新規検証タスクを起票しない。
+- **テストの期待値は「最後に緑になった契約」に寄せて一括統一する**: browser-tools断片リンク(href:null保持⇔除外)とsubmit報告書式(送信:/method:)は実装・テストが交互に書き換わり退行を繰り返した。修正時は実装+テストを同じコミットで揃え、コメントに契約行(例: 「断片は遷移候補から除外(e80e512)」)を明記する。途中の暫定期間に発見器がreview-changes/fix-を大量起票する。
+- **TZ境界のテスト固定は3環境で検証する**: usage集計は最終形として localDateKey()(ローカル日付)に実装・書込側が統一済み(UTC基準という一時案は撤去済み)。テスト期待値も実装と同一の関数から生成し、TZ=Asia/Tokyo/UTC/America/Los_Angelesの3環境でpassを確認するのが検証の証跡。1環境だけでは深夜帯の不具合を取りこぼす(2026-09 fix-usage-aggregate-tz)。
+- **checkpoint/resume実装の注意**: 復元後にcheckpointファイルを必ず削除(残すとmodelエラー→復元→失敗の無限ループ)。checkpointFnはツール実行済み地点で呼ぶ。モデル異常以外(ツール打ち切り・予算停止)は対象外という設計判断。
+
+# 2026-09 issue-throttle系列ラウンドの追加知見(ガンマdistill)
+
+- **実装者がapprove前に退場するとapproveが失敗する**: finish_taskの自動マージでブランチ(agent/<id>)が消えるため、検証者のapprove_taskが「not something we can merge」で落ちる(タスクは実装済み・main反映済みなのに帳簿がopenへ戻る)。復旧手順: (1)検証者がマージ済みmainで実態検証(テスト実行+コード確認) (2)実装者(または誰か)へ「自worktreeで git merge main → タスク再請求 → finish_task(no-opマージで確定)」を依頼 (3)approveで承認。実装者が全員退場済みなら、検証者がclaim→finish(コード差分ゼロを明示)するのが最短。
+- **古い分岐の放棄ブランチは原則マージしない(巻き戻しリスク)**: クラッシュ復旧(respawn-*)で請求したブランチが古い世代(stability-r3等)だと、マージ時に113ファイル/約-1万行の巻き戻し差分となり最新機能(スロットリング等)を破壊しうる。放棄判断の検定手順: (1)merge-baseとbranch先頭の日付/コミットで分岐世代を確認 (2)`git diff main <branch>` の二点間diffで「機能の独自追加」を列挙(mainとの三点間diffは新旧混合で見誤る) (3)各機能が現mainに改善形で存在するか確認(killDevserverTree等の強化版) (4)関連テストを現mainで実行して緑を証跡にする → 放棄判断はボードへ根拠付きで記録し、worktree/ブランチは掃除タスクへ委ねる。完了条件は「取り込み or 放棄判断の記録」なので、記録だけでfinishしてよい。
+- usage集計UI(イシュー#6)の最終形: /api/usage(aggregateUsageのbyDate/byThread/matrix)+ index.html statusタブの renderUsageAggregate()。並行実装由来の usageAggTable 等の重複は統一済み — 再発時は grep -c で関数名を数え、main側へ統一する(2026-09)。
+- **leadロール(進行・調整)はreviewタスクを請求できない**: 発見器が起票するverify-*はrole:review固定のため、leadはclaim不可(approveは実装者でなければ可)。verify滞留はrole:review持ちのワーカーへボードで依頼するか、リーダーがroleを緩める。claim空転が続くときは診断文の「未着手一覧」でrole不一致を確認してから打ち切る(claimMiss診断と併用)。

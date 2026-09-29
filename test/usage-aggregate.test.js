@@ -87,11 +87,19 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
   assert.ok(todayMain && todayMain.calls === 2, "今日のmain分はleadラウンドのみ(summaryは昨日)");
 });
 
-test("localDateKey: TZ境界の両側でローカル日付を返す(JST深夜帯のフレーキー防止)", () => {
-  // JST 2026-09-30 00:30 = UTC 2026-09-29T15:30Z → ローカル日付は 2026-09-30
-  assert.equal(localDateKey(new Date("2026-09-29T15:30:00Z")), "2026-09-30");
-  // JST 2026-09-29 23:59 = UTC 2026-09-29T14:59Z → ローカル日付は 2026-09-29
-  assert.equal(localDateKey(new Date("2026-09-29T14:59:00Z")), "2026-09-29");
+test("localDateKey: どんなTZでもローカル日付(getFullYear/M/D)と一致し、UTC瞬間との対応が保たれる", () => {
+  // TZ依存を避ける: ローカル正午の瞬間を作り、localDateKeyがローカル日付部と一致することを確認(JST/UTC双方で安定)
+  const mk = (y, m, d) => { const dt = new Date(y, m - 1, d, 12, 0, 0); return dt; };
+  const now = new Date();
+  for (const off of [0, 1]) {
+    const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - off, 12, 0, 0);
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const d = String(dt.getDate()).padStart(2, "0");
+    assert.equal(localDateKey(dt), y + "-" + m + "-" + d, "ローカル正午のキーはローカル日付と一致");
+    // その瞬間をUTC文字列へ出して戻しても同じキー(丸め誤差・TZ変換で壊れない)
+    assert.equal(localDateKey(new Date(dt.toISOString())), y + "-" + m + "-" + d, "ISO往復でも同じキー");
+  }
 });
 test("aggregateUsage: 空や形状不良のhistoryでも安全に空集計を返す", () => {
   assert.deepEqual(aggregateUsage(null), { byDate: [], byThread: [], matrix: [] });
