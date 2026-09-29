@@ -278,6 +278,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (r) r.state = p.verdict === "approve" ? "approved" : "denied";
     },
     "scenario.started": (p) => { live.scenario = { name: p.name, phase: "running" }; },
+    // runner.jsは{byAgent, totals}をemitする(旧契約のp.usageも後方互換で受ける)
     "usage.summary": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), totals: p.totals ?? p.usage ?? null }),
     "usage.round": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), agent: p.agent, thread: p.thread ?? '__main__', endedBy: p.endedBy ?? 'ok', totals: p.totals ?? null }),
     "scenario.finished": () => { if (live.scenario) live.scenario.phase = "done"; },
@@ -285,14 +286,15 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   for (const [type, fn] of Object.entries(record)) bus.on(type, fn);
 
   // タスクの直接操作(チャットを介さずblackboardのファイルを触る。トークン消費ゼロ)
-  function handleTaskAction({ action, id, agent, role, body, project, path, acceptance }) {
+  function handleTaskAction({ action, id, agent, role, body, project, path, acceptance, depends_on }) {
     if (action === "create") {
       const taskBody = String(body ?? "").trim();
       if (!taskBody) return { ok: false, error: "bodyが空です" };
       let taskId = String(id ?? "").trim();
       if (!taskId) taskId = `task-${Date.now().toString(36)}`;
       if (!/^[a-z0-9][a-z0-9-]*$/.test(taskId)) return { ok: false, error: "task_idは英小文字数字とハイフン" };
-      if (!tasks.create({ id: taskId, role: role ? String(role) : null, project: String(project ?? "").trim(), body: taskBody, acceptance: acceptance ? String(acceptance) : "" })) return { ok: false, error: `task_id ${taskId} は既に存在します` };
+      const dependsOn = Array.isArray(depends_on) ? depends_on.map((s) => String(s ?? "").trim()).filter(Boolean) : [];
+      if (!tasks.create({ id: taskId, role: role ? String(role) : null, project: String(project ?? "").trim(), body: taskBody, acceptance: acceptance ? String(acceptance) : "", dependsOn })) return { ok: false, error: `task_id ${taskId} は既に存在します` };
       return { ok: true, id: taskId };
     }
     if (action === "release") {
@@ -1066,7 +1068,7 @@ async function tick(){
       rows(d.tasks.open,(t)=>"<tr><td class='dim'>未着手</td><td class='mono'>"+esc(t.id)+"</td><td></td><td class='dim'>"+esc(t.summary)+"</td></tr>")+"</table>"+
       "<h2>エージェント</h2><table><tr><th>名前</th><th>状態</th><th>turn</th><th>直近ツール</th><th>消費</th><th>スレッド</th></tr>"+
       (rows(d.agents,(a)=>{const st={idle:["待機","#a3a3a8"],working:["作業中","#fbbf24"],done:["完了","#86efac"],error:["エラー","#fca5a5"],"budget-stop":["停止","#fca5a5"]}[a.status]||[esc(a.status),"#a3a3a8"];return "<tr><td style='color:hsl("+hue(a.id)+" 45% 72%)'>"+esc(a.displayName)+"</td><td style='color:"+st[1]+"'>"+st[0]+"</td><td class='mono'>"+a.turn+"</td><td class='mono'>"+esc(a.lastTool)+"</td><td class='mono'>"+a.tokens.toLocaleString()+"tok</td><td class='mono'>"+esc(a.thread)+"</td></tr>";})||"<tr><td colspan='6' class='dim'>稼働中のエージェントはいません</td></tr>")+"</table>"+
-      "<h2>通知(承認待ち/マージ/長時間タスク)</h2><div class='board'>"+(rows(d.pendingRequests??[],(r)=>"<div class='warn'><b>🔐 承認待ち #"+esc(r.id)+"</b> <span class='mono'>"+esc(r.command)+"</span></div>")||"")+(rows(d.notifications??[],(n)=>"<div>"+(n.kind==="permission.request"?"<b class='warn'>🔐 "+esc(n.title)+"</b>":(n.kind==="merge.completed"?"<b class='ok'>🔀 "+esc(n.title)+"</b>":"<b>⏱ "+esc(n.title)+"</b>"))+" <span>"+esc(n.body)+"</span> <span class='dim mono'>"+esc(String(n.at).replace("T"," ").slice(0,19))+"</span></div>"))||"<div class='dim'>まだありません</div>")+"</div>"+
+      "<h2>通知(承認待ち/マージ/長時間タスク)</h2><div class='board'>"+(rows(d.pendingRequests??[],(r)=>"<div class='warn'><b>🔐 承認待ち #"+esc(r.id)+"</b> <span class='mono'>"+esc(r.command)+"</span></div>")||"")+((rows(d.notifications??[],(n)=>"<div>"+(n.kind==="permission.request"?"<b class='warn'>🔐 "+esc(n.title)+"</b>":(n.kind==="merge.completed"?"<b class='ok'>🔀 "+esc(n.title)+"</b>":"<b>⏱ "+esc(n.title)+"</b>"))+" <span>"+esc(n.body)+"</span> <span class='dim mono'>"+esc(String(n.at).replace("T"," ").slice(0,19))+"</span></div>"))||"<div class='dim'>まだありません</div>")+"</div>"+
       "<h2>直近のマージ</h2><div class='board'>"+(rows(d.merges,(m)=>"<div><b class='mono'>"+esc(m.taskId)+"</b> <span class='accent'>"+esc(m.summary)+"</span> <span class='dim'>by "+esc(m.agent)+"</span></div>")||"<div class='dim'>まだありません</div>")+"</div>"+
       "<h2>ボードの新着(全スレッド・直近30件)</h2><div class='board'>"+rows(d.recent.slice().reverse(),(p)=>"<div><b style='color:hsl("+hue(p.from)+" 45% 72%)'>"+esc(p.from)+"</b> <span class='mono dim'>@"+esc(p.thread)+"</span> "+esc(p.text)+"</div>")+"</div>";
   }catch(e){ document.getElementById("body").textContent="取得に失敗: "+e.message; }

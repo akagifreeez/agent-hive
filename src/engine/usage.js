@@ -90,11 +90,7 @@ export function aggregateUsage(history, opts = {}) {
 // レコードのスレッド名を確定する。threadフィールドが無い旧データはagent名からの
 // 推測でしのぐ(usage.roundは<thread>-<worker>形式のidで走る: issue-x-alpha 等)。
 // 推測できない(接尾辞が無い/lead等)場合は__main__扱い。
-// レコードのスレッド名を確定する。threadフィールドが無い旧データはagent名からの
-// 推測でしのぐ(usage.roundは<thread>-<worker>形式のidで走る: issue-x-alpha 等)。
-// 推測できない(接尾辞が無い/lead等)場合は__main__扱い。
 const WORKER_SUFFIX_SRC = "-(?:alpha|beta|gamma|delta|impl-\\d+|review|worker-?\\d+)$";
-/** @type {RegExp} */
 /** @type {RegExp} */
 const WORKER_SUFFIX_RE = new RegExp(WORKER_SUFFIX_SRC);
 

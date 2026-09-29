@@ -1200,7 +1200,115 @@ function renderAuditTab(body) {
   load();
 }
 
+// 集計テーブル(usage-aggregate)を組み立てる。cols: 見出し配列、rows: データ配列、cells: 行→セル配列。
+// 合計行(calls/cost)を付し、先頭列以外は右寄せ。
+function usageAggTable(cols, rows, cells) {
+  const tbl = document.createElement("table");
+  tbl.className = "usage-tbl";
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  for (const c of cols) { const th = document.createElement("th"); th.textContent = c; trh.appendChild(th); }
+  thead.appendChild(trh);
+  tbl.appendChild(thead);
+  const tb = document.createElement("tbody");
+  let totCalls = 0, totUsd = 0;
+  for (const r of rows) {
+    const vals = cells(r);
+    totCalls += Number(r.calls ?? 0);
+    totUsd += Number(r.costUsd ?? 0);
+    const tr = document.createElement("tr");
+    vals.forEach((v, i) => {
+      const td = document.createElement("td");
+      if (i > 0) td.style.textAlign = "right";
+      td.textContent = String(v);
+      tr.appendChild(td);
+    });
+    tb.appendChild(tr);
+  }
+  const tr = document.createElement("tr");
+  tr.className = "total";
+  const td1 = document.createElement("td");
+  td1.textContent = "合計";
+  const td2 = document.createElement("td");
+  td2.style.textAlign = "right";
+  td2.textContent = String(totCalls);
+  const td3 = document.createElement("td");
+  td3.style.textAlign = "right";
+  td3.textContent = "$" + totUsd.toFixed(4);
+  tr.append(td1, td2, td3);
+  tb.appendChild(tr);
+  tbl.appendChild(tb);
+  return tbl;
+}
+
 function renderStatusTab(body) {
+  // usage集計ビュー(日別/スレッド別/日別×スレッド、イシュー#6)。/api/usage の aggregate を描画
+  const aggBox = document.createElement("div");
+  aggBox.id = "usage-aggregate";
+  body.appendChild(aggBox);
+  const loadAgg = async () => {
+    aggBox.innerHTML = "";
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = "集計を読み込み中…";
+    aggBox.appendChild(hint);
+    let agg = null;
+    try {
+      const r = await (await hfetch("/api/usage")).json();
+      agg = r.aggregate ?? null;
+    } catch { /* 読み込み失敗時は後段の表示へ */ }
+    aggBox.innerHTML = "";
+    if (!agg) {
+      const h = document.createElement("div");
+      h.className = "hint";
+      h.textContent = "集計(usage)はまだありません。";
+      aggBox.appendChild(h);
+      return;
+    }
+    // 日別
+    const hDate = document.createElement("div");
+    hDate.className = "sec";
+    hDate.textContent = "消費(日別・直近14日)";
+    aggBox.appendChild(hDate);
+    if (!agg.byDate?.length) {
+      const h = document.createElement("div");
+      h.className = "hint";
+      h.textContent = "usageはまだありません。";
+      aggBox.appendChild(h);
+    } else {
+      aggBox.appendChild(usageAggTable(["日付", "calls", "prompt", "completion", "reasoning", "cost"], agg.byDate,
+        (r) => [r.date, r.calls, r.promptTokens, r.completionTokens, r.reasoningTokens, "$" + (r.costUsd ?? 0).toFixed(4)]));
+    }
+    // スレッド別
+    const hThread = document.createElement("div");
+    hThread.className = "sec";
+    hThread.textContent = "消費(スレッド別・直近14日)";
+    aggBox.appendChild(hThread);
+    if (!agg.byThread?.length) {
+      const h = document.createElement("div");
+      h.className = "hint";
+      h.textContent = "usageはまだありません。";
+      aggBox.appendChild(h);
+    } else {
+      aggBox.appendChild(usageAggTable(["スレッド", "calls", "prompt", "completion", "reasoning", "cost"], agg.byThread,
+        (r) => [r.thread === "__main__" ? "メイン" : r.thread, r.calls, r.promptTokens, r.completionTokens, r.reasoningTokens, "$" + (r.costUsd ?? 0).toFixed(4)]));
+    }
+    // 日別×スレッド
+    const hMatrix = document.createElement("div");
+    hMatrix.className = "sec";
+    hMatrix.textContent = "消費(日別×スレッド)";
+    aggBox.appendChild(hMatrix);
+    if (!agg.matrix?.length) {
+      const h = document.createElement("div");
+      h.className = "hint";
+      h.textContent = "usageはまだありません。";
+      aggBox.appendChild(h);
+    } else {
+      aggBox.appendChild(usageAggTable(["日付", "スレッド", "calls", "cost"], agg.matrix,
+        (r) => [r.date, r.thread === "__main__" ? "メイン" : r.thread, r.calls, "$" + (r.costUsd ?? 0).toFixed(4)]));
+    }
+  };
+  loadAgg();
   // usage(エージェント別消費)
   const h1 = document.createElement("div");
   h1.className = "sec";
@@ -1229,11 +1337,12 @@ function renderStatusTab(body) {
     }
     const tr = document.createElement("tr");
     tr.className = "total";
-    tr.innerHTML = `<td>合計</td><td></td><td></td><td>${totTok.toLocaleString()}</td><td>$${totUsd.toFixed(4)}</td>`;
+    tr.innerHTML = `<td>合計</td><td></td><td></td><td>${totTok.toLocaleString()}</td><td>${totUsd.toFixed(4)}</td>`;
     tb.appendChild(tr);
     tbl.appendChild(tb);
     body.appendChild(tbl);
   }
+  // 日別・スレッド別の集計ビュー(GitHubイシュー#6)は先頭のusage集計ブロックで描画済み
   // セッション保存/読込
   const h2 = document.createElement("div");
   h2.className = "sec";
@@ -2294,6 +2403,69 @@ $("saytext").addEventListener("paste", (e) => {
 });
 for (const b of document.querySelectorAll("#ctx-tabs .ct")) {
   b.onclick = () => { ctxTab = b.dataset.tab; renderCtx(lastState); };
+
+// 日別・スレッド別の消費集計ビュー(GitHubイシュー#6)を描画する。
+// データ源は /api/usage の aggregate(aggregateUsage: byDate/byThread/matrix)。
+async function renderUsageAggregate(box) {
+  const byDate = document.createElement("div");
+  const byThread = document.createElement("div");
+  box.append(byDate, byThread);
+  let agg = null;
+  try {
+    const r = await (await hfetch("/api/usage")).json();
+    agg = r.aggregate ?? null;
+  } catch {}
+  if (!agg || !(agg.byDate ?? []).length) {
+    const h = document.createElement("div");
+    h.className = "hint";
+    h.textContent = "集計できる消費記録はまだありません。";
+    box.appendChild(h);
+    return;
+  }
+  const mkTable = (head, rows) => {
+    const tbl = document.createElement("table");
+    tbl.className = "usage-tbl";
+    tbl.innerHTML = "<thead><tr>" + head.map((h) => "<th>" + escapeHtml(h) + "</th>").join("") + "</tr></thead>";
+    const tb = document.createElement("tbody");
+    for (const r of rows) tb.appendChild(r);
+    tbl.appendChild(tb);
+    return tbl;
+  };
+  const td = (t, cls) => {
+    const c = document.createElement("td");
+    if (cls) c.className = cls;
+    c.textContent = t;
+    return c;
+  };
+  const money = (n) => "$" + Number(n ?? 0).toFixed(4);
+  // 日別(新しい順)
+  const dh = document.createElement("div");
+  dh.className = "sec";
+  dh.textContent = "日別の消費(直近14日)";
+  const dateRows = agg.byDate.map((r) => {
+    const tr = document.createElement("tr");
+    tr.append(td(r.date), td((r.calls ?? 0).toLocaleString()), td((r.promptTokens ?? 0).toLocaleString()),
+      td((r.completionTokens ?? 0).toLocaleString()), td((r.reasoningTokens ?? 0).toLocaleString()), td(money(r.costUsd)));
+    return tr;
+  });
+  byDate.append(dh, mkTable(["日付", "calls", "prompt", "completion", "reasoning", "cost"], dateRows));
+  // スレッド別(消費の大きい順)+ 日別xスレッド
+  const sh = document.createElement("div");
+  sh.className = "sec";
+  sh.textContent = "スレッド別の消費";
+  const threadRows = agg.byThread.map((r) => {
+    const tr = document.createElement("tr");
+    tr.append(td(r.thread), td((r.calls ?? 0).toLocaleString()), td((r.promptTokens ?? 0).toLocaleString()),
+      td((r.completionTokens ?? 0).toLocaleString()), td((r.reasoningTokens ?? 0).toLocaleString()), td(money(r.costUsd)));
+    return tr;
+  });
+  byThread.append(sh, mkTable(["スレッド", "calls", "prompt", "completion", "reasoning", "cost"], threadRows));
+  const total = agg.byThread.reduce((a, r) => a + (r.costUsd ?? 0), 0);
+  const sum = document.createElement("div");
+  sum.className = "hint";
+  sum.textContent = "集計期間内の合計: " + money(total) + " / " + agg.byThread.length + "スレッド";
+  byThread.appendChild(sum);
+}
 }
 refresh();
 setInterval(refresh, 5000);
