@@ -125,6 +125,7 @@ test("updateReadme: 未知セクション・生成不能は現状維持(保護),
       "<!-- auto:repo-layout end -->",
     ].join("\n");
     writeFileSync(readme, initial);
+    mkdirSync(join(root, "docs"), { recursive: true }); // repo-layoutの期待行(docs/)用
     const r = updateReadme(readme, { root, write: (p, c) => writeFileSync(p, c) });
     assert.ok(r.after.includes("<!-- auto:unknown-section start -->\n中身"), "未知セクションはそのまま保護");
     assert.ok(r.after.includes("bin/ CLI"), "実在ディレクトリからrepo-layoutを生成");
