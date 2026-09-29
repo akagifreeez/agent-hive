@@ -23,11 +23,11 @@ function rmTree(p) {
   try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ }
 }
 
-function makeTools(ws, agent) {
+function makeTools(ws, agent, leader = false) {
   const bus = new Bus();
   const board = new Board(bus);
   const tasks = new TaskBlackboard(ws, bus);
-  return { tools: createTools({ agent, workspace: ws, board, tasks, bus }), tasks };
+  return { tools: createTools({ agent, workspace: ws, board, tasks, bus, threadOpener: leader ? () => ({ ok: true }) : null }), tasks };
 }
 
 test("非リーダー(depth>0)のcreate_task model指定は拒否される", async () => {
@@ -36,7 +36,7 @@ test("非リーダー(depth>0)のcreate_task model指定は拒否される", asy
   const { tools } = makeTools(ws, worker);
   const r = await tools.execute("create_task", { task_id: "m1", body: "x", model: "prov/alt-model" });
   assert.equal(r.ok, false, "非リーダーのmodel指定は拒否");
-  assert.match(r.text, /リーダーだけ/);
+  assert.match(r.text, /リーダー専用/);
   assert.equal(existsSync(join(ws, "tasks", "open", "m1.md")), false, "タスクは起票されない");
   rmTree(ws);
 });
@@ -44,7 +44,7 @@ test("非リーダー(depth>0)のcreate_task model指定は拒否される", asy
 test("リーダー(depth===0)のmodel指定はメタに保存され readMeta/list で読める", async () => {
   const ws = mktmp("hive-msel-");
   const lead = { id: "lead", displayName: "リーダー", role: "lead", depth: 0, personaText: "# L" };
-  const { tools, tasks } = makeTools(ws, lead);
+  const { tools, tasks } = makeTools(ws, lead, true);
   const r = await tools.execute("create_task", { task_id: "m2", body: "x", model: "prov/alt-model" });
   assert.equal(r.ok, true);
   assert.match(r.text, /model: prov\/alt-model/);
@@ -58,7 +58,7 @@ test("リーダー(depth===0)のmodel指定はメタに保存され readMeta/lis
 test("model未指定タスクのmeta.modelはnull(既定モデルのまま)", async () => {
   const ws = mktmp("hive-msel-");
   const lead = { id: "lead", displayName: "リーダー", role: "lead", depth: 0, personaText: "# L" };
-  const { tools, tasks } = makeTools(ws, lead);
+  const { tools, tasks } = makeTools(ws, lead, true);
   await tools.execute("create_task", { task_id: "m3", body: "x" });
   const meta = readMeta(join(ws, "tasks", "open", "m3.md"));
   assert.equal(meta.model, null);

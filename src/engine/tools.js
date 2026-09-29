@@ -458,7 +458,6 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           displayName: args.display_name ? String(args.display_name) : undefined,
           role: args.role ? String(args.role) : undefined,
           project: args.project ? String(args.project) : "",
-          model: args.model != null && String(args.model).trim() && agent.depth === 0 ? String(args.model).trim() : null,
           brief: String(args.brief ?? ""),
           model: String(args.model ?? "").trim() || null,
         });
