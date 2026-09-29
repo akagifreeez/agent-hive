@@ -142,11 +142,6 @@ export function extractElements(page, filter = {}) {
   let index = 0;
   for (const type of want) {
     if (type === "link") {
-<<<<<<< HEAD
-      // page.links(parsePage済み・断片/javascript除外済み)をそのまま列挙する
-      for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href });
-        } else if (type === "form") {
-=======
 
       // リンクはpage.linksを使う(parsePageと同じ一覧。断片#/javascript:は除外済み・テスト仕様 e80e512)
       for (const l of page.links ?? []) {
@@ -154,7 +149,6 @@ export function extractElements(page, filter = {}) {
         out.push({ index: ++index, type, text: l.text, href: l.href });
       }
     } else if (type === "form") {
->>>>>>> main
       for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {
       const hRe = /<h([1-6])(\s[^>]*)?>([\s\S]*?)<\/h\1\s*>/gi;
