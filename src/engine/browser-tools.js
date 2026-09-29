@@ -142,14 +142,9 @@ export function extractElements(page, filter = {}) {
   let index = 0;
   for (const type of want) {
     if (type === "link") {
-<<<<<<< HEAD
-      for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href }); // anchors(断片)はテスト仕様により除外
-    } else if (type === "form") {
-=======
       // page.links(parsePage済み・断片/javascript除外済み)をそのまま列挙する
       for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href });
-        } else if (type === "form") {
->>>>>>> main
+    } else if (type === "form") {
       for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {
       const hRe = /<h([1-6])(\s[^>]*)?>([\s\S]*?)<\/h\1\s*>/gi;
