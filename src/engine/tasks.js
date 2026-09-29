@@ -125,8 +125,9 @@ export class TaskBlackboard {
   // 自己依存や壊れたグラフ(循環)で永遠に着手できない状態を作らないため、
   // 依存元が自分自身 / 未完了依存が全て自分自身のときは依存を無視してtrueを返す。
   canClaim(file) {
+    const selfId = file.replace(/\.md$/, "");
     const meta = readMeta(join(this.open, file));
-    const deps = (meta.dependsOn ?? []).filter((d) => d !== file);
+    const deps = (meta.dependsOn ?? []).filter((d) => d !== selfId);
     if (!deps.length) return true;
     return !deps.some((d) => this.isUnresolved(d));
   }
