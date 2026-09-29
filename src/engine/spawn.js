@@ -4,6 +4,7 @@
 import { join, resolve } from "node:path";
 import { createWorktree } from "./worktree.js";
 import { createTools } from "./tools.js";
+import { readMeta } from "./tasks.js";
 import { runAgentLoop, buildSystemPrompt } from "./loop.js";
 import { runCommand } from "./exec.js";
 
@@ -54,7 +55,7 @@ export class SpawnManager {
 
   // ツールから呼ばれる。呼び出し元は待たせないので、ループは非同期で走らせる。
   // boardは呼び出し元のスレッドのボード(v6。省略時は構築時のboard=メイン)。
-  async spawn({ parent, board = null, displayName, role, brief, project = "", expendable = false }) {
+  async spawn({ parent, board = null, displayName, role, brief, project = "", model = null, expendable = false }) {
     const depth = (parent.depth ?? 0) + 1;
     if (depth > this.hierarchy.maxDepth) {
       return { error: `深さの上限(${this.hierarchy.maxDepth})に達しています。あなたの配下には作れません。` };
@@ -87,10 +88,10 @@ export class SpawnManager {
       scenarioName: "chat",
       expendable: Boolean(expendable), // trueなら請求ミス1回で早期退場(自動増員ワーカー用)
     };
-    this.live.set(id, { displayName: dn, depth, parent: parent.id, status: "working" });
+    this.live.set(id, { displayName: dn, depth, parent: parent.id, status: "working", model: model ?? null });
     // ブリーフ=このエージェントの請求済みタスク。finish_taskで完了→main自動マージまで繋がる
     const projNote = project ? `文脈(project): ${project} — 追加のタスクを請求するときは project: ${project} で絞ること。\n\n` : "";
-    this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, project, body: `${projNote}スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
+    this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, project, model: model ?? null, body: `${projNote}スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
     this.bus.emit("agent.spawned", { agent: { id, displayName: dn, depth, parent: parent.id, role: agent.role, thread: project || null } });
     b.post("system", `[スポーン] ${parent.displayName} が作業エージェント ${dn}(${id}) を作成しました。`);
 
@@ -101,7 +102,10 @@ export class SpawnManager {
 
   async runAgent(agent, worktreePath, brief, board = null) {
     const b = board ?? this.board;
-    const model = this.modelFactory(agent);
+    // タスク別モデル選択(イシュー#12): 自分のブリーフタスク(spawn-*)にmodel指定があればそのrefを渡す。未指定なら従来どおり
+    const briefTask = this.tasks.claimedBy(agent.id).find((t) => t.id === `spawn-${agent.id}`);
+    const taskModel = briefTask ? (readMeta(join(this.tasks.claimed, `${agent.id}--spawn-${agent.id}.md`)).model ?? null) : null;
+    const model = this.modelFactory({ ...agent, model: taskModel ?? agent.model });
     const tools = createTools({
       agent,
       workspace: worktreePath,
