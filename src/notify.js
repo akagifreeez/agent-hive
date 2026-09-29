@@ -15,7 +15,7 @@ const ANSI = { yellow: "\x1b[33m", bold: "\x1b[1m", reset: "\x1b[0m" };
 /** 通知1件をコンソール( stderr )へ目立つ1行で出す。NO_COLORで色なし。
  * @param {NotifyItem} n */
 export function printNotifyLine(n) {
-  const c = process.env.NO_COLOR ? "" : ANSI;
+  const c = /** @type {{yellow: string, bold: string, reset: string}} */ (process.env.NO_COLOR ? "" : ANSI);
   const line = `🔔 [通知] ${n.title}: ${n.body}`;
   stderr.write(`${c.bold}${c.yellow}${line}${c.reset}\n`);
 }
