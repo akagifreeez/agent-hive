@@ -1246,6 +1246,66 @@ function persistUsage(workspace, entry) {
   } catch {}
 }
 
+// /api/usage-trace: state/usage-trace/usage-trace.jsonl(loop.jsがchat()ごとに追記)を
+// 解析し、ワーカー別・ターン別のトークン消費推移を返す(GitHubイシュー#15)。
+// traceFileはテスト差し替え用(省略時は通常の場所)。壊れた行は監査APIと同じく無視する。
+/**
+ * @param {string} workspace
+ * @param {{agent?: string|null, fromTurn?: number|null, toTurn?: number|null, file?: string|null}} [opts]
+ * @returns {{series: Array<{agent: string, points: Array<{ts: string, turn: number, prompt: number, completion: number, reasoning: number, totalTokens: number}>, totalTokens: number}>, total: {turns: number, totalTokens: number, byAgent: Record<string, number>}, lastTs: string|null}}
+ */
+export function analyzeUsageTrace(workspace, opts = {}) {
+  const file = opts.file ?? join(workspace, "state", "usage-trace", "usage-trace.jsonl");
+  const agentFilter = opts.agent ? String(opts.agent) : null;
+  const fromTurn = Number.isFinite(Number(opts.fromTurn)) && opts.fromTurn !== null && opts.fromTurn !== "" ? Number(opts.fromTurn) : null;
+  const toTurn = Number.isFinite(Number(opts.toTurn)) && opts.toTurn !== null && opts.toTurn !== "" ? Number(opts.toTurn) : null;
+  const rows = [];
+  try {
+    const text = readFileSync(file, "utf8");
+    for (const l of text.split("\n")) {
+      const s = l.trim();
+      if (!s) continue;
+      let r = null;
+      try { r = JSON.parse(s); } catch { /* 壊れた行は無視 */ }
+      if (!r || typeof r !== "object") continue;
+      if (agentFilter && r.agent !== agentFilter) continue;
+      const turn = Number(r.turn);
+      if (!Number.isFinite(turn)) continue;
+      if (fromTurn != null && turn < fromTurn) continue;
+      if (toTurn != null && turn > toTurn) continue;
+      rows.push({
+        ts: String(r.ts ?? ""),
+        agent: String(r.agent ?? "?"),
+        turn,
+        prompt: Number(r.prompt) || 0,
+        completion: Number(r.completion) || 0,
+        reasoning: Number(r.reasoning) || 0,
+      });
+    }
+  } catch { /* ファイル未作成など。空応答で返す */ }
+  // ワーカー別に束ねる(pointsはターン順)。同ターンの複数行(リトライ等)はそのまま両方描く
+  const byAgent = new Map();
+  for (const r of rows) {
+    let s = byAgent.get(r.agent);
+    if (!s) { s = { agent: r.agent, points: [], totalTokens: 0 }; byAgent.set(r.agent, s); }
+    const totalTokens = r.prompt + r.completion + r.reasoning;
+    s.points.push({ ts: r.ts, turn: r.turn, prompt: r.prompt, completion: r.completion, reasoning: r.reasoning, totalTokens });
+    s.totalTokens += totalTokens;
+  }
+  const series = [...byAgent.values()];
+  for (const s of series) s.points.sort((a, b) => a.turn - b.turn || String(a.ts).localeCompare(String(b.ts)));
+  series.sort((a, b) => b.totalTokens - a.totalTokens); // 消費の大きい順
+  const byAgentTotal = {};
+  let turns = 0, totalTokens = 0, lastTs = null;
+  for (const r of rows) {
+    turns += 1;
+    totalTokens += r.prompt + r.completion + r.reasoning;
+    byAgentTotal[r.agent] = (byAgentTotal[r.agent] ?? 0) + r.prompt + r.completion + r.reasoning;
+    if (!lastTs || r.ts > lastTs) lastTs = r.ts;
+  }
+  return { series, total: { turns, totalTokens, byAgent: byAgentTotal }, lastTs };
+}
+
 // /api/audit: state/audit.jsonl(+1世代前 audit-1.jsonl)の末尾limit件を新着順で返す。
 // 台帳はtools.jsが書く真実で、ここは読み取り専用。壊れた行は無視する(簿記の失敗で止めない)
 function readAuditTail(workspace, limit) {
