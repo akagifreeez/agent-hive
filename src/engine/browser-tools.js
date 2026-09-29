@@ -142,6 +142,7 @@ export function extractElements(page, filter = {}) {
   let index = 0;
   for (const type of want) {
     if (type === "link") {
+
       // リンクはpage.linksを使う(parsePageと同じ一覧。断片#/javascript:は除外済み・テスト仕様 e80e512)
       for (const l of page.links ?? []) {
         if (index >= 100) break;
