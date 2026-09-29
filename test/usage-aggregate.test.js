@@ -44,8 +44,8 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
   const now = new Date();
   const d = (offsetDays, hour) => {
     const t = new Date(now);
-    t.setDate(t.getDate() - offsetDays);
-    t.setHours(hour, 0, 0, 0);
+    t.setUTCDate(t.getUTCDate() - offsetDays);
+    t.setUTCHours(hour, 0, 0, 0);
     return t.toISOString();
   };
   const history = [

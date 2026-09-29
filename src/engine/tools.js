@@ -7,6 +7,7 @@ import { runCommand, detectShell } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
 import { readMeta, detectTaskOverlap } from "./tasks.js";
 import { readSkill } from "./skills.js";
+import { browserFetch, browserExtract, browserSubmit } from "./browser.js";
 
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
@@ -154,6 +155,47 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           project: { type: "string", description: "文脈(プロジェクト)名で絞込(done/openのみ有効)" },
         },
         required: ["source"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "browser_fetch",
+      description: "内蔵ブラウザでURLを取得し、ページ構造(タイトル/見出し/リンク/フォーム/本文)を返す。絶対URL必須。レンダリング不要のHTTPレベル取得。",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string", description: "取得するURL(http://またはhttps://の絶対URL)" } },
+        required: ["url"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "browser_extract",
+      description: "ページ取得(またはHTML直接)→セレクタ抽出を1呼び出しで行う。selectorはタグ名・#id・.classに対応(未指定は全文)。",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "取得するURL(html指定時は省略可)" },
+          html: { type: "string", description: "解析対象のHTML(指定時はurl取得を省略)" },
+          base_url: { type: "string", description: "html指定時の基準URL" },
+          selector: { type: "string", description: "抽出する要素(タグ名/#id/.class、省略で全文)" },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "browser_submit",
+      description: "フォームを組立てて送信する(取得→入力→送信のHTTPレベル操作)。html+base_urlからフォーム抽出し、valuesで埋めてPOST/GET。selectorで送信対象要素を検証(誤送信防止)。レンダリング必須の実操作はMCP(Playwright等)で拡張。",
+      parameters: {
+        type: "object",
+        properties: {
+          html: { type: "string", description: "フォームを含むページHTML(browser_fetchのraw等)" },
+          base_url: { type: "string", description: "そのページのURL(相対action解決の基準・絶対URL必須)" },
+          values: { type: "object", description: "入力する値 {フィールド名: 値}。未指定フィールドは現値維持" },
+          selector: { type: "string", description: "送信前に存在を検証する要素(タグ名またはフィールド名)。一致が無ければ送らない" },
+          form_index: { type: "number", description: "複数フォーム時の対象(1始まり・省略で最初)" },
+          follow_redirects: { type: "boolean", description: "リダイレクト追従(既定true)" },
+        },
+        required: ["html", "base_url"],
         additionalProperties: false,
       },
     },
@@ -572,6 +614,35 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const r = await threadCloser({ project: projectName });
         if (r.error) return { ok: false, text: `スレッドを閉じられません: ${r.error}` };
         return { ok: true, text: `スレッド ${projectName} を閉じました。成果物とログは保持されています。` };
+      }
+      case "browser_fetch": {
+        const r = await browserFetch(String(args.url ?? ""));
+        if (!r.ok) return { ok: false, text: r.text };
+        const lines = [];
+        lines.push("[" + r.status + "] " + r.page.url);
+        lines.push("タイトル: " + (r.page.title || "(なし)"));
+        lines.push("");
+        lines.push("見出し: " + (r.page.headings.join(" / ") || "(なし)"));
+        lines.push("");
+        lines.push("リンク:");
+        for (const l of r.page.links.slice(0, 20)) lines.push("- " + l.text + " → " + l.href);
+        lines.push("");
+        lines.push("フォーム " + r.page.forms.length + "件:");
+        for (const f of r.page.forms) lines.push("- [" + f.index + "] " + f.method + " " + f.action + " (" + f.fields.length + "fields)");
+        lines.push("");
+        lines.push("=== 本文 ===");
+        lines.push(r.page.text);
+        return { ok: true, text: lines.join("\n").slice(0, 8000) };
+      }
+      case "browser_extract": {
+        const er = await browserExtract(args);
+        if (!er.ok) return { ok: false, text: er.text };
+        return { ok: true, text: ("[" + er.url + "]" + "\n" + "selector: " + (er.selector || "(全文)") + "\n" + er.text).slice(0, 8000) };
+      }
+      case "browser_submit": {
+        const values = args.values && typeof args.values === "object" ? args.values : {};
+        const sr = await browserSubmit({ html: args.html, base_url: args.base_url, values, selector: args.selector, form_index: args.form_index, follow_redirects: args.follow_redirects });
+        return { ok: sr.ok, text: sr.text.slice(0, 8000) };
       }
       case "web_fetch": {
         const url = String(args.url ?? "").trim();
