@@ -106,11 +106,11 @@ test("extractElements: 種別フィルタとジャンプ先(index)が返る", as
   assert.equal(headings[0].level, 1);
 
   const links = extractElements(page, { type: "link" });
-  assert.equal(links.length, 2); // 断片(#sec-1)はnormalizeUrlで除外
+  assert.equal(links.length, 3); // 断片(#sec-1)はhref:nullで保持(遷移候補の一覧性優先)
   assert.ok(links.every((l) => l.index >= 1));
 
   const all = extractElements(page, {});
-  assert.equal(all.length, 5); // リンク2+フォーム1+見出し2(断片リンクは除外)
+  assert.equal(all.length, 6); // リンク3(断片含むhref:null)+フォーム1+見出し2
 });
 
 test("extractText: セレクタ指定で部分テキスト抽出", async (t) => {
@@ -197,7 +197,7 @@ test("browserSubmit: POSTでフォーム送信でき、303はlocation追従し�
     values: { user: "alice", pass: "s3cret" },
   });
   assert.equal(r.ok, true);
-  assert.match(r.text, /^送信: POST/m); // 送信: POST <url>
+  assert.match(r.text, /^method: POST /m); // method: POST <url>(browser-net.jsの出力契約)
   assert.match(r.text, /user=alice/);
   assert.match(r.text, /alice/); // 応答ページの抽出にも反映されている
   server.close();
