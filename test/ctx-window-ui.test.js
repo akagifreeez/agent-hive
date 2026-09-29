@@ -51,7 +51,7 @@ test("loop.jsはusage-trace記録時にusage.traceイベントを発行する", 
 });
 
 test("server: usage.traceを受けると/api/stateのagent.ctxに使用/上限/残りが入る", async () => {
-  const { bus, getState, ws } = await setup();
+  const { bus, ui, getState, ws } = await setup();
   try {
     // 未登録エージェントでも usage.trace で出現する(表示が消えない)
     bus.emit("usage.trace", { agent: "worker-a", turn: 1, ctxChars: 3000 });
@@ -63,7 +63,7 @@ test("server: usage.traceを受けると/api/stateのagent.ctxに使用/上限/�
     assert.equal(ctx.usedTokens, 1000);
     assert.equal(ctx.ctxWindow, 200000);
     assert.equal(ctx.remainTokens, 199000);
-  } finally { rmTree(ws); }
+  } finally { ui.close(); rmTree(ws); }
 });
 
 test("server: 換算は切り上げ・ctxWindow未設定時は200Kフォールバック・ゼロ除算安全", async () => {
@@ -85,11 +85,11 @@ test("server: 換算は切り上げ・ctxWindow未設定時は200Kフォール�
     assert.equal(ctx.usedTokens, Math.ceil(7 / 3)); // 3
     assert.equal(ctx.ctxWindow, 200000);
     assert.equal(ctx.remainTokens, 200000 - 3);
-  } finally { rmTree(ws); }
+  } finally { ui.close(); rmTree(ws); }
 });
 
 test("server: 上限超過時は残り0・usage.trace更新で上書きされる(リアルタイム)", async () => {
-  const { bus, getState, ws } = await setup();
+  const { bus, ui, getState, ws } = await setup();
   try {
     bus.emit("usage.trace", { agent: "w3", turn: 1, ctxChars: 700000 });
     let st = await getState();
@@ -98,7 +98,7 @@ test("server: 上限超過時は残り0・usage.trace更新で上書きされる
     st = await getState();
     assert.equal(st.live.agents["w3"].ctx.usedTokens, 3000);
     assert.equal(st.live.agents["w3"].ctx.remainTokens, 197000);
-  } finally { rmTree(ws); }
+  } finally { ui.close(); rmTree(ws); }
 });
 
 test("UI: 詳細パネルにコンテキスト使用量(使用/上限/残り+バー)の描画がある", () => {
