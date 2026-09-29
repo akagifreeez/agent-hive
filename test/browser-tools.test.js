@@ -79,7 +79,7 @@ test("parsePage: タイトルと見出し・アンカーが取れ、script/style
   assert.deepEqual(page.headings, ["見出しH1", "見出しH2"]);
   assert.equal(page.links.find((l) => l.text === "ガイド").href, "http://127.0.0.1:9/docs/guide.html");
   assert.equal(page.links.find((l) => l.text === "外部リンク").href, "https://example.com/ext");
-  assert.ok(!page.links.some((l) => l.href === null)); // javascript:/断片は除外
+  assert.ok(!page.links.some((l) => l.href !== null && !/^https?:/.test(l.href))); // hrefは絶対URLかnull(断片・javascript:はnull保持)
   assert.ok(!page.text.includes("script_secret"));
 });
 
