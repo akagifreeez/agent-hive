@@ -1,0 +1,68 @@
+import fs from "node:fs";
+const p = "src/engine/browser.js";
+const orig = fs.readFileSync(p, "utf8");
+let s = orig.replace(
+  'import { spawn } from "node:child_process";',
+  'import { spawn } from "node:child_process";\nimport { request as httpRequest } from "node:http";\nimport { request as httpsRequest } from "node:https";'
+);
+if (s === orig) { console.error("import anchor not found"); process.exit(1); }
+const L = [];
+L.push("");
+L.push("// ===== HTTPレベルの軽量ブラウザ操作(test/browser-tools.test.js が仕様)。=====");
+L.push("// node:http/httpsのみで取得→解析→フォーム送信を行う(依存ゼロ原則)。");
+L.push("// レンダリング必須機能(スクリーンショット・JS実行後のDOM)はスコープ外: ");
+L.push("//   依存ゼロを保つためChromium等を同梱しない。実操作が必要な場合はMCP(Playwright等)で拡張する。");
+L.push("");
+L.push("/**");
+L.push(" * 相対URLをbaseと結合する。断片(#...)やjavascript:等はnull(リンク一覧から除外)。",
+);
+L.push(" * @param {string} href");
+L.push(" * @param {string} base");
+L.push(" * @returns {string|null}");
+L.push(" */");
+L.push("export function normalizeUrl(href, base) {");
+L.push("  const raw = String(href ?? \"\").trim();");
+L.push("  if (!raw) return null;");
+L.push("  if (/^(javascript|data|mailto|tel|blob):/i.test(raw)) return null;");
+L.push("  if (raw.startsWith(\"#\")) return null;");
+L.push("  try {");
+L.push("    const u = new URL(raw, base);");
+L.push("    if (u.protocol !== \"http:\" && u.protocol !== \"https:\") return null;");
+L.push("    u.hash = \"\";");
+L.push("    return u.toString();");
+L.push("  } catch {");
+L.push("    return null;");
+L.push("  }");
+L.push("}");
+L.push("");
+L.push("/** HTML実体参照を戻す(最小セット)。 */");
+L.push("function decodeEntities(s) {");
+L.push("  return s");
+L.push("    .replace(/&lt;/g, \"<\")");
+L.push("    .replace(/&gt;/g, \">\")");
+L.push("    .replace(/&quot;/g, '\"')");
+L.push("    .replace(/&#39;/g, \"'\")");
+L.push("    .replace(/&nbsp;/g, \" \")");
+L.push("    .replace(/&amp;/g, \"&\");");
+L.push("}");
+L.push("");
+L.push("/** タグ除去+空白整形(整形済みテキスト行配列)。script/style/noscript/コメントは除外。 */");
+L.push("function htmlToLines(html) {");
+L.push("  const noScript = String(html ?? \"\")");
+L.push("    .replace(/<!--[\s\S]*?-->/g, \" \")");
+L.push("    .replace(/<(script|style|noscript)\b[\s\S]*?<\/\1>/gi, \" \");");
+L.push("  const withBreaks = noScript.replace(/<\/(p|div|h[1-6]|li|tr)>|<br\b[^>]*>/gi, \"\n\");");
+L.push("  return withBreaks");
+L.push("    .replace(/<[^>]+>/g, \" \")");
+L.push("    .split(\"\n\")");
+L.push("    .map((l) => decodeEntities(l).replace(/\s+/g, \" \").trim())");
+L.push("    .filter(Boolean);");
+L.push("}");
+L.push("");
+L.push("/** 属性値を取り出す(name=\"x\" / name='x')。無ければnull。 */");
+L.push("function attr(attrs, name) {");
+L.push("  const m = attrs.match(new RegExp(name + \"\\s*=\\s*(\\\"([^\\\"]*)\\\"|'([^']*)')\", \"i\"));");
+L.push("  return m ? (m[2] ?? m[3] ?? \"\") : null;");
+L.push("}");
+fs.writeFileSync(p, s + L.join("\n") + "\n");
+console.log("part1 ok");
