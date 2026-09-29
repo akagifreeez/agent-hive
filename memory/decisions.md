@@ -21,3 +21,5 @@
 - UI実装は先行実装(main取り込み済み・テスト有り)へ統一するのが既定。usage集計ビューは renderUsageAggregate(issue-respawn-alpha実装・test/usage-aggregate-ui.test.js)を正とし、並行実装(spawn-impl-2のusageAggTable+inline loader)は差分ゼロ化して廃止した(2026-09)。
 - 発見器タスク(review-changes/distill-learnings等)の繰り返し起票は「地点前進→新条件成立」の正規挙動。ロール不一致(impl/leadにrole:reviewは請求不可)で全員が拾えないときは、claim空転を打ち切ってボードで現状共有する(2026-09 discuss-mumdrr6iで確認)。
 - タスク別モデル選択(イシュー#12)の運用決定: create_task/spawn_agent の model引数はリーダー専用・任意(基本は既定モデル、相当な理由があるときだけ代替)。タスクメタの model: 行が検証者・引き継ぎ者へ「どのモデルで動くべきか」の一次情報になる。実装詳細は constraints.md「issue-modelselect系列ラウンドの知見」へ(2026-09)。
+- ラウンドcheckpoint/resume(イシュー#4)の設計決定: スナップショット対象はモデルAPI異常(model.chat失敗=endedBy:"error")のみ。ツール失敗打ち切り・予算停止は「モデルとは無関係の意図的終了」のため対象外。保存はツール実行済み地点でcheckpointFn経由(state/checkpoint-<id>.json・tmp+rename)、復元はエラー検知時にmemories差し替え→checkpointファイル削除(削除しないと復元→失敗の無限ループ)。実装詳細は constraints.md イシュー#4節へ(2026-09)。
+- 承認待ちタスクの孤立対策: verify-*(role:review)は実装者が自己承認できない。スレッドのreviewロールが退場すると承認待ちが無人になるが、リーダー(lead)もreviewタスクは請求不可。対処は lead が reviewロールのワーカーを spawn して検証→approve まで通す(issue-checkpointスレッドで実証)。spawnは同時エージェント数上限があるため、まず既存ワーカーの再請求を促してから実施する。
