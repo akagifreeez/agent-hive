@@ -8,6 +8,7 @@ import {
   RETRY_MAX_RETRIES, EMPTY_COMPLETION_MAX_RETRIES,
   computeRetryDelay, isRetryableStatus, modelSleep, parseRetryAfterMs,
 } from "./openai.js";
+import { gateProvider, noteProviderRateLimited, clearProviderRateLimit } from "./throttle.js";
 
 export class AnthropicModel {
   /**
@@ -33,6 +34,8 @@ export class AnthropicModel {
     if (useStream) body.stream = true;
     let emptyRetries = 0;
     for (let attempt = 1; ; attempt++) {
+      // プロバイダ横断の共有クールダウン(他エージェントが429/529を見たら全員が待つ: イシュー#1)
+      await gateProvider(this.baseUrl);
       let res;
       try {
         res = await fetch(messagesUrl(this.baseUrl), {
@@ -52,6 +55,9 @@ export class AnthropicModel {
       if (!res.ok) {
         const bodyText = await res.text().catch(() => "");
         if (isRetryableStatus(res.status) && attempt <= RETRY_MAX_RETRIES) {
+          if (res.status === 429 || res.status === 529) {
+            noteProviderRateLimited(this.baseUrl, parseRetryAfterMs(res));
+          }
           await modelSleep(computeRetryDelay(attempt, parseRetryAfterMs(res)));
           continue;
         }
@@ -78,6 +84,7 @@ export class AnthropicModel {
         usage = data.usage ?? null;
         result = fromContentBlocks(data.content ?? [], data.stop_reason);
       }
+      clearProviderRateLimit(this.baseUrl);
       // 空応答(テキストもツールもusageも無い)はOpenAIModelと同様1回だけリトライ
       const empty = !result.content && !(result.toolCalls?.length) && !usage;
       if (empty && emptyRetries < EMPTY_COMPLETION_MAX_RETRIES) {
