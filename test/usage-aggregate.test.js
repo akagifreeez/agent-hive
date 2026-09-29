@@ -62,7 +62,7 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
   assert.equal(agg.byDate[0].date, now.toISOString().slice(0, 10), "1件目は今日");
   const today = agg.byDate[0];
   assert.equal(today.calls, 5);
-  assert.equal(today.costUsd, 0.6);
+  assert.ok(Math.abs(today.costUsd - 0.6) < 1e-9, 'costUsd合計(浮動小数は接近比較)');
   assert.equal(today.promptTokens, 300);
   assert.equal(today.completionTokens, 130);
   assert.equal(today.reasoningTokens, 30);
