@@ -169,7 +169,7 @@ test("browserFetch: ローカルサーバーからGETし、page+rawが返る(絶
   const { server, base } = await startLocalServer({ "/page.html": { body: PAGE_HTML } });
   const r = await browserFetch(`${base}/page.html`);
   assert.equal(r.ok, true);
-  console.log("DBG:", r.ok, r.status, JSON.stringify(r.page?.title), (r.raw??"").length); assert.equal(r.page.title, "フォームページ");
+  assert.equal(r.page.title, "フォームページ");
   assert.ok(r.status === 200);
   assert.ok(String(r.raw).includes("見出しH1"));
 
