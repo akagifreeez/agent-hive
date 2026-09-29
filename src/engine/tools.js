@@ -610,7 +610,8 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       case "browser_extract": {
         const er = await browserExtract(args);
         if (!er.ok) return { ok: false, text: er.text };
-        return { ok: true, text: ("[" + er.url + "]"\n"selector: " + (er.selector || "(全文)") + "\n""" + er.text).slice(0, 8000) };
+        return { ok: true, text: ("[" + er.url + "]" + "\n" + "selector: " + (er.selector || "(全文)") + "\n" + er.text).slice(0, 8000) };
+      }
       case "browser_submit": {
         const values = args.values && typeof args.values === "object" ? args.values : {};
         const sr = await browserSubmit({ html: args.html, base_url: args.base_url, values, selector: args.selector, form_index: args.form_index, follow_redirects: args.follow_redirects });
