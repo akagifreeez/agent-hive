@@ -19,7 +19,7 @@ import { modelStateInfo, resolveDefaultSpec, probeModel, startOpenAIAuth } from 
 import { buildCatalog } from "../model/catalog.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
-import { aggregateUsage } from "../engine/usage.js";
+import { aggregateUsage, localDateKey } from "../engine/usage.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
 
@@ -1240,7 +1240,7 @@ function persistUsage(workspace, entry) {
       const history = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
       // 日別・スレッド別集計(イシュー#6)用に日付とスレッド名を付けて蓄積する。
       // thread無しの旧レコードとの互換は集計側(aggregateUsage)が__main__扱いで吸収。
-      const enriched = { ...entry, date: new Date().toISOString().slice(0, 10), thread: entry.thread ?? '__main__' };
+      const enriched = { ...entry, date: localDateKey(new Date()), thread: entry.thread ?? '__main__' }; // 集計と同じローカル日付基準
       history.push(enriched);
       writeFileSync(file, JSON.stringify(history.slice(-200), null, 1));
   } catch {}
