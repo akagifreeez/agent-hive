@@ -213,6 +213,47 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       },
     },
     {
+      name: "browser_fetch",
+      description: "指定URLのページを取得し、構造化結果(タイトル/見出し/リンク/フォーム/本文テキスト)とrawを返す。urlはhttp(s)の絶対URL必須。",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "取得するURL(絶対URL)" },
+        },
+        required: ["url"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "browser_extract",
+      description: "URL取得またはHTML直指定からセレクタで部分テキストを抽出する。urlとhtmlはどちらか必須。",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "取得するURL(絶対URL)。html指定時は省略可" },
+          html: { type: "string", description: "直接解析するHTML(url省略時に使う)" },
+          selector: { type: "string", description: "抽出する要素(例: h1、#id)。省略時は本文全体" },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "browser_submit",
+      description: "HTML内のフォームへ値を設定して送信する(GET=クエリ結合/POST=urlenc、303等はlocation追従)。selectorでフォーム内要素を検証し誤送信を防ぐ。",
+      parameters: {
+        type: "object",
+        properties: {
+          html: { type: "string", description: "フォームを含むHTML" },
+          base_url: { type: "string", description: "フォームの基準URL(絶対URL)" },
+          values: { type: "object", description: "設定する値(name→値のオブジェクト)" },
+          selector: { type: "string", description: "送信前に存在を確認するフォーム内要素(誤送信防止)" },
+          follow_redirects: { type: "boolean", description: "リダイレクト追従(既定true)" },
+        },
+        required: ["html", "base_url"],
+        additionalProperties: false,
+      },
+    },
+    {
       name: "web_search",
       description: "Web検索を行い、タイトルとURLの一覧を返す。本文を読むには web_fetch を併用する。",
       parameters: {
@@ -691,6 +732,20 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         } catch (err) {
           return { ok: false, text: `検索エラー: ${err.message}` };
         }
+      }
+      case "browser_fetch": {
+        const url = String(args.url ?? "").trim();
+        if (!/^https?:\/\//i.test(url)) return { ok: false, text: "urlはhttp(s)の絶対URLで指定してください。" };
+        const r = await browserFetch(url);
+        return r.ok ? { ok: true, text: r.text } : { ok: false, text: r.text };
+      }
+      case "browser_extract": {
+        const r = await browserExtract(args ?? {});
+        return r.ok ? { ok: true, text: r.text } : { ok: false, text: r.text };
+      }
+      case "browser_submit": {
+        const r = await browserSubmit(args ?? {});
+        return r.ok ? { ok: true, text: r.text } : { ok: false, text: r.text };
       }
       case "search_files": {
         const pattern = String(args.pattern ?? "");
