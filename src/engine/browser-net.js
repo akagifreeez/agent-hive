@@ -97,7 +97,7 @@ export async function browserSubmit(args = {}) {
     }
     const resPage = parsePage(r.body, sub.url);
     const lines = [
-      "method: " + sub.method + " " + sub.url,
+      "送信: " + sub.method + " " + sub.url,
       "ステータス: " + r.status,
       "送信データ: " + (sub.body ?? "(なし)"),
       "",
