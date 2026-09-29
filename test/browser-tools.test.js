@@ -64,7 +64,7 @@ function startLocalServer(t, routes) {
   });
 }
 
-test("normalizeUrl: base結合と断片排除", () => {
+test("normalizeUrl: base結合と断片排除", async (t) => {
   const base = "http://127.0.0.1:9/a/b/index.html";
   assert.equal(normalizeUrl("/docs/x.html", base), "http://127.0.0.1:9/docs/x.html");
   assert.equal(normalizeUrl("c.html", base), "http://127.0.0.1:9/a/b/c.html");
@@ -73,7 +73,7 @@ test("normalizeUrl: base結合と断片排除", () => {
   assert.equal(normalizeUrl("javascript:alert(1)", base), null);
 });
 
-test("parsePage: タイトルと見出し・アンカーが取れ、script/styleは除外される", () => {
+test("parsePage: タイトルと見出し・アンカーが取れ、script/styleは除外される", async (t) => {
   const page = parsePage(PAGE_HTML, "http://127.0.0.1:9/login.html");
   assert.equal(page.title, "フォームページ");
   assert.deepEqual(page.headings, ["見出しH1", "見出しH2"]);
@@ -83,7 +83,7 @@ test("parsePage: タイトルと見出し・アンカーが取れ、script/style
   assert.ok(!page.text.includes("script_secret"));
 });
 
-test("parsePage: 本文テキストが整形される(タグ除去・空白潰し・行制限)", () => {
+test("parsePage: 本文テキストが整形される(タグ除去・空白潰し・行制限)", async (t) => {
   const page = parsePage(PAGE_HTML, "http://127.0.0.1:9/x.html");
   assert.ok(page.text.includes("これは1段落目のテキストです。"));
   assert.ok(!/<[a-z]/.test(page.text)); // タグ残骸がない
@@ -93,7 +93,7 @@ test("parsePage: 本文テキストが整形される(タグ除去・空白潰�
   assert.equal(big.text.split("\n").length, 200);
 });
 
-test("extractElements: 種別フィルタとジャンプ先(index)が返る", () => {
+test("extractElements: 種別フィルタとジャンプ先(index)が返る", async (t) => {
   const page = parsePage(PAGE_HTML, "http://127.0.0.1:9/login.html");
   const forms = extractElements(page, { type: "form" });
   assert.equal(forms.length, 1);
@@ -113,7 +113,7 @@ test("extractElements: 種別フィルタとジャンプ先(index)が返る", ()
   assert.equal(all.length, 6); // リンク3+フォーム1+見出し2
 });
 
-test("extractText: セレクタ指定で部分テキスト抽出", () => {
+test("extractText: セレクタ指定で部分テキスト抽出", async (t) => {
   const page = parsePage(PAGE_HTML, "http://127.0.0.1:9/x.html");
   const h1 = extractText(page, "h1");
   assert.ok(h1.includes("見出しH1"));
@@ -122,7 +122,7 @@ test("extractText: セレクタ指定で部分テキスト抽出", () => {
   assert.equal(extractText(page, "nosuchtag"), "一致する要素がありません(セレクタ: nosuchtag)");
 });
 
-test("extractForm: form_index無指定で最初のフォーム、orderは1始まり", () => {
+test("extractForm: form_index無指定で最初のフォーム、orderは1始まり", async (t) => {
   const form = extractForm(PAGE_HTML, "http://127.0.0.1:9/login.html", null);
   assert.equal(form.method, "post");
   assert.equal(form.action, "http://127.0.0.1:9/login");
@@ -133,7 +133,7 @@ test("extractForm: form_index無指定で最初のフォーム、orderは1始ま
   assert.ok(extractForm(PAGE_HTML, "http://127.0.0.1:9/x.html", 2) === null);
 });
 
-test("applyFormValues: フォーム値の上書きと新規項目の追加順", () => {
+test("applyFormValues: フォーム値の上書きと新規項目の追加順", async (t) => {
   const form = extractForm(PAGE_HTML, "http://x/", null);
   const applied = applyFormValues(form, { user: "alice", pass: "s3cret", save: true, extra: "e1" });
   assert.equal(applied.fields.find((f) => f.name === "user").value, "alice");
@@ -145,7 +145,7 @@ test("applyFormValues: フォーム値の上書きと新規項目の追加順", 
   assert.deepEqual(names.slice(-1), ["extra"]); // 新規は末尾追加
 });
 
-test("buildSubmission: method/url/body/content-typeを組み立て(GETはクエリ結合・セレクタ検証付き)", () => {
+test("buildSubmission: method/url/body/content-typeを組み立て(GETはクエリ結合・セレクタ検証付き)", async (t) => {
   const form = extractForm(PAGE_HTML, "http://127.0.0.1:9/login.html", null);
   const post = buildSubmission(form, { user: "alice", pass: "pw" });
   assert.equal(post.method, "POST");
