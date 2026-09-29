@@ -48,7 +48,7 @@ function btFormFields(formInner) {
   const src = String(formInner ?? "");
   const fields = [];
   const pushField = (f) => { if (f.name && fields.length < 100) fields.push(f); };
-  const tokenRe = new RegExp(String.raw`<(input|select|textarea)([^>]*)(?:>([sS]*?)</(?:input|select|textarea)s*>|s*/?>)`, 'gi');
+  const tokenRe = new RegExp("<(input|select|textarea)([^>]*)(?:>(\[\s\S]*?)<\/(?:input|select|textarea)\s*>|\s*?>)", "gi");
   let m;
   while ((m = tokenRe.exec(src))) {
     const tag = String(m[1]).toLowerCase();
@@ -57,14 +57,14 @@ function btFormFields(formInner) {
     if (type === "submit" || type === "button" || type === "image") continue;
     if (tag === "select") {
       const options = [];
-      const optRe = /<options([^>]*)>([sS]*?)</options*>/gi;
+      const optRe = new RegExp("<option\s([^>]*)>(\[\s\S]*?)<\/option\s*>", "gi");
       let om;
       let value = "";
       while ((om = optRe.exec(m[3] ?? ""))) {
         const oa = om[1] ?? "";
         const val = btAttr(oa, "value") ?? btStripTags(om[2]);
         const selected = /(^|s)selected(s|$|=)/i.test(oa);
-        if (!value || selected) value = val;
+        if (selected || !value) value = val;
         options.push(val);
       }
       pushField({ name: btAttr(attrs, "name") ?? "", type: "select", value, options, order: fields.length + 1 });
