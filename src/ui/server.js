@@ -14,6 +14,7 @@ import { runCommand } from "../engine/exec.js";
 import { openInBrowser } from "../engine/browser.js";
 import { PermissionGate } from "../engine/permissions.js";
 import { ROOT, dataDir } from "../config.js";
+import { wireCliNotify } from "../notify.js";
 import { modelStateInfo, resolveDefaultSpec, probeModel, startOpenAIAuth } from "../model/factory.js";
 import { buildCatalog } from "../model/catalog.js";
 import { spawn } from "node:child_process";
@@ -90,7 +91,21 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
   const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
   const boardStore = new BoardStore(config.workspace);
+  // CLI通知(#11): 承認待ち/マージ完了/長時間タスク完了をコンソールへ出しつつ、
+  // live.notificationsへ貯めて監視(monitor)へ配信する。--chat等でindex.js側から
+  // 先に配線されていても、ここではonNotify(監視配信)の追加だけを行う(二重出力にならない)
+  /** @type {import("../notify.js").NotifyItem[]} */
+  const notifications = [];
+  wireCliNotify(bus, {
+    longTaskSec: config.notify?.longTaskSec ?? 600,
+    onNotify: (n) => {
+      notifications.unshift(n);
+      if (notifications.length > 30) notifications.length = 30;
+    },
+  });
   const live = {
+    // CLI通知(#11): 最新の通知(承認待ち/マージ完了/長時間タスク完了)。新着順・最大30件
+    notifications,
     // v6.10: エージェントはthread.opened/agent.spawned登録時に出現する(事前登録しない。
     // しないと未所属のconfigエージェントがメイン部屋のメンバーとして見えてしまう)
     agents: {},
@@ -263,6 +278,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (r) r.state = p.verdict === "approve" ? "approved" : "denied";
     },
     "scenario.started": (p) => { live.scenario = { name: p.name, phase: "running" }; },
+    // runner.jsは{byAgent, totals}をemitする(旧契約のp.usageも後方互換で受ける)
     "usage.summary": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), totals: p.totals ?? p.usage ?? null }),
     "usage.round": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), agent: p.agent, thread: p.thread ?? '__main__', endedBy: p.endedBy ?? 'ok', totals: p.totals ?? null }),
     "scenario.finished": () => { if (live.scenario) live.scenario.phase = "done"; },
@@ -831,7 +847,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     throw err;
   });
   console.log(`UI: http://localhost:${config.ui.port}${autoStart ? " (シナリオを自動開始します)" : ""}`);
-  if (config.ui.monitorPort) {
+  // monitorPort: 0(エフェメラル扱い#テスト用)も有効。null/undefinedで無効
+  if (config.ui.monitorPort != null) {
     await startMonitor({ config, live, tasks, startedAt });
   }
   if (autoStart) {
@@ -1003,6 +1020,10 @@ export function buildMonitorSnapshot({ config, live, tasks, startedAt }) {
     },
     agents,
     merges: (live.merges ?? []).slice(0, 10).map((m) => ({ taskId: m.taskId, agent: m.agent, summary: m.summary ?? "" })),
+    // CLI通知(#11): 最新の通知(承認待ち/マージ完了/長時間タスク完了)+未処理の承認要求。
+    // 監視(monitor)から状況がひと目で分かるようにする(通知は新着順・最大30件)
+    notifications: (live.notifications ?? []).map((n) => ({ kind: n.kind, at: n.at, title: n.title, body: n.body })),
+    pendingRequests: (live.requests ?? []).filter((r) => r.state === "pending").map((r) => ({ id: r.id, command: String(r.command ?? "").slice(0, 120) })),
     recent: live.board.slice(-30).map((p) => ({ from: p.from, thread: p.thread ?? "__main__", text: String(p.text).slice(0, 200), at: p.at ?? null })),
   };
 }
@@ -1047,6 +1068,7 @@ async function tick(){
       rows(d.tasks.open,(t)=>"<tr><td class='dim'>未着手</td><td class='mono'>"+esc(t.id)+"</td><td></td><td class='dim'>"+esc(t.summary)+"</td></tr>")+"</table>"+
       "<h2>エージェント</h2><table><tr><th>名前</th><th>状態</th><th>turn</th><th>直近ツール</th><th>消費</th><th>スレッド</th></tr>"+
       (rows(d.agents,(a)=>{const st={idle:["待機","#a3a3a8"],working:["作業中","#fbbf24"],done:["完了","#86efac"],error:["エラー","#fca5a5"],"budget-stop":["停止","#fca5a5"]}[a.status]||[esc(a.status),"#a3a3a8"];return "<tr><td style='color:hsl("+hue(a.id)+" 45% 72%)'>"+esc(a.displayName)+"</td><td style='color:"+st[1]+"'>"+st[0]+"</td><td class='mono'>"+a.turn+"</td><td class='mono'>"+esc(a.lastTool)+"</td><td class='mono'>"+a.tokens.toLocaleString()+"tok</td><td class='mono'>"+esc(a.thread)+"</td></tr>";})||"<tr><td colspan='6' class='dim'>稼働中のエージェントはいません</td></tr>")+"</table>"+
+      "<h2>通知(承認待ち/マージ/長時間タスク)</h2><div class='board'>"+(rows(d.pendingRequests??[],(r)=>"<div class='warn'><b>🔐 承認待ち #"+esc(r.id)+"</b> <span class='mono'>"+esc(r.command)+"</span></div>")||"")+(rows(d.notifications??[],(n)=>"<div>"+(n.kind==="permission.request"?"<b class='warn'>🔐 "+esc(n.title)+"</b>":(n.kind==="merge.completed"?"<b class='ok'>🔀 "+esc(n.title)+"</b>":"<b>⏱ "+esc(n.title)+"</b>"))+" <span>"+esc(n.body)+"</span> <span class='dim mono'>"+esc(String(n.at).replace("T"," ").slice(0,19))+"</span></div>"))||"<div class='dim'>まだありません</div>")+"</div>"+
       "<h2>直近のマージ</h2><div class='board'>"+(rows(d.merges,(m)=>"<div><b class='mono'>"+esc(m.taskId)+"</b> <span class='accent'>"+esc(m.summary)+"</span> <span class='dim'>by "+esc(m.agent)+"</span></div>")||"<div class='dim'>まだありません</div>")+"</div>"+
       "<h2>ボードの新着(全スレッド・直近30件)</h2><div class='board'>"+rows(d.recent.slice().reverse(),(p)=>"<div><b style='color:hsl("+hue(p.from)+" 45% 72%)'>"+esc(p.from)+"</b> <span class='mono dim'>@"+esc(p.thread)+"</span> "+esc(p.text)+"</div>")+"</div>";
   }catch(e){ document.getElementById("body").textContent="取得に失敗: "+e.message; }
@@ -1069,6 +1091,8 @@ tick();setInterval(tick,3000);
   const host = config.ui.monitorHost ?? "0.0.0.0";
   const port = config.ui.monitorPort ?? 0;
   await /** @type {Promise<void>} */ (new Promise((resolve) => server.listen(port, host, () => resolve())));
+  // 実ポート(0指定時のエフェメラル)をconfigへ書き戻す(テスト・CLIから参照可能に)
+  config.ui.monitorPort = /** @type {import("node:net").AddressInfo} */ (server.address()).port;
   server.unref();
   /** @type {import("node:net").AddressInfo} */ const mAddr = /** @type {any} */ (server.address());
   console.log(`Monitor: http://localhost:${mAddr.port} (読み取り専用・${host}で公開)`);

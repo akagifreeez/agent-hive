@@ -15,7 +15,7 @@ const ANSI = { yellow: "\x1b[33m", bold: "\x1b[1m", reset: "\x1b[0m" };
 /** 通知1件をコンソール( stderr )へ目立つ1行で出す。NO_COLORで色なし。
  * @param {NotifyItem} n */
 export function printNotifyLine(n) {
-  const c = process.env.NO_COLOR ? "" : ANSI;
+  const c = /** @type {{yellow: string, bold: string, reset: string}} */ (process.env.NO_COLOR ? "" : ANSI);
   const line = `🔔 [通知] ${n.title}: ${n.body}`;
   const colored = c ? `${c.bold}${c.yellow}${line}${c.reset}` : line;
   stderr.write(`${colored}\n`);
@@ -23,20 +23,30 @@ export function printNotifyLine(n) {
 
 /**
  * busへCLI通知を配線する。戻り値のunwire()で全リスナを外せる(テスト用)。
- * 二重配線防止: 同じbusに既に配線済みなら何もせずnullを返す(デスクトップ殻は
- * 独自のNative通知配線を持つため、wireCliNotifyを呼んでいても呼んでいなくても壊れない)。
+ * 二重配線防止: 同じbusへの2回目の呼び出しはリスナを足さず、opts.onNotifyだけを
+ * 既存の配線へ追加する(--chatの起動順: index.jsが先にコンソール配線 → startUiが
+ * 監視配信のonNotifyを後から追加、の順序の逆でも正しく動く)。デスクトップ殻は
+ * 独自のNative通知配線を持つため、wireCliNotifyを呼んでいれば併存しても壊れない。
  * @param {import("./engine/board.js").Bus} bus
  * @param {{longTaskSec?: number, onNotify?: (n: NotifyItem) => void, log?: (line: string) => void}} [opts]
- * @returns {{unwire: () => void}|null} 既に配線済みのときnull
+ * @returns {{unwire: () => void}|null} 既に配線済みのときnull(onNotifyの追加だけは実施)
  */
 export function wireCliNotify(bus, opts = {}) {
-  if (/** @type {any} */ (bus).__cliNotifyWired) return null;
-  /** @type {any} */ (bus).__cliNotifyWired = true;
+  const anyBus = /** @type {any} */ (bus);
+  if (anyBus.__cliNotifyWired) {
+    if (opts.onNotify) anyBus.__cliNotifyOnNotify.push(opts.onNotify);
+    return null;
+  }
+  anyBus.__cliNotifyWired = true;
+  anyBus.__cliNotifyOnNotify = [];
+  if (opts.onNotify) anyBus.__cliNotifyOnNotify.push(opts.onNotify);
   const longTaskSec = Number(opts.longTaskSec) > 0 ? Number(opts.longTaskSec) : 600;
   const emit = (n) => {
     // コンソール出力は常に本体(通知の最低保証)。onNotifyは監視(/api/monitor)への追加配信
     printNotifyLine(n);
-    if (opts.onNotify) opts.onNotify(n);
+    for (const f of anyBus.__cliNotifyOnNotify) {
+      try { f(n); } catch { /* 配信先の失敗で通知本体を止めない */ }
+    }
   };
   const offReq = bus.on("permission.request", (p) => {
     emit({ kind: "permission.request", at: new Date().toISOString(), id: p.id, title: `承認待ち #${p.id}`, body: String(p.command ?? "").slice(0, 120) });
@@ -58,8 +68,9 @@ export function wireCliNotify(bus, opts = {}) {
     const t0 = claimedAt.get(id);
     claimedAt.delete(id);
     if (t0 == null) return;
-    const tookSec = Math.round((Date.now() - t0) / 1000);
-    if (tookSec < longTaskSec) return;
+    const tookSecF = (Date.now() - t0) / 1000;
+    if (tookSecF < longTaskSec) return;
+    const tookSec = Math.round(tookSecF);
     const took = tookSec >= 3600 ? `${Math.floor(tookSec / 3600)}時間${Math.round((tookSec % 3600) / 60)}分` : `${Math.floor(tookSec / 60)}分${tookSec % 60}秒`;
     emit({ kind: "task.finished.long", at: new Date().toISOString(), taskId: id, agent: p.agent, title: `長時間タスク完了 ${id}`, body: `${p.agent ?? "?"} が${took}かけて完了` });
   });
@@ -67,7 +78,8 @@ export function wireCliNotify(bus, opts = {}) {
     unwire: () => {
       offReq(); offMerge(); offClaimed(); offReleased(); offCancelled(); offFinished();
       claimedAt.clear();
-      delete /** @type {any} */ (bus).__cliNotifyWired;
+      anyBus.__cliNotifyOnNotify = [];
+      delete anyBus.__cliNotifyWired;
     },
   };
 }
