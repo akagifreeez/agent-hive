@@ -14,7 +14,7 @@ import { runCommand } from "../engine/exec.js";
 import { openInBrowser } from "../engine/browser.js";
 import { PermissionGate } from "../engine/permissions.js";
 import { ROOT, dataDir } from "../config.js";
-import { modelStateInfo, resolveDefaultSpec } from "../model/factory.js";
+import { modelStateInfo, resolveDefaultSpec, probeModel } from "../model/factory.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
@@ -329,6 +329,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       // ?q= があるときは全文検索モード(全スレッド横断の本文部分一致)
+      if (url.pathname === "/api/models") return json(res, { model: modelStateInfo(config) });
       if (url.pathname === "/api/board") {
         const q = url.searchParams.get("q");
         if (q !== null) {
@@ -579,6 +580,21 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
+      if (url.pathname === "/api/model-test" && req.method === "POST") {
+        // 疎通プローブ(設定ウィンドウの「テスト送信」)。エージェントを起こさない
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", async () => {
+          try {
+            const { provider, model } = JSON.parse(body || "{}");
+            const r = await probeModel(config, { provider: provider ?? null, model: model ?? null });
+            json(res, r);
+          } catch (err) {
+            json(res, { ok: false, error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/mcp" && req.method === "GET" && onMcpList) {
         json(res, { servers: onMcpList() });
         return;
@@ -722,20 +738,36 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 
 // APIキーを鍵ファイルへ保存し、実行中のconfigにも即時反映する(設定ウィンドウ用)。
 // 鍵は応答に返さない(ヒント=末尾4文字のみ)。書き込み先は既存の鍵ファイルがあればそこ、
-// 無ければDATA側(userData)に新規作成。新形models設定でauthが未指定の既定プロバイダには
-// state/models-<id>.keyを自動割り当てする。環境変数が設定されている場合はそちらが優先される旨を返す
+// 無ければDATA側(userData)に新規作成。body.provider指定でそのプロバイダのauth.fileへ
+// (未指定なら自動割り当て)。env運用中はenv更新の案内で止める。環境変数が設定されている
+// 場合はそちらが優先される旨を返す
 function saveApiKey(body, config) {
   const key = String(body.key ?? "").trim();
   if (!key) throw new Error("APIキーが空です");
   if (/\s/.test(key)) throw new Error("APIキーに空白は使えません");
   if (key.length < 8) throw new Error("APIキーが短すぎます");
-  let rel = config.model?.apiKeyFile;
-  if (!rel && config.models) {
-    const spec = resolveDefaultSpec(config);
-    if (spec && !spec.provider.auth?.env && !spec.provider.auth?.file && !spec.provider.auth?.value) {
-      if (!spec.provider.auth) spec.provider.auth = {};
-      spec.provider.auth.file = join("state", `models-${spec.provider.id}.key`); // dataDir基準で解決される相対パス
-      rel = spec.provider.auth.file;
+  const pid = String(body.provider ?? "").trim();
+  let rel;
+  if (pid) {
+    // 生のproviders設定へ書く(buildCatalogの戻しはコピーなので、そこへ書いても実行中configに反映されない)
+    const raw = config.models?.providers?.[pid];
+    if (!raw) return { ok: false, error: `未知のプロバイダ "${pid}"` };
+    if (!raw.auth) raw.auth = {};
+    if (raw.auth.value) return { ok: false, error: `プロバイダ "${pid}" は設定に直値の鍵があるため上書きできません` };
+    if (raw.auth.env && process.env[raw.auth.env] && !raw.auth.file) return { ok: false, error: `プロバイダ "${pid}" は環境変数 ${raw.auth.env} で運用中です(env側を更新してください)` };
+    if (!raw.auth.file) raw.auth.file = join("state", `models-${pid}.key`); // dataDir基準で解決される相対パス
+    rel = raw.auth.file;
+  } else {
+    rel = config.model?.apiKeyFile;
+    if (!rel && config.models) {
+      const spec = resolveDefaultSpec(config);
+      const dpid = spec?.provider?.id;
+      const raw = dpid ? config.models.providers?.[dpid] : null;
+      if (raw && !raw.auth?.env && !raw.auth?.file && !raw.auth?.value) {
+        if (!raw.auth) raw.auth = {};
+        raw.auth.file = join("state", `models-${dpid}.key`);
+        rel = raw.auth.file;
+      }
     }
   }
   if (!rel) {
@@ -747,7 +779,7 @@ function saveApiKey(body, config) {
   const target = existing ?? candidates[candidates.length - 1];
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, key + "\n");
-  config.model.apiKey = key; // 次に生成されるモデルから即時有効
+  if (!pid) config.model.apiKey = key; // 次に生成されるモデルから即時有効
   return { ok: true, hint: "…" + key.slice(-4), viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) };
 }
 
