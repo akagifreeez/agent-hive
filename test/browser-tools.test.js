@@ -106,7 +106,7 @@ test("extractElements: 種別フィルタとジャンプ先(index)が返る", as
   assert.equal(headings[0].level, 1);
 
   const links = extractElements(page, { type: "link" });
-  assert.equal(links.length, 3);
+  assert.equal(links.length, 2); // 断片(#sec-1)はnormalizeUrlで除外
   assert.ok(links.every((l) => l.index >= 1));
 
   const all = extractElements(page, {});
@@ -197,7 +197,7 @@ test("browserSubmit: POSTでフォーム送信でき、303はlocation追従し�
     values: { user: "alice", pass: "s3cret" },
   });
   assert.equal(r.ok, true);
-  assert.match(r.text, /method: POST/);
+  assert.match(r.text, /^送信: POST/m); // 送信: POST <url>
   assert.match(r.text, /user=alice/);
   assert.match(r.text, /alice/); // 応答ページの抽出にも反映されている
   server.close();
