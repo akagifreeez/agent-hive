@@ -210,8 +210,6 @@
   body.widepanel { grid-template-columns: 240px 1fr 640px; }
   #panel-btn { position: absolute; right: 188px; top: 9px; background: var(--panel2); border: 1px solid var(--separator); color: var(--sub); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
   #panel-btn:hover { color: var(--label); border-color: var(--line-strong); }
-  #clear-board-btn { position: absolute; right: 316px; top: 9px; background: var(--panel2); border: 1px solid var(--separator); color: var(--sub); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
-  #clear-board-btn:hover { color: var(--label); border-color: var(--line-strong); }
   #browserpane { display: none; flex: 1; flex-direction: column; min-height: 0; }
   .bbar { display: flex; gap: 4px; padding: 5px; border-bottom: 1px solid var(--separator); }
   .bbar input { flex: 1; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 4px 8px; font-size: 11px; font-family: var(--font-mono); box-shadow: var(--inset-field); }
@@ -346,7 +344,6 @@
       <div id="board-search-box">
         <input id="board-search" type="text" placeholder="ボードを全文検索(Enter)" autocomplete="off">
       </div>
-      <button id="clear-board-btn" title="このスレッドのチャット履歴をクリア(タスク・メモリは残る)">クリア</button>
       <button id="panel-btn" title="右パネルの表示/非表示">パネル</button>
       <button id="monitor-btn" title="モニタ(読み取り専用ダッシュボード)">モニタ</button>
       <button id="settings-btn" title="設定">設定</button>
@@ -475,13 +472,14 @@ let selectedThread = "__main__";
 const COMMANDS = {
   help: "コマンド一覧",
   workflow: "ワークフロー実行(/workflow <名前>)",
-  tasks: "現在のタスク一覧",
+  tasks: "現在のタスク一覧(/tasks done で完了も)",
   usage: "エージェント別の消費",
   threads: "スレッド一覧",
   session: "セッションの保存/復元(/session save <名前>)",
   model: "現在のモデル表示",
   thread: "スレッドを直接開く(/thread <名前> <目標>)",
   close: "スレッドを閉じる(/close <名前>)",
+  clear: "このスレッドのチャット履歴をクリア(/clear・タスクとメモリは残る)",
 };
 let customCommands = {};
 let uiEffort = null;
@@ -489,6 +487,7 @@ let uiModelName = null;
 let selectedAgent = null;
 let ctxTab = "tasks";
 let projectFilter = "";
+let showDoneTasks = false; // タスクタブ: 既定は進行中のみ。チェックで完了済み(過去)も出す
 const unread = {}; // thread => 件数
 let lastState = null;
 // ボード描画の窓(末尾N件)とマージ差分の展開状態。スレッド切替でリセット
@@ -833,7 +832,8 @@ function renderCtx(state) {
 function renderTasksTab(body, state) {
   const list = state.taskList ?? { open: [], claimed: [], done: [] };
   const inThread = selectedThread !== "__main__";
-  const all = [...list.open, ...list.claimed, ...list.done].filter((t) => !inThread || (t.project || "") === selectedThread);
+  // 既定は進行中(未着手+作業中)のみ。過去(完了済み)は「過去も表示」で出す
+  const all = [...list.open, ...list.claimed, ...(showDoneTasks ? list.done : [])].filter((t) => !inThread || (t.project || "") === selectedThread);
   const projects = [...new Set(all.map((t) => t.project || ""))].sort();
 
   if (inThread) {
@@ -858,7 +858,23 @@ function renderTasksTab(body, state) {
     body.appendChild(sel);
   }
 
+  // 過去(完了済み)の表示トグル
+  const toggle = document.createElement("label");
+  toggle.style.cssText = "display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--sub);margin-left:8px;cursor:pointer";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = showDoneTasks;
+  cb.onchange = () => { showDoneTasks = cb.checked; renderCtx(lastState); };
+  toggle.append(cb, document.createTextNode("過去も表示"));
+  body.appendChild(toggle);
+
   const visible = all.filter((t) => inThread || projectFilter === "" || (projectFilter === "__none__" ? !t.project : (t.project || "") === projectFilter));
+  if (!visible.length) {
+    const empty = document.createElement("div");
+    empty.className = "sec";
+    empty.textContent = showDoneTasks ? "タスクはありません" : "進行中のタスクはありません(「過去も表示」で完了済みを出せます)";
+    body.appendChild(empty);
+  }
   const groups = inThread ? [["", ""]] : [...projects.map((p) => [p, p]), ["", "(未分類)"]];
   const secs = [
     ["open", "未着手", () => ({ label: "中止", action: "cancel" })],
@@ -1459,10 +1475,12 @@ async function handleCommand(text) {
   } else if (cmd === "tasks") {
     if (!lastState) return post("まだ状態を取得していません");
     const l = lastState.taskList;
-    const rows = [...l.open, ...l.claimed, ...l.done]
+    const showDone = args[0] === "done" || args[0] === "all";
+    const rows = [...l.open, ...l.claimed, ...(showDone ? l.done : [])]
       .filter((t) => selectedThread === "__main__" || (t.project || "") === selectedThread)
       .map((t) => `${t.state}: ${t.id}${t.project ? ` (${t.project})` : ""}`);
-    post(rows.length ? rows.join("\n") : "タスクはありません");
+    const note = showDone ? "" : (l.done.length ? `\n(完了${l.done.length}件は /tasks done で表示)` : "");
+    post(rows.length || note ? rows.join("\n") + note : "タスクはありません");
   } else if (cmd === "usage") {
     if (!lastState) return post("まだ状態を取得していません");
     const rows = Object.entries(lastState.live.agents).map(([id, a]) =>
@@ -1508,6 +1526,25 @@ async function handleCommand(text) {
       if (!r.error) { uiEffort = null; uiModelName = r.model ?? ""; }
       post(r.error ? `エラー: ${r.error}` : `モデルを ${r.model} に変更しました(次のラウンドから)`);
     }
+  } else if (cmd === "clear") {
+    // チャット履歴のクリア。確認ダイアログを挟む(破壊的操作)。タスク・メモリには影響しない
+    const dlg = $("dlg");
+    const inp = $("dlg-input");
+    $("dlg-title").textContent = "チャット履歴のクリア";
+    $("dlg-body").textContent = `このスレッド(#${selectedThread === "__main__" ? "メイン" : selectedThread})のチャット履歴を削除します。\nタスク・メモリには影響しません(過去のタスクは残ります)。`;
+    inp.style.display = "none";
+    $("dlg-ok").textContent = "クリア";
+    dlg.showModal();
+    $("dlg-ok").onclick = async () => {
+      dlg.close();
+      inp.style.display = "";
+      const r = await (await hfetch("/api/clear-board", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ thread: selectedThread }) })).json();
+      if (r.error) { toast(`クリア: ${r.error}`); return; }
+      toast(`チャット履歴をクリアしました(${r.clearedPosts}件)`, "ok");
+      threadBoards.delete(selectedThread);
+      renderAll();
+    };
+    $("dlg-cancel").onclick = () => { dlg.close(); inp.style.display = ""; };
   } else if (cmd === "effort") {
     const lv = (args[0] ?? "").toLowerCase();
     if (!["low", "medium", "high"].includes(lv)) { post("low / medium / high のいずれかを指定してください"); return; }
@@ -1778,28 +1815,6 @@ function openSettings() {
 $("settings-btn").onclick = openSettings;
 
 $("settings-btn").onclick = openSettings;
-
-// チャット履歴のクリア(ヘッダ「クリア」)。確認ダイアログを挟む(破壊的操作)。
-// タスク・メモリには影響しない=過去のタスク(完了済み)はタスクタブに残り続ける
-$("clear-board-btn").onclick = () => {
-  const dlg = $("dlg");
-  const inp = $("dlg-input");
-  $("dlg-title").textContent = "チャット履歴のクリア";
-  $("dlg-body").textContent = `このスレッド(#${selectedThread === "__main__" ? "メイン" : selectedThread})のチャット履歴を削除します。\nタスク・メモリには影響しません(過去のタスクは残ります)。`;
-  inp.style.display = "none";
-  $("dlg-ok").textContent = "クリア";
-  dlg.showModal();
-  $("dlg-ok").onclick = async () => {
-    dlg.close();
-    inp.style.display = "";
-    const r = await (await hfetch("/api/clear-board", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ thread: selectedThread }) })).json();
-    if (r.error) { toast(`クリア: ${r.error}`); return; }
-    toast(`チャット履歴をクリアしました(${r.clearedPosts}件)`, "ok");
-    threadBoards.delete(selectedThread);
-    renderAll();
-  };
-  $("dlg-cancel").onclick = () => { dlg.close(); inp.style.display = ""; };
-};
 
 /* ================= 設定ウィンドウ: ワークスペース(開発フォルダ) ================= */
 // 現在のワークスペースを表示し、入力したパスをhive.local.jsonへ保存する(再起動で反映)
