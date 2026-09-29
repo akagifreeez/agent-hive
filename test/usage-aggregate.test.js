@@ -42,10 +42,14 @@ async function setup() {
 
 test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレッドの集計を作る", () => {
   const now = new Date();
+  // UTC基準でレコードを組む: 集計(aggregateUsage)はtoISOString=UTCで日付キーを作るため。
+  // ローカル時刻組立だと日付境界(JST深夜=UTC昼過ぎ)で「今日」が翌日になり、
+  // now.toISOString()由来の期待値とずれて落ちるためUTCへ統一(安定化)。
+  const utcToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const d = (offsetDays, hour) => {
-    const t = new Date(now);
-    t.setDate(t.getDate() - offsetDays);
-    t.setHours(hour, 0, 0, 0);
+    const t = new Date(utcToday);
+    t.setUTCDate(t.getUTCDate() - offsetDays);
+    t.setUTCHours(hour, 0, 0, 0);
     return t.toISOString();
   };
   const history = [
@@ -62,7 +66,7 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
   const agg = aggregateUsage(history, { days: 14 });
   // 日別(新しい順)
   assert.ok(agg.byDate.length >= 2);
-  assert.equal(agg.byDate[0].date, now.toISOString().slice(0, 10), "1件目は今日");
+  assert.equal(agg.byDate[0].date, now.toISOString().slice(0, 10), "1件目は今日(UTC日付)");
   const today = agg.byDate[0];
   assert.equal(today.calls, 6);
   assert.ok(Math.abs(today.costUsd - 0.7) < 1e-9, 'costUsd合計(浮動小数は接近比較)');
