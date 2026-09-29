@@ -23,18 +23,27 @@ function queueMerge(fn) {
   return withMergeLock(fn);
 }
 
-// 毎ランfreshに張り直す(前回のブランチ残骸を掃除)。ただしworktree内に未コミット変更が
-// ある場合は無音に壊さない——保持してonKeptで告知し、引き継ぎ判断を外に見せる。
+// 毎ランfreshに張り直す(前回のブランチ残骸を掃除)。ただし無音に壊してはいけないものは保持して
+// onKeptで告知し、引き継ぎ判断を外に見せる: (1)worktree内の未コミット変更 (2)未マージのコミット
+// (プロセス死で中断したコミット済み作業。イシュー#7: respawnスキャンより先に消さない)。
 export async function setupWorktrees({ mainWorkspace, worktreeRoot, agents, exec = runCommand, onKept = null }) {
   const paths = {};
   for (const agent of agents) {
     const path = resolve(join(worktreeRoot, agent.id));
     if (existsSync(path)) {
       const st = await exec({ command: "git status --porcelain", cwd: path, outputLimit: 2000 });
-      const dirty = st.ok && st.text.split("\n").slice(1).some((l) => l.trim());
+      const dirty = st.ok && st.text.split("
+").slice(1).some((l) => l.trim());
       if (dirty) {
         paths[agent.id] = path;
         onKept?.({ agentId: agent.id, path, detail: st.text.slice(0, 800) });
+        continue;
+      }
+      // dirty無しでも未マージのコミットが残っていれば保持する(respawnスキャンの検出対象)
+      const unmerged = await hasUnmergedWork({ mainWorkspace, agentId: agent.id, exec });
+      if (unmerged) {
+        paths[agent.id] = path;
+        onKept?.({ agentId: agent.id, path, detail: "未マージコミットを保持" });
         continue;
       }
     }
@@ -43,11 +52,29 @@ export async function setupWorktrees({ mainWorkspace, worktreeRoot, agents, exec
   return paths;
 }
 
+/** エージェントブランチに「mainへ未マージのコミット」があるか。ブランチやworktreeが
+ * 無い/判定に失敗した場合はfalse(=作り直してよい)。 */
+export async function hasUnmergedWork({ mainWorkspace, agentId, exec = runCommand }) {
+  const branch = `agent/${agentId}`;
+  const rev = await exec({ command: `git rev-parse --verify ${branch}`, cwd: mainWorkspace, outputLimit: 200 });
+  if (!rev.ok) return false; // ブランチ無し
+  const anc = await exec({ command: `git merge-base --is-ancestor ${branch} main`, cwd: mainWorkspace, outputLimit: 200 });
+  if (anc.ok) return false; // mainに含まれている(マージ済み) → 作り直してよい
+  const log = await exec({ command: `git log main..${branch} --oneline`, cwd: mainWorkspace, outputLimit: 2000 });
+  return Boolean(log.ok && log.text.split("
+").slice(1).some((l) => l.trim())); // 未マージコミットあり
+}
+
 // 1エージェント分のworktreeを動的に作る(v5: スポーンされるエージェント向け)
-export async function createWorktree({ mainWorkspace, worktreeRoot, agentId, exec = runCommand }) {
+export async function createWorktree({ mainWorkspace, worktreeRoot, agentId, exec = runCommand, onKept = null }) {
   const path = resolve(join(worktreeRoot, agentId));
   const branch = `agent/${agentId}`;
   if (existsSync(path)) {
+    // 二重防御: setupWorktrees経由以外の直呼びでも、未マージコミット付きworktreeは壊さない
+    if (await hasUnmergedWork({ mainWorkspace, agentId, exec })) {
+      onKept?.({ agentId, path, detail: "未マージコミットを保持" });
+      return path;
+    }
     await exec({ command: `git worktree remove --force '${path}'`, cwd: mainWorkspace, outputLimit: 1000 });
   }
   await exec({ command: `git branch -D ${branch} 2>/dev/null || true`, cwd: mainWorkspace, outputLimit: 1000 });
