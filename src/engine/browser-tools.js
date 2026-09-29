@@ -48,7 +48,7 @@ function btFormFields(formInner) {
   const fields = [];
   const pushField = (f) => { if (f.name && fields.length < 100) fields.push(f); };
   // input|select|textarea を1つの正規表現で出現順に走査する(HTML上の順序=order)
-  const tagRe = /<(input|select|textarea)\s([^>]*?)(?:\/>|>([\s\S]*?)<\/\1\s*>)/gi;
+  const tagRe = /<(input|select|textarea)\s([^>]*?)(?:>([\s\S]*?)<\/\1\s*>|\/?>)/gi;
   let m;
   let order = 0;
   while ((m = tagRe.exec(formInner))) {
