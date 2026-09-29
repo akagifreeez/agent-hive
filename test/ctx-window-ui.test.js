@@ -111,4 +111,8 @@ test("UI: 詳細パネルにコンテキスト使用量(使用/上限/残り+バ
   assert.match(html, /remainTokens/);
   // バー描画(fill幅を占有率で設定)
   assert.match(html, /ctx-fill/);
+  // バーおよび警告色(.hot)のCSSが定義済み(視覚的に機能するバーであること)
+  assert.match(html, /\.ctxbar\s*\{[^}]*height\s*:/);
+  assert.match(html, /\.ctx-fill\s*\{[^}]*width\s*:/);
+  assert.match(html, /\.ctx-fill\.hot/);
 });
