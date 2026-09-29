@@ -5,7 +5,7 @@
 // ラウンド中にスポーンされたサブの進捗もボードに流れ、次のラウンドで読まれる。
 // v6.1: 各メインのmessagesはラウンド終了ごとに workspace/state/ へ保存し、
 // 再起動時に復元する(チャットの記憶がプロセスをまたいで続く)。
-import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { runAgentLoop, buildSystemPrompt } from "./loop.js";
 import { createTools } from "./tools.js";
@@ -132,6 +132,38 @@ export class ChatHost {
     }
   }
 
+  // ラウンドcheckpoint(イシュー#4): ツール実行済みmessagesのスナップショット。
+  // モデル異常で中断したラウンドをスナップショット地点から再開するためのもの。
+  checkpointPath(id) {
+    return join(this.mainWorkspace ?? ".", "state", `checkpoint-${id}.json`);
+  }
+
+  saveCheckpoint(main, messages) {
+    const p = this.checkpointPath(main.id);
+    if (!p) return;
+    try {
+      mkdirSync(join(p, ".."), { recursive: true });
+      const tmp = `${p}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ messages }));
+      renameSync(tmp, p);
+    } catch { /* 保存失敗でラウンドを壊さない */ }
+  }
+
+  loadCheckpoint(id) {
+    const p = this.checkpointPath(id);
+    if (!p) return null;
+    try {
+      const d = JSON.parse(readFileSync(p, "utf8"));
+      if (Array.isArray(d.messages) && d.messages.length > 1) return d.messages;
+    } catch {}
+    return null;
+  }
+
+  clearCheckpoint(id) {
+    const p = this.checkpointPath(id);
+    if (!p) return;
+    try { rmSync(p, { force: true }); } catch {}
+  }
   // ユーザー入力: 全メインを時間差で起こす(同時だと議論にならないため)。
   // 本文はボード経由で1回だけ届く(seen管理)。キックオフは中身を持たない汎用文。
   say(text) {
