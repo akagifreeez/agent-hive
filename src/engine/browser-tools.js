@@ -84,7 +84,7 @@ function btFormFields(formInner) {
  * HTMLをページ情報へ構造化する。
  * @param {string} html 生HTML
  * @param {string} baseUrl 絶対URL(相対リンク解決の基準)
- * @returns {{url: string, title: string, headings: string[], links: Array<{text: string, href: string|null}>, forms: Array<{index: number, method: string, action: string, html: string, fields: Array<{name: string, type: string, value: string, options?: string[], order: number}>}>, text: string, raw: string}}
+ * @returns {{url: string, title: string, headings: string[], links: Array<{text: string, href: string|null}>, anchors: Array<{text: string, href: null}>, forms: Array<{index: number, method: string, action: string, html: string, fields: Array<{name: string, type: string, value: string, options?: string[], order: number}>}>, text: string, raw: string}}
  */
 export function parsePage(html, baseUrl) {
   const src = String(html ?? "");
@@ -99,13 +99,14 @@ export function parsePage(html, baseUrl) {
     if (t) headings.push(t);
   }
   const links = [];
+  const anchors = []; // 断片リンク(遷移不能)。一覧用にtextを保持・hrefはnull
   const aRe = /<a\s[^>]*?href=(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a\s*>/gi;
   let am;
   while ((am = aRe.exec(src)) && links.length < 100) {
     const raw = am[1] ?? am[2] ?? am[3] ?? "";
     const text = btStripTags(am[4]);
     const href = normalizeUrl(raw, base);
-    if (href === null) continue; // javascript:/断片等は除外(誤遷移防止)
+    if (href === null) { if (text) anchors.push({ text, href: null }); continue; } // 断片はanchorsへ(一覧用)
     if (!text) continue;
     links.push({ text, href });
   }
@@ -127,7 +128,7 @@ export function parsePage(html, baseUrl) {
   const bodyHtml = src.replace(/<(script|style)(\s[^>]*)?>[\s\S]*?<\/\1\s*>/gi, " ");
   let textLines = btDecodeEntities(bodyHtml.replace(/<[^>]*>/g, "\n")).split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
   if (textLines.length > 200) textLines = textLines.slice(0, 200);
-  return { url: base, title, headings, links, forms, text: textLines.join("\n"), raw: src };
+  return { url: base, title, headings, links, anchors, forms, text: textLines.join("\n"), raw: src };
 }
 
 /**
@@ -141,7 +142,7 @@ export function extractElements(page, filter = {}) {
   let index = 0;
   for (const type of want) {
     if (type === "link") {
-      for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href });
+      for (const l of [...(page.links ?? []), ...(page.anchors ?? [])]) out.push({ index: ++index, type, text: l.text, href: l.href });
     } else if (type === "form") {
       for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {
