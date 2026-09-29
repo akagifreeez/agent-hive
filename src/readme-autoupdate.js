@@ -92,15 +92,20 @@ const LAYOUT_ROLES = {
 };
 
 export function generateRepoLayout(root) {
-  let entries;
+  const rows = [];
   try {
-    entries = readdirSync(root, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      .filter((name) => LAYOUT_ROLES[name]);
+    const top = readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+    for (const name of top.filter((n) => LAYOUT_ROLES[n])) rows.push(name);
+    // src/ はコードの本体。既知の役割を持つ子ディレクトリ(src/engine 等)を展開して載せる
+    const srcDir = join(root, "src");
+    if (existsSync(srcDir)) {
+      const kids = readdirSync(srcDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => `src/${e.name}`);
+      rows.push(...kids.filter((n) => LAYOUT_ROLES[n]));
+    }
   } catch {
     return null;
   }
+  const entries = [...new Set(rows)];
   if (!entries.length) return null;
   const rank = (n) => (n.startsWith("src/") ? 0 : n === "bin" ? 1 : n === "agents" ? 2 : n === "docs" ? 3 : 4);
   entries.sort((a, b) => {
