@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
-function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視 */ } }
+function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ } }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Board, Bus } from "../../src/engine/board.js";
