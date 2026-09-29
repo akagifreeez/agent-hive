@@ -55,6 +55,8 @@ export function aggregateUsage(history, opts = {}) {
     const d = new Date(h.at ?? "");
     if (isNaN(d.getTime())) continue;
     if (sinceMs != null && d.getTime() < sinceMs) continue; // 期間外は除外
+    // usage.summary(シナリオ全体の合計サマリ)はusage.roundの積み上げと二重計上になるため集計対象外
+    if (typeof h.agent !== "string" || !h.agent) continue;
     const date = d.toISOString().slice(0, 10);
     const thread = resolveThread(h);
     const t = h.totals ?? {};

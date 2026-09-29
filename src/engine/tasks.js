@@ -124,6 +124,7 @@ export class TaskBlackboard {
   // 依存が全部doneならtrue。depends_onに未完了タスクがあるopenはclaimできない(イシュー#2)。
   // 自己依存や壊れたグラフ(循環)で永遠に着手できない状態を作らないため、
   // 依存元が自分自身 / 未完了依存が全て自分自身のときは依存を無視してtrueを返す。
+  /** @param {string} file open配下のタスクファイル名 @returns {boolean} */
   canClaim(file) {
     const selfId = file.replace(/\.md$/, "");
     const meta = readMeta(join(this.open, file));

@@ -79,9 +79,10 @@ export function newUiToken() {
  * @param {() => Object[]} [o.onMcpList]
  * @param {(req: Object) => Promise<Object>} [o.onMcpAdd]
  * @param {(req: Object) => Object} [o.onMcpRemove]
+ * @param {(req: {topic: string, refs?: string[], rounds?: number}) => {ok?: boolean, error?: string, thread?: string, participants?: string[]}} [o.onDiscuss]
  * @returns {Promise<Object>} サーバーハンドル(port/close等)
  */
-export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null, onMcpList = null, onMcpAdd = null, onMcpRemove = null }) {
+export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null, onMcpList = null, onMcpAdd = null, onMcpRemove = null, onDiscuss = null }) {
   const startedAt = Date.now();
   // UIトークン。環境変数 HIVE_UI_TOKEN(CLI等の外部クライアント用)で上書きできる
   const uiToken = process.env.HIVE_UI_TOKEN || newUiToken();
@@ -262,7 +263,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (r) r.state = p.verdict === "approve" ? "approved" : "denied";
     },
     "scenario.started": (p) => { live.scenario = { name: p.name, phase: "running" }; },
-    "usage.summary": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), totals: p.usage ?? null }),
+    "usage.summary": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), totals: p.totals ?? p.usage ?? null }),
     "usage.round": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), agent: p.agent, thread: p.thread ?? '__main__', endedBy: p.endedBy ?? 'ok', totals: p.totals ?? null }),
     "scenario.finished": () => { if (live.scenario) live.scenario.phase = "done"; },
   };
@@ -447,6 +448,22 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         }
         const all = [...live.board].sort((a, b) => a.id - b.id);
         return json(res, { posts: all.slice(-200), total: boardStore.total() });
+      }
+      if (url.pathname === "/api/discuss" && req.method === "POST" && onDiscuss) {
+        // モデル横断ディスカッションの起動(/discussコマンド)。論点を指定すると
+        // 接続済みプロバイダの代表モデル同士が1つのスレッドで議論する(エージェントを起こさない)
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const r = onDiscuss(JSON.parse(body || "{}"));
+            if (!r || r.error) throw new Error(r?.error ?? "失敗しました");
+            json(res, r);
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
       }
       if (url.pathname === "/api/thread" && req.method === "POST" && onThread) {
         let body = "";
