@@ -67,8 +67,9 @@ export function wireCliNotify(bus, opts = {}) {
     const t0 = claimedAt.get(id);
     claimedAt.delete(id);
     if (t0 == null) return;
-    const tookSec = Math.round((Date.now() - t0) / 1000);
-    if (tookSec < longTaskSec) return;
+    const tookSecF = (Date.now() - t0) / 1000;
+    if (tookSecF < longTaskSec) return;
+    const tookSec = Math.round(tookSecF);
     const took = tookSec >= 3600 ? `${Math.floor(tookSec / 3600)}時間${Math.round((tookSec % 3600) / 60)}分` : `${Math.floor(tookSec / 60)}分${tookSec % 60}秒`;
     emit({ kind: "task.finished.long", at: new Date().toISOString(), taskId: id, agent: p.agent, title: `長時間タスク完了 ${id}`, body: `${p.agent ?? "?"} が${took}かけて完了` });
   });
