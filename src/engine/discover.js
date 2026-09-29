@@ -5,13 +5,17 @@
 //    review-changesタスク生成。レビュー完了でreviewedタグをmainへ前進させる。
 // ③ 記憶プローブ: 未処理の完了タスクがあればdistill-learnings起票(idleなエージェントが
 //    workspace/memory/ へ知見を抽出する)。完了時にエンジンが処理済みマーカーを進める。
+// ④ READMEプローブ: コードからREADMEの自動セクション(readme-auto.js)を再生成し、
+//    差分があればupdate-readmeタスク起票。マーカー外(人間の手書き部分)は構造的に触らない。
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "./exec.js";
+import { detectStaleSections, updateReadmeFromCode, genCliCommands, extractHelp } from "./readme-auto.js";
 
 export const FIX_TASK_ID = "fix-test-failures";
 export const REVIEW_TASK_ID = "review-changes";
 export const DISTILL_TASK_ID = "distill-learnings";
+export const README_TASK_ID = "update-readme";
 const DISTILL_MARKER = "memory/.distilled"; // workspace起点。1行=処理済みのdoneタスクid
 
 export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCommand, exec = runCommand }) {
@@ -103,6 +107,33 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
     }
   }
 
+  async function probeReadme() {
+    const path = join(workspace, "README.md");
+    if (!existsSync(path)) return;
+    if (tasks.existsOpenOrClaimed(README_TASK_ID)) return;
+    const stale = detectStaleSections({
+      repoRoot: workspace,
+      generators: {
+        "cli-commands": () => genCliCommandsFromRoot(workspace),
+        "repo-layout": () => genRepoLayout(workspace),
+      },
+    });
+    if (stale.length === 0) return;
+    tasks.create({
+      id: README_TASK_ID,
+      acceptance: "READMEの自動セクション(`<!-- auto:... -->`間)だけが更新され、マーカー外の差分がgit diff README.mdに現れないこと。npm test全緑。",
+      body: `コード変更をREADMEの自動セクションへ反映せよ(発見器が検知: 対象=${stale.join(", ")})。\n\n- まず bash で \`git merge main\` して最新mainを取り込む。\n- node で readme-auto.js を使ってREADMEを更新する: \`node --input-type=module -e "import { updateReadmeFromCode } from './src/engine/readme-auto.js'; console.log(updateReadmeFromCode({ repoRoot: process.cwd() }));"\`\n- 自動セクション(\`<!-- auto:... start/end -->\`間)だけが変わること。マーカー外の人間の文章は編集しない。\n- \`git diff README.md\` で差分を確認し、マーカー外に変化があれば中止してボードへ報告する。\n- 終わったらボードへ報告して finish_task。`,
+    });
+    bus.emit("discovery.created", { taskId: README_TASK_ID });
+  }
+
+  // bin/hive.jsのHELPを取り出してcli-commandsセクション本文を作るラッパ
+  function genCliCommandsFromRoot(root) {
+    const hivePath = join(root, "bin", "hive.js");
+    if (!existsSync(hivePath)) return "";
+    return genCliCommands(extractHelp(readFileSync(hivePath, "utf8")));
+  }
+
   async function tick() {
     if (busy || stopped) return false;
     busy = true;
@@ -110,6 +141,7 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
       await probeTests();
       await probeDiffs();
       await probeMemory();
+      await probeReadme();
       return true;
     } catch (err) {
       bus.emit("discovery.error", { error: err.message });
