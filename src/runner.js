@@ -12,7 +12,13 @@ import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
 import { setupWorktrees } from "./engine/worktree.js";
 import { runCommand } from "./engine/exec.js";
 import { UsageLedger } from "./engine/usage.js";
-import { OpenAIModel, FallbackModel } from "./model/openai.js";
+import { OpenAIModel } from "./model/openai.js";
+import { createModelFactory } from "./model/factory.js";
+
+// 旧来のrunner.js内実装をsrc/model/factory.jsへ移設済み。api(ワイヤ形式)で
+// アダプタを選択する新版(agent.modelは"provider/model"でもベアIDでもよい)。
+// re-exportで既存の参照(index.js等)の互換を維持する。
+export { createModelFactory };
 import { SpawnManager } from "./engine/spawn.js";
 import { ChatHost } from "./engine/chat.js";
 import { buildMemoryContext, ensurePcRules } from "./engine/memory.js";
@@ -22,21 +28,6 @@ import { createWorkflowApi, runWorkflowScript } from "./engine/workflow.js";
 import { Hooks } from "./engine/hooks.js";
 import { ROOT, dataDir } from "./config.js";
 import { renameSync } from "node:fs";
-
-export function createModelFactory(config) {
-  return (agent = {}) => {
-    const mk = (model, effort) => new OpenAIModel({
-      ...config.model,
-      model: model ?? config.model.model,
-      reasoningEffort: effort ?? agent.reasoningEffort ?? config.model.reasoningEffort,
-      webSearch: agent.webSearch ?? config.model.webSearch,
-    });
-    const primary = agent.model ? mk(agent.model) : mk();
-    // フォールバック列(config.model.fallbackModels)があれば、終端エラー時に順に試す(ZCode model-selection流)
-    const fallbacks = (config.model.fallbackModels ?? []).map((m) => mk(m));
-    return fallbacks.length ? new FallbackModel({ primary, fallbacks }) : primary;
-  };
-}
 
 // メインチャット常駐モード(v6): リーダー1体がメインチャットで壁打ちと計画を担い、
 // open_threadで開かれたサブスレッド(project)ごとに3ワーカーが並行作業する。

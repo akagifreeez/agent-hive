@@ -14,6 +14,7 @@ import { runCommand } from "../engine/exec.js";
 import { openInBrowser } from "../engine/browser.js";
 import { PermissionGate } from "../engine/permissions.js";
 import { ROOT, dataDir } from "../config.js";
+import { modelStateInfo, resolveDefaultSpec } from "../model/factory.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
 
@@ -324,7 +325,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       // 総件数: チャットモードではディスクが真実。RAMのみのボード(未永続化)はRAM件数で代用
-      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length), budget: budgetState }, model: { name: config.model.model, fallbacks: config.model.fallbackModels ?? [] }, apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, budget: budgetState, mcp: config.mcp?.servers ?? {} });
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length), budget: budgetState }, model: modelStateInfo(config), apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, budget: budgetState, mcp: config.mcp?.servers ?? {} });
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       // ?q= があるときは全文検索モード(全スレッド横断の本文部分一致)
@@ -721,16 +722,25 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
 
 // APIキーを鍵ファイルへ保存し、実行中のconfigにも即時反映する(設定ウィンドウ用)。
 // 鍵は応答に返さない(ヒント=末尾4文字のみ)。書き込み先は既存の鍵ファイルがあればそこ、
-// 無ければDATA側(userData)に新規作成。環境変数が設定されている場合はそちらが優先される旨を返す
+// 無ければDATA側(userData)に新規作成。新形models設定でauthが未指定の既定プロバイダには
+// state/models-<id>.keyを自動割り当てする。環境変数が設定されている場合はそちらが優先される旨を返す
 function saveApiKey(body, config) {
   const key = String(body.key ?? "").trim();
   if (!key) throw new Error("APIキーが空です");
   if (/\s/.test(key)) throw new Error("APIキーに空白は使えません");
   if (key.length < 8) throw new Error("APIキーが短すぎます");
-  const rel = config.model?.apiKeyFile;
+  let rel = config.model?.apiKeyFile;
+  if (!rel && config.models) {
+    const spec = resolveDefaultSpec(config);
+    if (spec && !spec.provider.auth?.env && !spec.provider.auth?.file && !spec.provider.auth?.value) {
+      if (!spec.provider.auth) spec.provider.auth = {};
+      spec.provider.auth.file = join("state", `models-${spec.provider.id}.key`); // dataDir基準で解決される相対パス
+      rel = spec.provider.auth.file;
+    }
+  }
   if (!rel) {
     // 鍵ファイル運用でない場合は環境変数案内のみ(書き込み先が無い)
-    return { ok: false, error: "hive.config.json に model.apiKeyFile がありません。環境変数で設定してください" };
+    return { ok: false, error: "設定に鍵の保存先がありません(model.apiKeyFile または models.providers.<id>.auth.file を設定するか、環境変数で設定してください)" };
   }
   const candidates = [resolve(ROOT, rel), resolve(dataDir(), rel)];
   const existing = candidates.find((f) => existsSync(f));

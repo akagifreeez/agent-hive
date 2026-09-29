@@ -6,7 +6,7 @@ import { writeFileSync } from "node:fs";
 import http from "node:http";
 import { join } from "node:path";
 import { loadConfig, dataDir } from "../config.js";
-import { OpenAIModel } from "../model/openai.js";
+import { createModelFactory } from "../model/factory.js";
 import { startUi } from "../ui/server.js";
 import { chatUiHandlers } from "../ui/chat-wiring.js";
 import { runChat } from "../runner.js";
@@ -78,7 +78,7 @@ async function bootstrap() {
     notify(`スレッド開始: ${p.name}`, p.goal ?? ""));
 
   if (SCENARIO) {
-    await startUi({ config, modelFactory: () => new OpenAIModel(config.model), bus, autoStart: true });
+    await startUi({ config, modelFactory: createModelFactory(config), bus, autoStart: true });
   } else {
     // 既定: メインチャット常駐モード(v6: リーダー+サブスレッド)
     // thread.openedの取りこぼし防止のため、UIの待ち受けを先に立ててからrunChatする

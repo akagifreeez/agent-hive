@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { OpenAIModel } from "./model/openai.js";
+import { createModelFactory } from "./model/factory.js";
 import { runScenario, runChat } from "./runner.js";
 import { Bus } from "./engine/board.js";
 import { startUi } from "./ui/server.js";
@@ -23,7 +23,7 @@ async function main() {
   const bus = new Bus();
   wireConsoleLog(bus);
 
-  const modelFactory = () => new OpenAIModel(config.model);
+  const modelFactory = createModelFactory(config);
 
   if (args.includes("--chat")) {
     // デスクトップ殻と同じ順(UIの待ち受けを先に立ててからrunChat)。

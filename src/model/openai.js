@@ -1,4 +1,5 @@
-// OpenAI互換(chat/completions)アダプタ。GLM(Z.AI/OpenRouter)等を想定。
+// openai-completions ワイヤ形式のアダプタ(models.providers.<id>.api="openai-completions"で選択)。
+// OpenAI互換(chat/completions)。GLM(Z.AI/OpenRouter)等を想定。
 // 依存ゼロ(node内蔵fetch)。
 // usage(prompt/completion/reasoning/cost)を返し、コスト計測とコンテキスト管理の
 // 判定ソース(provider usage優先: ZCode compact/policy.tsと同方針)に使う。
@@ -9,11 +10,12 @@
  */
 export class OpenAIModel {
   /**
-   * @param {{baseUrl: string, apiKey: string, model?: string, temperature?: number, maxTokens?: number, timeoutMs?: number, reasoningEffort?: string|null, webSearch?: boolean|object|null}} cfg
+   * @param {{baseUrl: string, apiKey: string, model?: string, temperature?: number, maxTokens?: number, timeoutMs?: number, reasoningEffort?: string|null, webSearch?: boolean|object|null, costRates?: {input?: number, output?: number}|null}} cfg
    *   webSearch: サーバー側web_searchツール(Z.AI固有。functionツールと併存可)。
    *   true=既定パラメータ(search-prime)、オブジェクト=web_search引数へそのまま展開、null/falsy=無効。
+   *   costRates: カタログ単価($/1Mトークン)。usage.costをプロバイダが返さない場合のフォールバック計算に使う。
    */
-  constructor({ baseUrl, apiKey, model, temperature = 0.7, maxTokens = 2000, timeoutMs = 120000, reasoningEffort = null, webSearch = null }) {
+  constructor({ baseUrl, apiKey, model, temperature = 0.7, maxTokens = 2000, timeoutMs = 120000, reasoningEffort = null, webSearch = null, costRates = null }) {
     if (!apiKey) throw new Error("APIキーが未設定です(環境変数か apiKeyFile を設定してください)");
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
@@ -23,6 +25,7 @@ export class OpenAIModel {
     this.timeoutMs = timeoutMs;
     this.reasoningEffort = reasoningEffort;
     this.webSearch = webSearch;
+    this.costRates = costRates;
   }
 
   async chat({ messages, tools, onDelta = null }) {
@@ -127,7 +130,7 @@ export class OpenAIModel {
           arguments: safeParseArgs(tc.function.arguments),
         })),
         raw: msg,
-        usage: extractUsage(usage),
+        usage: extractUsage(usage, this.costRates),
         searches, // web_search実行結果の出典一覧([{title,link,refer,...}]、未実行時はnull)
       };
     }
@@ -289,13 +292,20 @@ function modelSleep(ms) {
   return sleepImpl(ms);
 }
 
-export function extractUsage(u) {
+export function extractUsage(u, costRates = null) {
   if (!u) return { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+  const promptTokens = u.prompt_tokens ?? 0;
+  const completionTokens = u.completion_tokens ?? 0;
+  let costUsd = u.cost ?? 0;
+  // プロバイダが実費を返さない場合のみカタログ単価で概算($/1Mトークン)
+  if (!costUsd && costRates?.input != null && costRates?.output != null) {
+    costUsd = (promptTokens * costRates.input + completionTokens * costRates.output) / 1_000_000;
+  }
   return {
-    promptTokens: u.prompt_tokens ?? 0,
-    completionTokens: u.completion_tokens ?? 0,
+    promptTokens,
+    completionTokens,
     reasoningTokens: u.completion_tokens_details?.reasoning_tokens ?? 0,
-    costUsd: u.cost ?? 0,
+    costUsd,
   };
 }
 

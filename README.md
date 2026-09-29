@@ -59,7 +59,27 @@ npm start              # ブラウザUIのみ(http://localhost:7789)
 
 ### 設定
 
-- `hive.config.json`: モデル接続(baseUrl/apiKeyEnv/apiKeyFile/webSearch)/エージェント定義/チャット運用(自動増員・claim待ち・予算)など。`model.webSearch: true` でZ.AIのサーバー側web検索を有効化(GLM Coding Planで使える内蔵ツール。検索結果の注入ぶんpromptトークンが増えるため、`agents[].webSearch` でエージェント別に上書き可)
+- `hive.config.json` の `models` セクション: モデル接続をプロバイダ単位で定義する(複数契約に対応。`api` はワイヤ形式=今は `openai-completions` のみ)。`default` は `provider/model` 形の既定モデル、`fallbacks` は終端エラー時の代替列。auth は `env`(環境変数)/`file`(鍵ファイル)/`value`(直値)のいずれか:
+
+  ```json
+  "models": {
+    "default": "zai/glm-5.3-flash",
+    "fallbacks": [],
+    "providers": {
+      "zai": {
+        "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+        "api": "openai-completions",
+        "auth": { "env": "ZAI_API_KEY", "file": "../../zai.key" },
+        "params": { "temperature": 0.7, "maxTokens": 4000, "timeoutMs": 180000, "reasoningEffort": "low", "webSearch": true },
+        "models": [
+          { "id": "glm-5.3-flash", "name": "GLM-5.3-Flash", "reasoning": true, "contextWindow": 200000, "maxTokens": 4000 }
+        ]
+      }
+    }
+  }
+  ```
+
+  旧来の `model` セクション(baseUrl/apiKeyEnv/apiKeyFile)も引き続き有効で、自動で `default` プロバイダに読み替えられる。`params.webSearch: true` でZ.AIのサーバー側web検索を有効化(GLM Coding Planで使える内蔵ツール。検索結果の注入ぶんpromptトークンが増えるため、`agents[].webSearch` でエージェント別に上書き可)
 - `hive.local.json`: ワークスペース位置などのローカル上書き(git除外対象)
 - ポート: UI=7789 / モニタ=7791。`HIVE_UI_PORT` / `HIVE_MONITOR_PORT` 環境変数で変更
 - ワークスペース: 既定はリポジトリ直下。梱包実行時はuserData配下(`HIVE_DATA`で上書き)
