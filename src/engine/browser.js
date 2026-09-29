@@ -29,7 +29,5 @@ export {
   extractForm,
   applyFormValues,
   buildSubmission,
-  browserFetch,
-  browserExtract,
-  browserSubmit,
 } from "./browser-tools.js";
+export { browserFetch, browserExtract, browserSubmit } from "./browser-net.js";
