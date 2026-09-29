@@ -49,6 +49,12 @@ test("CLI: status/board/tasksが実サーバーに対して動く", async () => 
   const help = await runCli(["--help"], port);
   assert.equal(help.code, 0);
   assert.match(help.stdout, /agent-hive CLI/);
+  assert.match(help.stdout, /notify/, "CLIヘルプにnotifyサブコマンドが載る(#11)");
+
+  // notifyサブコマンド: monitorPort未指定(UIのみ)なら分かりやすい案内で非ゼロ終了
+  const nf = await runCli(["notify"], port);
+  assert.equal(nf.code, 1);
+  assert.match(nf.stderr, /監視\(monitor\)が無効/);
 
   ui.close();
   rmTree(ws);
