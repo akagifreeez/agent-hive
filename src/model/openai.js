@@ -273,7 +273,16 @@ export function computeRetryDelay(attempt, retryAfterMs = undefined, jitter = tr
   return Math.round(capped * (0.5 + Math.random() * 0.5));
 }
 
-function parseRetryAfterMs(res) {
+// テストで待ち時間を差し替えられるようにする(sleepはアダプタ間で共有)
+let sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms));
+export function setModelSleep(fn) {
+  sleepImpl = fn;
+}
+export function modelSleep(ms) {
+  return sleepImpl(ms);
+}
+
+export function parseRetryAfterMs(res) {
   const v = res.headers?.get?.("retry-after");
   if (!v) return undefined;
   const n = Number(v);
@@ -281,15 +290,6 @@ function parseRetryAfterMs(res) {
   const d = Date.parse(v);
   if (!Number.isNaN(d)) return Math.max(0, d - Date.now());
   return undefined;
-}
-
-// テストで待ち時間を差し替えられるようにする
-let sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms));
-export function setModelSleep(fn) {
-  sleepImpl = fn;
-}
-function modelSleep(ms) {
-  return sleepImpl(ms);
 }
 
 export function extractUsage(u, costRates = null) {

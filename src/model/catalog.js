@@ -3,8 +3,8 @@
  * ModelRefを実行時のModelSpecへ解決する。OpenClaw ModelRegistryの最小版。
  * プロバイダ(認証・baseUrlの名前空間)とapi(ワイヤ形式)は直交する。
  * @typedef {{id: string, baseUrl: string, api: string, name?: string, auth?: {env?: string, file?: string, value?: string}, params?: {temperature?: number, maxTokens?: number, timeoutMs?: number, contextWindow?: number, reasoningEffort?: string, webSearch?: boolean|object|null}, models?: Array<{id: string, name?: string, contextWindow?: number, maxTokens?: number, reasoning?: boolean, reasoningEffort?: string, cost?: {input?: number, output?: number}|null}>}} ProviderCfg
- * @typedef {{id: string, name?: string, contextWindow?: number, maxTokens?: number, reasoning?: boolean, reasoningEffort?: string, cost?: {input?: number, output?: number}|null}} ModelRow
- * @typedef {{provider: ProviderCfg, model: {id: string, name: string, contextWindow: number, maxTokens: number, reasoning: boolean, reasoningEffort: string|null, cost: {input?: number, output?: number}|null}}} ModelSpec
+ * @typedef {{id: string, name?: string, contextWindow?: number, maxTokens?: number, reasoning?: boolean, reasoningEffort?: string, cost?: {input?: number, output?: number, cacheRead?: number, cacheWrite?: number}|null}} ModelRow
+ * @typedef {{provider: ProviderCfg, model: {id: string, name: string, contextWindow: number, maxTokens: number, reasoning: boolean, reasoningEffort: string|null, cost: {input?: number, output?: number, cacheRead?: number, cacheWrite?: number}|null}}} ModelSpec
  * @typedef {{default?: string|null, fallbacks?: string[]|null, providers?: Record<string, Object>}} ModelsCfg
  */
 import { readFileSync, existsSync } from "node:fs";
@@ -26,16 +26,18 @@ export function buildCatalog(modelsCfg = {}) {
   return { providers, defaultRef: modelsCfg.default ?? null, fallbackRefs: modelsCfg.fallbacks ?? [] };
 }
 
-/** ベアIDのときの既定プロバイダを推定する(既定ref→内蔵+設定の一意一致の順)。
+/** ベアIDのときの既定プロバイダを推定する(内蔵+設定の一意一致 → 既定ref、の順)。
+ * 例: builtinにclaude-*を持つ状態でdefaultがzaiでも、"claude-sonnet-5-5"はanthropicへ向く。
  * @param {ReturnType<typeof buildCatalog>} catalog @param {string} ref ModelRefまたはベアID */
 function guessProvider(catalog, ref) {
+  const bare = ref.includes("/") ? ref.slice(ref.indexOf("/") + 1) : ref;
+  const hits = Object.values(catalog.providers).filter((p) => (p.models ?? []).some((m) => m.id === bare));
+  if (hits.length === 1) return hits[0].id;
   if (catalog.defaultRef) {
     const i = catalog.defaultRef.indexOf("/");
     if (i > 0) return catalog.defaultRef.slice(0, i);
   }
-  const bare = ref.includes("/") ? ref.slice(ref.indexOf("/") + 1) : ref;
-  const hits = Object.values(catalog.providers).filter((p) => (p.models ?? []).some((m) => m.id === bare));
-  return hits.length === 1 ? hits[0].id : null;
+  return null;
 }
 
 /** ModelRef(またはベアID)をModelSpecへ解決する。カタログ行が無いモデルは既定値で動く。

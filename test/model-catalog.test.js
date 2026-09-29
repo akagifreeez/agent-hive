@@ -42,6 +42,13 @@ test("resolveModel: カタログ行が無いモデルは既定値で解決でき
   assert.equal(s.model.contextWindow, 200000);
 });
 
+test("resolveModel: ベアIDが内蔵カタログに一意一致する場合は既定と異なるプロバイダへ向く", () => {
+  // defaultがzaiでも claude-haiku-4-5 は内蔵anthropicに一意一致する
+  const cat = buildCatalog({ default: "zai/glm-5.3-flash" });
+  assert.equal(resolveModel(cat, "claude-haiku-4-5").provider.id, "anthropic");
+  assert.equal(resolveModel(cat, "glm-5.3-flash").provider.id, "zai", "既存のGLMベアIDは従来どおり");
+});
+
 test("resolveModel: 未知プロバイダはエラーで利用可能一覧を出す", () => {
   const cat = buildCatalog({ default: "zai/glm-5.3-flash" });
   assert.throws(() => resolveModel(cat, "nope/m"), /未知のプロバイダ "nope".*zai/s);

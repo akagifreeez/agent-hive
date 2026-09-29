@@ -4,11 +4,13 @@
 // anthropic-messages(M2・Claude)やopenai-chatgpt-responses(M4・Codex OAuth)はここに足す。
 import { ROOT, dataDir } from "../config.js";
 import { OpenAIModel, FallbackModel } from "./openai.js";
+import { AnthropicModel } from "./anthropic-messages.js";
 import { buildCatalog, resolveModel, resolveAuthValue, specRef } from "./catalog.js";
 
 /** api(ワイヤ形式)→アダプタクラス。 */
 const ADAPTERS = {
   "openai-completions": OpenAIModel,
+  "anthropic-messages": AnthropicModel,
 };
 
 /** モデルファクトリを返す。旧runner.js内実装の一般化:
@@ -38,7 +40,12 @@ export function createModelFactory(config) {
         reasoningEffort: effort ?? spec.model.reasoningEffort ?? spec.provider.params?.reasoningEffort ?? null,
         webSearch: agent.webSearch ?? spec.provider.params?.webSearch ?? null,
         costRates: spec.model.cost
-          ? { input: spec.model.cost.input ?? 0, output: spec.model.cost.output ?? 0 }
+          ? {
+              input: spec.model.cost.input ?? 0,
+              output: spec.model.cost.output ?? 0,
+              cacheRead: spec.model.cost.cacheRead ?? 0,
+              cacheWrite: spec.model.cost.cacheWrite ?? 0,
+            }
           : null,
       });
     };

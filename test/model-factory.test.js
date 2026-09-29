@@ -37,7 +37,7 @@ test("createModelFactory: 既定モデルがアダプタへ正しく渡る", () 
   assert.equal(m.maxTokens, 3000);
   assert.equal(m.reasoningEffort, "low");
   assert.equal(m.webSearch, true);
-  assert.deepEqual(m.costRates, { input: 1, output: 2 });
+  assert.deepEqual(m.costRates, { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 });
 });
 
 test("createModelFactory: fallbacksがあるとFallbackModelで包む", () => {
