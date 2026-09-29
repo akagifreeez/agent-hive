@@ -396,6 +396,32 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!tasks.claimedBy(agent.id).some((t) => t.id === taskId)) {
           return { ok: false, text: "そのタスクは請求していません(task_idを確認)。" };
         }
+        // 検証タスク(verify-*)の完了: これ以上の検証タスクを起票しない(無限連鎖防止)。
+        // 元タスクが保留中なら実装者≠検証者を確認してマージ+完了確定する。
+        if (mainWorkspace && taskId.startsWith("verify-")) {
+          const originalId = taskId.replace(/^verify-/, "");
+          const pending = approvals?.pending.get(originalId) ?? null;
+          if (pending && pending.agentId === agent.id) {
+            return { ok: false, text: `自分が実装したタスク ${originalId} の検証は、実装者以外が行う必要があります(検証タスクは保留のまま残ります)。` };
+          }
+          const verifyDone = tasks.finish(agent, taskId);
+          if (!pending) {
+            return { ok: true, text: verifyDone ? `検証タスク ${taskId} を完了にしました(元タスクの保留情報が無いためマージは行いません)。` : "完了確定に失敗しました。" };
+          }
+          const implementer = { id: pending.agentId, displayName: pending.agentId };
+          const m = await mergeAgentWork({ mainWorkspace, worktreePath: pending.worktreePath, agent: implementer, taskId: originalId });
+          if (m.conflict) {
+            return { ok: false, text: `マージが競合しています。実装者(${pending.agentId})に \`git merge main\` での解決を依頼してください。\n${m.text.slice(0, 600)}` };
+          }
+          if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
+          approvals.pending.delete(originalId);
+          const implDone = tasks.finish({ id: pending.agentId }, originalId);
+          bus.emit("merge.completed", { agent: pending.agentId, taskId: originalId, stat: m.stat ?? "", patch: m.patch ?? "", summary: m.summary ?? "" });
+          board.post("system", `[承認] ${agent.displayName}(${agent.id}) がタスク ${originalId}(${pending.agentId}実装)を検証し、main へマージしました。`);
+          return { ok: true, text: implDone
+            ? `検証完了。タスク ${originalId} を承認してマージしました。`
+            : `検証完了。タスク ${originalId} をマージしました(元タスクの完了確定は既に済みの可能性があります)。` };
+        }
         // worktree運用時はmainへ自動マージしてから完了確定
         if (mainWorkspace) {
           // 実装者≠検証者の強制(approvals.require): マージを保留し、実装者以外の検証タスクを起票する。
@@ -409,7 +435,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
                 id: verifyId,
                 role: reviewer.role,
                 project: claimedTask?.project ?? "",
-                body: `検証: タスク ${taskId}(${agent.id} 実装)の差分をレビューしてください。\n動作確認(テスト実行など)を行い、問題なければ approve_task (task_id: "${taskId}") で承認してください。承認後、成果が main へマージされます。`,
+                body: `検証: タスク ${taskId}(${agent.id} 実装)の差分をレビューしてください。\n動作確認(テスト実行など)を行い、問題なければ finish_task (task_id: "${verifyId}") で検証完了としてください。承認後、成果が main へマージされます。`,
                 createdBy: agent.id,
               });
               approvals.pending.set(taskId, { agentId: agent.id, worktreePath: workspace });
