@@ -210,6 +210,8 @@
   body.widepanel { grid-template-columns: 240px 1fr 640px; }
   #panel-btn { position: absolute; right: 188px; top: 9px; background: var(--panel2); border: 1px solid var(--separator); color: var(--sub); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
   #panel-btn:hover { color: var(--label); border-color: var(--line-strong); }
+  #clear-board-btn { position: absolute; right: 316px; top: 9px; background: var(--panel2); border: 1px solid var(--separator); color: var(--sub); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
+  #clear-board-btn:hover { color: var(--label); border-color: var(--line-strong); }
   #browserpane { display: none; flex: 1; flex-direction: column; min-height: 0; }
   .bbar { display: flex; gap: 4px; padding: 5px; border-bottom: 1px solid var(--separator); }
   .bbar input { flex: 1; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 4px 8px; font-size: 11px; font-family: var(--font-mono); box-shadow: var(--inset-field); }
@@ -344,6 +346,7 @@
       <div id="board-search-box">
         <input id="board-search" type="text" placeholder="ボードを全文検索(Enter)" autocomplete="off">
       </div>
+      <button id="clear-board-btn" title="このスレッドのチャット履歴をクリア(タスク・メモリは残る)">クリア</button>
       <button id="panel-btn" title="右パネルの表示/非表示">パネル</button>
       <button id="monitor-btn" title="モニタ(読み取り専用ダッシュボード)">モニタ</button>
       <button id="settings-btn" title="設定">設定</button>
@@ -410,6 +413,15 @@
     <h3>設定</h3>
       <div class="set-row"><label>権限モード</label>
         <select id="set-perm"><option value="normal">normal(要承認)</option><option value="auto">auto(自動許可)</option></select>
+      </div>
+    <div class="set-row"><label>ワークスペース</label>
+        <div style="flex:1">
+          <div style="display:flex;gap:6px">
+            <input id="set-ws" placeholder="現在のパス" spellcheck="false">
+            <button class="btn" id="set-ws-save" style="flex-shrink:0">保存</button>
+          </div>
+          <div style="font-size:11px;color:var(--label-tertiary);margin-top:3px" id="set-ws-note"></div>
+        </div>
       </div>
     <div class="set-row"><label>モデルと接続</label>
         <div style="flex:1">
@@ -1756,6 +1768,7 @@ $("board-search").addEventListener("keydown", (e) => {
 function openSettings() {
   // 現在値: UIから変更済みならその値、未変更ならサーバーが配る実値(live)/config値
   $("set-perm").value = lastState?.live?.permMode ?? "normal";
+  renderWorkspaceRow();
   renderModelsList();
   renderMcpList();
   const memFiles = (lastState?.files ?? []).filter((f) => f.startsWith("memory/") && f.endsWith(".md"));
@@ -1765,6 +1778,50 @@ function openSettings() {
 $("settings-btn").onclick = openSettings;
 
 $("settings-btn").onclick = openSettings;
+
+// チャット履歴のクリア(ヘッダ「クリア」)。確認ダイアログを挟む(破壊的操作)。
+// タスク・メモリには影響しない=過去のタスク(完了済み)はタスクタブに残り続ける
+$("clear-board-btn").onclick = () => {
+  const dlg = $("dlg");
+  const inp = $("dlg-input");
+  $("dlg-title").textContent = "チャット履歴のクリア";
+  $("dlg-body").textContent = `このスレッド(#${selectedThread === "__main__" ? "メイン" : selectedThread})のチャット履歴を削除します。\nタスク・メモリには影響しません(過去のタスクは残ります)。`;
+  inp.style.display = "none";
+  $("dlg-ok").textContent = "クリア";
+  dlg.showModal();
+  $("dlg-ok").onclick = async () => {
+    dlg.close();
+    inp.style.display = "";
+    const r = await (await hfetch("/api/clear-board", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ thread: selectedThread }) })).json();
+    if (r.error) { toast(`クリア: ${r.error}`); return; }
+    toast(`チャット履歴をクリアしました(${r.clearedPosts}件)`, "ok");
+    threadBoards.delete(selectedThread);
+    renderAll();
+  };
+  $("dlg-cancel").onclick = () => { dlg.close(); inp.style.display = ""; };
+};
+
+/* ================= 設定ウィンドウ: ワークスペース(開発フォルダ) ================= */
+// 現在のワークスペースを表示し、入力したパスをhive.local.jsonへ保存する(再起動で反映)
+async function renderWorkspaceRow() {
+  const note = $("set-ws-note");
+  try {
+    const { workspace, dataDir } = await (await hfetch("/api/workspace")).json();
+    $("set-ws").placeholder = workspace;
+    note.textContent = `現在: ${workspace} / データ: ${dataDir}`;
+  } catch (e) {
+    note.textContent = `取得に失敗: ${e.message}`;
+  }
+}
+$("set-ws-save").onclick = async () => {
+  const path = $("set-ws").value.trim();
+  if (!path) { toast("パスが空です"); return; }
+  const r = await (await hfetch("/api/workspace", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }) })).json();
+  if (r.error) { toast(`ワークスペース: ${r.error}`); return; }
+  $("set-ws").value = "";
+  $("set-ws-note").textContent = `次回起動から: ${r.path}`;
+  toast(r.note, "ok");
+};
 
 /* ================= 設定ウィンドウ: モデルと接続(鍵保存・疎通テスト) ================= */
 // プロバイダごとの行(鍵の状態ドット・鍵入力+保存・テスト送信)。生の鍵は表示しない
@@ -2022,6 +2079,14 @@ es.onmessage = (e) => {
       unread[th] = (unread[th] ?? 0) + 1;
       if (lastState) renderNav(lastState.live.threads);
     }
+    return;
+  }
+  if (type === "board.cleared") {
+    const th = payload?.thread ?? "__main__";
+    threadBoards.delete(th); // スレッド別キャッシュを捨てる(次回は空のディスクから読み直す)
+    unread[th] = 0;
+    if (th === selectedThread) renderAll();
+    else if (lastState) renderNav(lastState.live.threads);
     return;
   }
   if (["agent.turn", "agent.delta", "tool.call", "tool.result", "agent.status", "agent.spawned", "thread.opened", "merge.completed",

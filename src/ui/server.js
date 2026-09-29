@@ -247,6 +247,13 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       // RAMに置くのは末尾だけ。全文はJSONLが真実で、古い分は/api/boardがディスクから読む
       if (live.board.length > 800) live.board.splice(0, live.board.length - 800);
     },
+    "board.cleared": (p) => {
+      // チャット履歴のクリア。RAM末尾からも該当スレッドの投稿を除去(タスク/メモリには触らない)
+      const t = p?.thread ?? "__main__";
+      for (let i = live.board.length - 1; i >= 0; i--) {
+        if ((live.board[i].thread ?? "__main__") === t) live.board.splice(i, 1);
+      }
+    },
     "permission.request": (p) => { live.requests.push({ ...p, state: "pending" }); },
     "permission.resolved": (p) => {
       const r = live.requests.find((x) => x.id === p.id);
@@ -348,6 +355,52 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/models") return json(res, { model: modelStateInfo(config) });
+      if (url.pathname === "/api/clear-board" && req.method === "POST") {
+        // チャット履歴のクリア(設定ウィンドウ/ヘッダの「履歴クリア」)。タスク・メモリには触らない
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const { thread } = JSON.parse(body || "{}");
+            const t = String(thread ?? "__main__") || "__main__";
+            const r = boardStore.clear(t);
+            bus.emit("board.cleared", { thread: t });
+            // runner側のBoardメモリも空にする(次ラウンドの文脈に過去投稿を残さない)
+            bus.emit("board.clear", { thread: t });
+            json(res, { ok: true, thread: t, clearedPosts: r.count });
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/workspace" && req.method === "GET") {
+        return json(res, { workspace: config.workspace, dataDir: dataDir() });
+      }
+      if (url.pathname === "/api/workspace" && req.method === "POST") {
+        // ワークスペース(開発フォルダ)の変更。hive.local.jsonに書いて再起動で反映する
+        // (実行中のボード/タスク/worktreeと結びつくためホットスワップはしない)
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const p = String(JSON.parse(body || "{}").path ?? "").trim();
+            if (!p) throw new Error("パスが空です");
+            mkdirSync(p, { recursive: true }); // 新規フォルダも許容(空フォルダから始める)
+            const localPath = resolve(dataDir(), "hive.local.json");
+            let local = {};
+            if (existsSync(localPath)) {
+              try { local = JSON.parse(readFileSync(localPath, "utf8")); } catch { /* 壊れていれば新規作成 */ }
+            }
+            local.workspace = p;
+            writeFileSync(localPath, JSON.stringify(local, null, 1));
+            json(res, { ok: true, path: p, note: "保存しました。hiveの再起動で反映されます" });
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/board") {
         const q = url.searchParams.get("q");
         if (q !== null) {

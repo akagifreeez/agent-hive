@@ -121,6 +121,13 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
 
   // サブスレッド: project名=スレッド名。3ワーカー( personas: workers )が専用ボードで並行作業
   const threads = new Map();
+  // UIからのチャット履歴クリア: 対象スレッドのBoardメモリを空にする(ディスク/索引はserver側のBoardStore.clear)。
+  // タスク・メモリ(mem-*.json)には触らない=完了済みタスクの履歴は消えない
+  bus.on("board.clear", (p) => {
+    const t = p?.thread ?? "__main__";
+    const b = t === "__main__" ? mainBoard : threads.get(t)?.board;
+    if (b) b.clearMemory();
+  });
   const workflowRuns = new Map(); // 実行中のワークフロー(同名の同時実行を防ぐ)
   const registryPath = join(stateDir, "threads.json");
   const writeRegistry = () => {

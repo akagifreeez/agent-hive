@@ -42,6 +42,13 @@ export class Board {
     }
   }
 
+  // メモリ内の投稿を空にする(UIからの履歴クリア用。ディスク/索引はBoardStore.clearが担当)。
+  // seqも0へ戻す(ファイルが空になったため、次の投稿からidを採番し直す)
+  clearMemory() {
+    this.posts = [];
+    this.seq = 0;
+  }
+
   /**
    * 投稿を1件追加して全経路(メモリ/JSONL/bus/waiters)へ流す
    * @param {string} from
