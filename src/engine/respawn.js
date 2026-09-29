@@ -63,7 +63,7 @@ export async function respawnUnfinishedWork({ mainWorkspace, worktreeRoot, tasks
       if (!listed.ok || !listed.text.split("\n").some((l) => l.startsWith("worktree ") && samePath(l.slice("worktree ".length), path))) continue;
       // 未コミット変更
       const st = await run(`git -C '${path}' status --porcelain`);
-      f.dirty = st.ok && st.text.split("\n").slice(1).some((l) => l.trim());
+      f.dirty = st.ok && st.text.split("\n").some((l) => l.trim());
       // main差分
       const df = await run(`git diff --name-only main...${branch}`);
       f.hasDiff = df.ok && df.text.split("\n").some((l) => l.trim());
