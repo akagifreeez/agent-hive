@@ -106,11 +106,11 @@ test("extractElements: 種別フィルタとジャンプ先(index)が返る", as
   assert.equal(headings[0].level, 1);
 
   const links = extractElements(page, { type: "link" });
-  assert.equal(links.length, 3); // 断片(#sec-1)はhref:nullで保持(遷移候補の一覧性優先)
+  assert.equal(links.length, 2); // 断片(#sec-1)はnormalizeUrlでnull→除外(実装契約: 断片は遷移候補から外す)
   assert.ok(links.every((l) => l.index >= 1));
 
   const all = extractElements(page, {});
-  assert.equal(all.length, 6); // リンク3(断片含むhref:null)+フォーム1+見出し2
+  assert.equal(all.length, 5); // リンク2+フォーム1+見出し2(断片リンクは除外)
 });
 
 test("extractText: セレクタ指定で部分テキスト抽出", async (t) => {
