@@ -1,7 +1,7 @@
 // 起動時クラッシュ復旧(#7): worktree差分からの未完了作業再起票+放棄ブランチ掃除の検証
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { respawnUnfinishedWork } from "../src/engine/respawn.js";
@@ -36,7 +36,7 @@ test("respawn: 未マージのコミットがあるworktreeから再起票タス
     const ids = tasks.list().open.map((t) => t.id);
     const hit = ids.find((id) => id.startsWith("respawn-alpha-"));
     assert.ok(hit, "respawn-alpha-*タスクが起票されている");
-    const body = tasks.list().open.find((t) => t.id === hit).summary;
+    const body = readFileSync(join(ws, "tasks", "open", hit + ".md"), "utf8");
     assert.match(body, /クラッシュ復旧|worktrees\/alpha/);
     // ボード告知が出る
     assert.ok(board.posts.some((p) => p.text.includes("起動時スキャン") && p.text.includes("alpha")));
@@ -102,7 +102,7 @@ test("respawn: 変更ゼロの放棄worktreeはcleanup=trueで削除/falseで提
     assert.equal(existsSync(join(root, "idle1")), false);
     assert.equal(existsSync(join(root, "idle2")), false);
     const br = await runCommand({ command: `git branch --list agent/idle1`, cwd: ws, outputLimit: 500 });
-    assert.equal(br.text.trim(), "", "放棄ブランチも削除される");
+    assert.equal(br.text.split("\n").slice(1).join("\n").trim(), "", "放棄ブランチも削除される");
   } finally { rmTree(ws); rmTree(root); }
 });
 
@@ -121,7 +121,7 @@ test("respawn: 未コミット変更(dirty)だけのworktreeも再起票する",
     assert.deepEqual(r.respawned, ["delta"]);
     const t = tasks.list().open.find((x) => x.id.startsWith("respawn-delta-"));
     assert.ok(t, "dirtyworktreeからも起票");
-    assert.match(t.summary, /worktrees\/delta|クラッシュ復旧/);
+    assert.match(readFileSync(join(ws, "tasks", "open", t.id + ".md"), "utf8"), new RegExp("worktrees/delta|クラッシュ復旧"));
   } finally { rmTree(ws); rmTree(root); }
 });
 
