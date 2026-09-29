@@ -93,7 +93,11 @@ function currentTaskContext(tasks, agent, messages) {
  * @property {(() => any[])|null} [drainInput] ターン境界で割込ませる入力の取り出し(steering)
  * @property {(() => boolean)|null} [peekInput] 未処理入力が待っているか(idle退場の抑制)
  * @property {number} [claimMissesLimit] 連続請求ミス何回でidle終了するか
+<<<<<<< HEAD
  * @property {((messages: any[]) => void)|null} [checkpointFn] ツール実行済み地点でスナップショットを保存する(イシュー#4 checkpoint)
+=======
+ * @property {((messages: any[]) => void)|null} [checkpointFn] ツール実行済み地点でスナップショットを保存するコールバック(イシュー#4)
+>>>>>>> main
  */
 
 /** @param {RunAgentLoopOptions} o */
@@ -249,6 +253,9 @@ export async function runAgentLoop({
         }
       }
       messages.push(...reminders.splice(0));
+      // ラウンドcheckpoint(イシュー#4): ツール実行済み地点でスナップショット。
+      // 指定が無い(ワーカーラウンド等)場合は何もしない。
+      checkpointFn?.(messages);
       if (claimMisses >= claimMissesLimit) {
         // ユーザー入力が待っている/届けたばかりで未応答のときはidle退場しない。
         // 退場すると入力に答える前にラウンドが捨てられる(r7で実際に発生: ラウンド中のsayが

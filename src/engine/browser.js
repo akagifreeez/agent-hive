@@ -18,3 +18,16 @@ export async function openInBrowser(url, runner = defaultOpenCommand) {
     return false;
   }
 }
+
+// ==== browser-tools: HTTPレベル内蔵ブラウザ操作(依存ゼロ) ====
+// 実装は browser-tools.js(解析)・browser-net.js(通信)へ分離。ここから再公開する。
+export {
+  normalizeUrl,
+  parsePage,
+  extractElements,
+  extractText,
+  extractForm,
+  applyFormValues,
+  buildSubmission,
+} from "./browser-tools.js";
+export { browserFetch, browserExtract, browserSubmit } from "./browser-net.js";
