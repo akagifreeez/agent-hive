@@ -343,7 +343,7 @@ export function detectTaskOverlap(newBody, tasksList) {
 
 export function readMeta(file) {
   try {
-    const meta = { role: null, project: "", acceptance: "", dependsOn: [] };
+    const meta = { role: null, project: "", acceptance: "", dependsOn: [], model: null };
     for (const l of readFileSync(file, "utf8").split("\n")) {
       if (!l.trim()) break;
       const r = l.match(/^role:\s*(.+)$/);
@@ -353,11 +353,13 @@ export function readMeta(file) {
       const a = l.match(/^acceptance:\s*(.+)$/);
       if (a) meta.acceptance = a[1].trim();
       const d = l.match(/^depends_on:\s*(.+)$/);
+      const m = l.match(/^model:\s*(.+)$/);
+      if (m) meta.model = m[1].trim() || null;
       if (d) meta.dependsOn = String(d[1]).split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
     }
     return meta;
   } catch {
-    return { role: null, project: "", acceptance: "", dependsOn: [] };
+    return { role: null, project: "", acceptance: "", dependsOn: [], model: null };
   }
 }
 
@@ -368,8 +370,15 @@ function dependsLine(dependsOn) {
     .filter((s) => /^[a-z0-9][a-z0-9-]*$/.test(s)))];
   return ids.length ? `depends_on: ${ids.join(",")}` : "";
 }
+// タスク別モデル指定(イシュー#12)。refは provider/model 形式の緩い検証(パス区切りと記号のみ許容)
+function modelLine(model) {
+  const ref = String(model ?? "").trim().replace(/[\r\n]/g, "");
+  if (!ref) return "";
+  if (!/^[A-Za-z0-9._\/-]+$/.test(ref)) return "";
+  return `model: ${ref.slice(0, 120)}`;
+}
 
-function metaLines(project, role, acceptance = "", dependsOn = []) {
+function metaLines(project, role, acceptance = "", dependsOn = [], model = null) {
   const lines = [];
   const proj = String(project ?? "").trim().replace(/[\r\n]/g, "");
   if (proj) lines.push(`project: ${proj.slice(0, 60)}`);
@@ -379,6 +388,8 @@ function metaLines(project, role, acceptance = "", dependsOn = []) {
   if (acc) lines.push(`acceptance: ${acc}`);
   const dep = dependsLine(dependsOn);
   if (dep) lines.push(dep);
+  const ml = modelLine(model);
+  if (ml) lines.push(ml);
   return lines.length ? lines.join("\n") + "\n" : "";
 }
 
