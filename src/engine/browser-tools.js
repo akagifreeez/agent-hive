@@ -104,7 +104,8 @@ export function parsePage(html, baseUrl) {
     const raw = am[1] ?? am[2] ?? am[3] ?? "";
     const text = btStripTags(am[4]);
     const href = normalizeUrl(raw, base);
-    if (!text && !href) continue;
+    if (href === null) continue; // javascript:/断片等は除外(誤遷移防止)
+    if (!text) continue;
     links.push({ text, href });
   }
   const forms = [];
@@ -112,11 +113,12 @@ export function parsePage(html, baseUrl) {
   let fm;
   while ((fm = fRe.exec(src))) {
     const attrs = fm[1] ?? "";
-    const method = (btAttr(attrs, "method") || "GET").toUpperCase();
+    const methodRaw = btAttr(attrs, "method") || "get";
     const actionRaw = btAttr(attrs, "action") || "";
     forms.push({
       index: forms.length + 1,
-      method: method || "GET",
+      method: methodRaw.toUpperCase() || "GET",
+      methodRaw,
       action: normalizeUrl(actionRaw || base, base) ?? base,
       html: fm[2] ?? "",
       fields: btFormFields(fm[2] ?? ""),
@@ -141,7 +143,7 @@ export function extractElements(page, filter = {}) {
     if (type === "link") {
       for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href });
     } else if (type === "form") {
-      for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
+      for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.methodRaw ?? f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {
       const hRe = /<h([1-6])(\s[^>]*)?>([\s\S]*?)<\/h\1\s*>/gi;
       let hm;
