@@ -62,7 +62,7 @@
 
 - **create_taskにdepends_on追加(イシュー#2)**: create が dependsOn(配列)を受け、メタ行 depends_on として保存。claim時にcanClaim()で「未完了依存があれば立候補しない」。循環依存は依存を無視して立候補不可(デッドロック防止)、自己依存は依存を無視して着手可。list()はdependsOn/blockedフィールドを返す。UIはタスク行「依存待ち:id」表示+フォーム入力欄+ /api/tasks create の depends_on 通過。テスト test/task-depends.test.js+task-depends-ui.test.js(2026-09)。
 - **プロバイダ横断スロットリング(イシュー#1)**: src/model/throttle.js に gateProvider(送信前待ち)/noteProviderRateLimited(429/529時・Retry-Afterは単調延長・上限5分)/clearProviderRateLimit(成功時)。全アダプタ(openai/anthropic-messages/openai-chatgpt)が同一baseUrl単位でクールダウン共有。「429を見た呼び出しだけ」でなく同プロバイダ全員が待つ設計。テスト test/throttle.test.js(2026-09)。
-- **usage集計はローカル日付基準(イシュー#6)**: aggregateUsage/persistUsageとも localDateKey()(UTC ISOから変更)に統一。書き込み側と集計側の日付キー生成を1関数へ寄せ、深夜帯の「今日」バケット落ちを構造的に防止。usage.round/summaryにthread(無ければ__main__)+dateを付け、日別/スレッド別/日別xスレッドのmatrixを集計。テストはTZ境界固定(TZ差3種で検証)(2026-09)。
+- **usage集計はローカル日付基準(イシュー#6)**: aggregateUsage/persistUsageとも localDateKey()(ローカル日付)に統一。書き込み側と集計側の日付キー生成を1関数へ寄せ、深夜帯の「今日」バケット落ちを構造的に防止。usage.round/summaryにthread(無ければ__main__)+dateを付け、日別/スレッド別/日別xスレッドのmatrixを集計。テストはTZ差で検証(2026-09)。※後のfix-usage-aggregate-tzでも「UTC基準へ統一」が一時採用されたが、最終形はローカル基準のままで確着 — 重複した経緯記述は本条に統合済み。
 - **ラウンドcheckpoint/resume(イシュー#4)**: ツール実行済み地点で checkpointFn?.(messages) を呼び、state/checkpoint-<id>.json へ tmp+rename原子書込。model.chat失敗(endedBy:"error")時のみ loadCheckpoint→memories差し替え→checkpoint削除して次ラウンド再開。正常系・checkpointFn未指定は従来どおり。**checkpoint削除は復元後(残すと失敗無限ループ)**。テスト test/checkpoint.test.js(2026-09)。
 - **CLI --chat通知チャネル(イシュー#11)**: wireCliNotify(bus,{longTaskSec}) が permission.request/merge.completed/長時間タスク完了をコンソールへ出力し、onNotify追加配信で監視(/api/monitor)経由にも流す。UIサーバー側からの再wireは二重出力ガード(__cliNotifyWired)で冪等。デスクトップ通知(desktop/main.js)と併存可。テスト test/notify.test.js(2026-09)。
 - **worktreeの未マージ保持(イシュー#7)**: hasUnmergedWork() でコミット済み・未マージのworktreeをsetupWorktrees/createWorktreeが削除せず保持(onKept告知)。未コミットの下書きのみは保持対象外(直呼び契約)。起動シーケンスは setupWorktrees→respawnUnfinishedWork の順で、未完了作業から respawn-<agentId>-<head|dirty> タスクを自動起票、変更なしブランチは放棄候補として報告(chat.respawn.cleanup=trueで掃除)(2026-09)。
@@ -76,11 +76,18 @@
 - **edit_fileでテンプレートリテラルを壊したときの最短修復**は `git show main:<file>` で原本を取り直して該当ブロックを復元する(node -eパッチ再試行より安全。2026-09 issue-browserラウンドでworktree.js修復に実証)。
 - **ボード投稿は自身のスレッドへ投稿すると自分のボードに載らない**: to_thread指定時の注意。lead報告の取りこぼしがあったら他スレッドの投稿を見る(gather_context source=threads)。
 
+# 2026-09 issue-modelselect系列ラウンドの知見(ベータdistill)
+
+- **リーダーによるタスク別モデル選択(イシュー#12)は実装済み**: create_task/spawn_agent にリーダー専用・任意の model引数(ModelRef)。権限判定は二重防御(tools層=threadOpener有無、spawn層=parent.depth!==0で拒否)。タスクメタ model: 行を tasks.js(create/assign/metaLines/readMeta/list/TaskInfo)が扱い、spawn走行時はブリーフタスクのメタから readTaskModel → modelFactory({…agent, model: taskModel ?? agent.model}) へ伝播(未指定はagent既定)。原則「基本は既定モデル・特例で代替」。テスト test/model-task-select.test.js 5件(2026-09)。
+- **モデル基盤の契約(2026-09 modelselectラウンド確定)**: プロバイダ(認証・baseUrl名前空間)と api(ワイヤ形式)は直交。api= openai-completions/anthropic-messages/openai-chatgpt-responses を src/model/factory.js のADAPTERSで選択。内蔵カタログ(builtin.js= models.dev静止スナップショット最小版)+設定 models.providers を catalog.js がマージし ModelRef("provider/model"またはベアID)を解決。旧 model セクションは config.js が"default"プロバイダへ読み替える互換橋(buildModelsCfg/legacyModelSection)で既存参照を無修正維持。apiKeyEnv === null は「envを見ない」明示(誤ってOPENAI_API_KEYを拾わないため)。modelStateInfoのauthHintは鍵末尾4文字のみ=生鍵非露出契約。
+- **検証者の役割は「承認まで通す」**: 承認待ちタスクはrole:reviewの検証者が居るうちに approve_task まで実行する。finish→退場→自動解放の掃除で承認待ちエントリが消えると、成果がmain反映済みでも帳簿がdoneにならずレジューム作業が発生する(modelselectラウンドで実害)。検証報告は「結論を最初の1行+通した確認リスト」の形式で投稿し、後日のレジューム時にも根拠として再利用できるようにする。
+- **マージ退行の定型パターンと検出**: 実装とテスト期待値が別コミット・別担当で交互に書き換わると退行を繰り返す(browser-tools断片リンク・submit報告書式で実害)。検出は「テスト失敗の責任分界」をコミット時系列で追う(git log --all -S '<期待値文字列>')。どちらが正かは最新の仕様決定コミット(e8f92ec等のコメント)と現mainのコードで判断し、中途の暫定版を採用しない。修正時は実装+テストを同じコミットで揃える。
+
 # 2026-09 issue-checkpoint系列ラウンドの追加知見(ベータdistill)
 
-- **respawnスキャンとテストの競合**: 起動時respawn単体は正しい。e2e(respawn-chat)が落ちるときは、テストがworktreeに置いたwipコミットを「直前ラウンドのラウンド末自動マージ(mergeAgentWork)」が先にmainへ取り込み、スキャン時点で差分が消えている競合。テストでクラッシュを模擬するならラウンド末マージ完了を待つか dirty(未コミット)状態を使う。respawnを疑う前に git merge-base --is-ancestor で既取り込みを確認する(観測: コミット直後は差分あり→数秒後に消滅)。切り分けには respawnの直接呼び出し+実TaskBlackboardが有効。
-- **fix-*/review-*は解放→再請求の競合が起きる**: 通知と同時にclaimすると「他拠点で完了済み」で弾かれる。弾かれたら実質完了をボードで確認し、open復帰したら検証者の視点でapproveまで通す(重複実装しない)。verify-*は実装者以外限定のためrole:implワーカーは請求不可=承認待ちが滞る。承認待ちは自分のスレッドのrole:reviewが居るうちに処理する。
-- **verify連鎖の打ち切り**: verify-verify-verify-* の多段検証は発見器再起票連鎖の兆候。実装がmain反映済みなら「検証→approve」で閉じ、新規検証タスクを起票しない。
-- **テストの期待値は「最後に緑になった契約」へ実装+テスト同時一括で揃える**: browser-tools断片リンク(href:null保持⇔除外)とsubmit報告書式(送信:/method:)は実装・テストが交互に書き換わり退行を繰り返した(2026-09実害: 構文破損コミットも混入)。修正は同一コミットで揃え、契約コメント(例: 「断片は遷移候補から除外(e80e512)」)をコードに明記する。
-- **TZ境界のテスト検証は3環境**: usage-aggregateはUTC基準日付生成(setUTCDate/setUTCHours)へ統一の上、TZ=Asia/Tokyo/UTC/America/Los_Angelesの3環境でpassを取るのが検証証跡。1環境だけでは深夜帯を取りこぼす(2026-09 fix-usage-aggregate-tz)。
-- **checkpoint/resume実装の注意(イシュー#4)**: 復元後にcheckpointファイルを必ず削除(残すとmodelエラー→復元→失敗の無限ループ)。checkpointFnはツール実行済み地点で呼ぶ。対象はモデル異常(endedBy:error)のみで、ツール打ち切り・予算停止は対象外という設計判断(2026-09)。
+- **respawnスキャンとテストの競合**: runChatの起動時respawn単体は正しい(e2eのrespawn-chatテストが落ちるときは、テストがworktreeに置いたwipコミットを「直前ラウンドのラウンド末自動マージ(mergeAgentWork)」が先にmainへ取り込み、スキャン時点で差分が消えている競合)。テストでクラッシュを模擬するなら、ラウンド末マージ完了を待つか dirty(未コミット)状態を使う。respawnを疑う前に merge-base --is-ancestor でブランチが既に取り込まれていないか確認する(ベータ観測: コミット直後は差分あり→数秒後に消滅)。直接のrespawn呼び出し+実TaskBlackboardでの検証が切り分けに有効。
+- **fix-*/review-*タスクは解放→再請求の競合が起きる**: 通知と同時にclaimすると「他拠点で完了済み」で弾かれる。弾かれたら内容の実質完了をボードで確認し、open復帰したら検証者の視点でapproveまで通す(重複実装しない)。verify-*は実装者以外が担当するため、role:implの追加ワーカーは請求不可=待ちが発生する。承認待ちタスクは自分のスレッドのrole:reviewが居るうちに処理する。
+- **verify連鎖が深くなりすぎる前に打ち切る**: verify-verify-verify-* のような多段検証は発見器の再起票連鎖の兆候。実装がmain反映済みなら「検証→approve」で閉じ、新規検証タスクを起票しない。
+- **テストの期待値は「最後に緑になった契約」に寄せて一括統一する**: browser-tools断片リンク(href:null保持⇔除外)とsubmit報告書式(送信:/method:)は実装・テストが交互に書き換わり退行を繰り返した。修正時は実装+テストを同じコミットで揃え、コメントに契約行(例: 「断片は遷移候補から除外(e80e512)」)を明記する。途中の暫定期間に発見器がreview-changes/fix-を大量起票する。
+- **TZ境界のテスト固定は3環境で検証する**: usage集計は最終形として localDateKey()(ローカル日付)に実装・書込側が統一済み(UTC基準という一時案は撤去済み)。テスト期待値も実装と同一の関数から生成し、TZ=Asia/Tokyo/UTC/America/Los_Angelesの3環境でpassを確認するのが検証の証跡。1環境だけでは深夜帯の不具合を取りこぼす(2026-09 fix-usage-aggregate-tz)。
+- **checkpoint/resume実装の注意**: 復元後にcheckpointファイルを必ず削除(残すとmodelエラー→復元→失敗の無限ループ)。checkpointFnはツール実行済み地点で呼ぶ。モデル異常以外(ツール打ち切り・予算停止)は対象外という設計判断。
