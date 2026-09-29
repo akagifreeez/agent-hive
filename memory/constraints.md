@@ -80,6 +80,10 @@
 - **edit_fileでテンプレートリテラルを壊したときの最短修復**は `git show main:<file>` で原本を取り直して該当ブロックを復元する(node -eパッチ再試行より安全。2026-09 issue-browserラウンドでworktree.js修復に実証)。
 - **ボード投稿は自身のスレッドへ投稿すると自分のボードに載らない**: to_thread指定時の注意。lead報告の取りこぼしがあったら他スレッドの投稿を見る(gather_context source=threads)。
 
+- usage-traceとモニタ可視化(イシュー#15〜#17): (1)loop.jsはmodel.chatごとに usage-trace/usage-trace.jsonl へ1ターン1行追記(prompt/completion/reasoning内訳+ctxChars)。書込先はボードJSONLと同じ親の usage-trace/(state/監査領域には書かない。persistPath無し時はスキップ) (2)/api/usage-trace がagent・fromTurn/toTurnでフィルタしたseries/pointsを返す(fromTurn等はurl.searchParams由来のstring|nullも受ける契約) (3)loop.jsがbusへusage.traceを流すとserver.jsがlive.agents[id].ctx へ 使用/上限/残り(ctxWindow無ければ200Kフォールバック)を保持し、/api/stateで配布。エージェント詳細パネルのバー表示(使用/上限/残り+.hot警告色)のデータ源。トークン換算は「文字数/3切上げ」でcompact.jsと統一 (4)モニタページにmonitor-chart.js(IIFE・依存ゼロ・window/globalThis公開)でSVGチャート。yMaxは全系列(agents と tasks総数=open+claimed+done)の最大。XSS対策は数値toFixed+既知色リテラルのみ。テストからは globalThis.monitorChart 経由で呼ぶ(2026-09)。
+- README自動更新(readme-auto.js): 差分ベースでREADMEを再生成する。未閉鎖のHTMLコメントマーカー保護ケースをテスト済み(test/readme-auto 11件)(2026-09)。
+- **テストがstartUi()したら必ずui.close()する**: closeしないとサーバーハンドルが開いたままnode --testがプロセス終了できず、ファイル単位のタイムアウト(約60秒)で"test failed"になる(ctx-window-ui.testで実害・最小再現スクリプトで確定)。個別テストは全部緑なのにファイルだけ落ちるときはハンドル残存を疑う。finally で ui.close()+rmTree が定型(2026-09)。
+
 # 2026-09 issue-modelselect系列ラウンドの知見(ベータdistill)
 
 - **リーダーによるタスク別モデル選択(イシュー#12)は実装済み**: create_task/spawn_agent にリーダー専用・任意の model引数(ModelRef)。権限判定は二重防御(tools層=threadOpener有無、spawn層=parent.depth!==0で拒否)。タスクメタ model: 行を tasks.js(create/assign/metaLines/readMeta/list/TaskInfo)が扱い、spawn走行時はブリーフタスクのメタから readTaskModel → modelFactory({…agent, model: taskModel ?? agent.model}) へ伝播(未指定はagent既定)。原則「基本は既定モデル・特例で代替」。テスト test/model-task-select.test.js 5件(2026-09)。
