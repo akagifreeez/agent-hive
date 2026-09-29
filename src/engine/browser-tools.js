@@ -214,8 +214,12 @@ export function buildSubmission(form, values, opts = {}) {
   if (!form) throw new Error("フォームが見つかりません");
   const f = applyFormValues(form, values);
   if (opts.selector) {
-    const selRe = new RegExp("<" + String(opts.selector) + "(\\s|>)", "i");
-    if (!selRe.test(String(form.html ?? ""))) throw new Error("フォーム内に要素 " + String(opts.selector) + " が見つかりません(誤送信防止のため送信しません)");
+    const sel = String(opts.selector);
+    const html = String(form.html ?? "");
+    // selector照合はタグ名(<sel …>)またはフォームフィールド名(name="sel")のどちらでも可
+    const tagRe = new RegExp("<" + sel + "(\s|>)", "i");
+    const nameRe = new RegExp("name\s*=\s*(?:\"" + sel + "\"|'" + sel + "'|(?<w>" + sel + ")[\s>])", "i");
+    if (!tagRe.test(html) && !nameRe.test(html)) throw new Error("フォーム内に要素 " + sel + " が見つかりません(誤送信防止のため送信しません)");
   }
   const pairs = f.fields.filter((x) => x.name).map((x) => [x.name, x.value ?? ""]);
   const body = new URLSearchParams(pairs).toString();
