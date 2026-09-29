@@ -316,9 +316,9 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           try {
             const allOpen = tasks.list().open;
             // 依存でブロック中のタスクは「実在するが依存未完了で請求不可」なので分けて教える(空待ち防止)
-            const blocked = allOpen.filter((x) => Array.isArray(x.dependsOn) && x.dependsOn.length);
-            const depInfo = blocked.length
-              ? blocked.map((x) => {
+            const blockedTasks = allOpen.filter((x) => Array.isArray(x.dependsOn) && x.dependsOn.length);
+            const depInfo = blockedTasks.length
+              ? blockedTasks.map((x) => {
                   const parts = x.dependsOn.map((d) => `${d}(${tasks.isUnresolved(d) ? "未完了" : "完了済"})`);
                   return `${x.id} ← ${parts.join(",")}`;
                 }).join(", ")
