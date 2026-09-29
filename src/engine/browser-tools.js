@@ -45,38 +45,36 @@ function btAttr(attrs, name) {
 
 /** form内HTMLからフィールド(input/select/textarea)を抽出(submit系は除外)。 */
 function btFormFields(formInner) {
+  const src = String(formInner ?? "");
   const fields = [];
   const pushField = (f) => { if (f.name && fields.length < 100) fields.push(f); };
-  let order = 0;
+  const tokenRe = new RegExp(String.raw`<(input|select|textarea)([^>]*)(?:>([sS]*?)</(?:input|select|textarea)s*>|s*/?>)`, 'gi');
   let m;
-  const inputRe = /<input\s([^>]*)>/gi;
-  while ((m = inputRe.exec(formInner))) {
-    const attrs = m[1] ?? "";
-    const type = (btAttr(attrs, "type") || "text").toLowerCase();
+  while ((m = tokenRe.exec(src))) {
+    const tag = String(m[1]).toLowerCase();
+    const attrs = m[2] ?? "";
+    const type = (btAttr(attrs, "type") || (tag === "input" ? "text" : tag)).toLowerCase();
     if (type === "submit" || type === "button" || type === "image") continue;
-    pushField({ name: btAttr(attrs, "name") ?? "", type, value: btAttr(attrs, "value") ?? "", order: ++order });
-  }
-  const selectRe = /<select\s([^>]*)>([\s\S]*?)<\/select\s*>/gi;
-  while ((m = selectRe.exec(formInner))) {
-    const attrs = m[1] ?? "";
-    const options = [];
-    const optRe = /<option\s([^>]*)>([\s\S]*?)<\/option\s*>/gi;
-    let om;
-    let value = "";
-    while ((om = optRe.exec(m[2] ?? ""))) {
-      const oa = om[1] ?? "";
-      const val = btAttr(oa, "value") ?? btStripTags(om[2]);
-      const selected = /(^|\s)selected(\s|$|=)/i.test(oa);
-      if (!value || selected) value = val;
-      options.push(val);
+    if (tag === "select") {
+      const options = [];
+      const optRe = /<options([^>]*)>([sS]*?)</options*>/gi;
+      let om;
+      let value = "";
+      while ((om = optRe.exec(m[3] ?? ""))) {
+        const oa = om[1] ?? "";
+        const val = btAttr(oa, "value") ?? btStripTags(om[2]);
+        const selected = /(^|s)selected(s|$|=)/i.test(oa);
+        if (!value || selected) value = val;
+        options.push(val);
+      }
+      pushField({ name: btAttr(attrs, "name") ?? "", type: "select", value, options, order: fields.length + 1 });
+    } else if (tag === "textarea") {
+      pushField({ name: btAttr(attrs, "name") ?? "", type: "textarea", value: btDecodeEntities(m[3] ?? ""), order: fields.length + 1 });
+    } else {
+      pushField({ name: btAttr(attrs, "name") ?? "", type, value: btAttr(attrs, "value") ?? "", order: fields.length + 1 });
     }
-    pushField({ name: btAttr(attrs, "name") ?? "", type: "select", value, options, order: ++order });
   }
-  const taRe = /<textarea\s([^>]*)>([\s\S]*?)<\/textarea\s*>/gi;
-  while ((m = taRe.exec(formInner))) {
-    pushField({ name: btAttr(m[1] ?? "", "name") ?? "", type: "textarea", value: btDecodeEntities(m[2] ?? ""), order: ++order });
-  }
-    return fields.sort((a, b) => a.order - b.order);
+  return fields;
 }
 
 /**
@@ -104,7 +102,7 @@ export function parsePage(html, baseUrl) {
     const raw = am[1] ?? am[2] ?? am[3] ?? "";
     const text = btStripTags(am[4]);
     const href = normalizeUrl(raw, base);
-    if (href === null) continue; // javascript:/断片等は除外(誤遷移防止)
+    if (href === null) { if (/^#/i.test(raw)) { links.push({ text, href: null }); } continue; }
     if (!text) continue;
     links.push({ text, href });
   }
