@@ -35,3 +35,51 @@ export class UsageLedger {
     return Object.fromEntries(this.byAgent);
   }
 }
+
+// state/usage.json(usage.round/usage.summaryの運用履歴)から
+// 日別・スレッド別・日別xスレッドの集計ビューを作る(GitHubイシュー#6)。
+// 壊れた行・旧形式(thread無し)も無視せず集計に含める(thread無しは__main__扱い)。
+// @param {Array<{at?: string, thread?: string, agent?: string, totals?: {calls?: number, promptTokens?: number, completionTokens?: number, reasoningTokens?: number, costUsd?: number}}|null>} history
+// @param {{days?: number}} [opts] days: 集計対象日数(既定14)。0で全期間
+// @returns {{byDate: Array<{date: string, calls: number, promptTokens: number, completionTokens: number, reasoningTokens: number, costUsd: number}>, byThread: Array<{thread: string, calls: number, promptTokens: number, completionTokens: number, reasoningTokens: number, costUsd: number, agentIds: string[]}>, matrix: Array<{date: string, thread: string, calls: number, costUsd: number}>}}
+export function aggregateUsage(history, opts = {}) {
+  const empty = { calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+  const byDate = new Map();
+  const byThread = new Map();
+  const matrix = new Map();
+  const days = Number(opts.days ?? 14);
+  const sinceMs = Number.isFinite(days) && days > 0 ? Date.now() - days * 86400000 : null;
+  const list = Array.isArray(history) ? history : [];
+  for (const h of list) {
+    if (!h || typeof h !== "object") continue;
+    const d = new Date(h.at ?? "");
+    if (isNaN(d.getTime())) continue;
+    if (sinceMs != null && d.getTime() < sinceMs) continue; // 期間外は除外
+    const date = d.toISOString().slice(0, 10);
+    const thread = typeof h.thread === "string" && h.thread ? h.thread : "__main__";
+    const t = h.totals ?? {};
+    const calls = Number(t.calls ?? 0);
+    const pt = Number(t.promptTokens ?? 0);
+    const ct = Number(t.completionTokens ?? 0);
+    const rt = Number(t.reasoningTokens ?? 0);
+    const usd = Number(t.costUsd ?? 0);
+    if (!(calls || pt || ct || rt || usd)) continue; // 空レコードは集計しない
+    const dRow = byDate.get(date) ?? { date, ...empty };
+    dRow.calls += calls; dRow.promptTokens += pt; dRow.completionTokens += ct; dRow.reasoningTokens += rt; dRow.costUsd += usd;
+    byDate.set(date, dRow);
+    const tRow = byThread.get(thread) ?? { thread, ...empty, agentIds: [] };
+    tRow.calls += calls; tRow.promptTokens += pt; tRow.completionTokens += ct; tRow.reasoningTokens += rt; tRow.costUsd += usd;
+    if (typeof h.agent === "string" && h.agent && !tRow.agentIds.includes(h.agent)) tRow.agentIds.push(h.agent);
+    byThread.set(thread, tRow);
+    const mKey = date + "|" + thread;
+    const mRow = matrix.get(mKey) ?? { date, thread, ...empty };
+    mRow.calls += calls; mRow.promptTokens += pt; mRow.completionTokens += ct; mRow.reasoningTokens += rt; mRow.costUsd += usd;
+    matrix.set(mKey, mRow);
+  }
+  const dateDesc = (a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+  return {
+    byDate: [...byDate.values()].sort(dateDesc),
+    byThread: [...byThread.values()].sort((a, b) => b.costUsd - a.costUsd),
+    matrix: [...matrix.values()].sort((a, b) => dateDesc(a, b) || (a.thread < b.thread ? -1 : 1)),
+  };
+}
