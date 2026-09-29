@@ -2,7 +2,6 @@
 // レンダリング(JS実行・スクリーンショット)はスコープ外。その用途はMCP(Playwright等)で拡張する。
 import { URL, URLSearchParams } from "node:url";
 
-/** 相対URLをbaseと結合。javascript:/data:等の危険スキームはnull(誤遷移防止)。
 /** 相対URLをbaseと結合。断片のみ・javascript:/data:等はnull(誤遷移防止)。 */
 export function normalizeUrl(href, baseUrl) {
   const h = String(href ?? "").trim();
