@@ -132,7 +132,7 @@ test("updateReadme: 未知セクション・生成不能は現状維持(保護),
     assert.ok(r.after.includes("src/engine/ コア"), "役割説明付き");
     assert.ok(!r.after.includes("古いレイアウト"));
     // 生成不能(bin/hive.js削除)なら現状維持
-    rmSync(join(root, "bin", "hive.js"));
+    rmSync(join(root, "bin", "hive.js"), { force: true });
     const r2 = updateReadme(readme, { root, write: () => { throw new Error("生成不能なのに書いた"); } });
     assert.equal(r2.updatedSections.includes("cli-commands"), false, "cli-commandsは現状維持");
   } finally {
