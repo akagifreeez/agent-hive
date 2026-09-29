@@ -56,7 +56,7 @@ export function aggregateUsage(history, opts = {}) {
     if (isNaN(d.getTime())) continue;
     if (sinceMs != null && d.getTime() < sinceMs) continue; // 期間外は除外
     const date = d.toISOString().slice(0, 10);
-    const thread = typeof h.thread === "string" && h.thread ? h.thread : "__main__";
+    const thread = resolveThread(h);
     const t = h.totals ?? {};
     const calls = Number(t.calls ?? 0);
     const pt = Number(t.promptTokens ?? 0);
@@ -82,4 +82,23 @@ export function aggregateUsage(history, opts = {}) {
     byThread: [...byThread.values()].sort((a, b) => b.costUsd - a.costUsd),
     matrix: [...matrix.values()].sort((a, b) => dateDesc(a, b) || (a.thread < b.thread ? -1 : 1)),
   };
+}
+
+
+// レコードのスレッド名を確定する。threadフィールドが無い旧データはagent名からの
+// 推測でしのぐ(usage.roundは<thread>-<worker>形式のidで走る: issue-x-alpha 等)。
+// 推測できない(接尾辞が無い/lead等)場合は__main__扱い。
+// レコードのスレッド名を確定する。threadフィールドが無い旧データはagent名からの
+// 推測でしのぐ(usage.roundは<thread>-<worker>形式のidで走る: issue-x-alpha 等)。
+// 推測できない(接尾辞が無い/lead等)場合は__main__扱い。
+const WORKER_SUFFIX_SRC = "-(?:alpha|beta|gamma|delta|impl-\\d+|review|worker-?\\d+)$";
+/** @type {RegExp} */
+/** @type {RegExp} */
+const WORKER_SUFFIX_RE = new RegExp(WORKER_SUFFIX_SRC);
+
+function resolveThread(h) {
+  if (typeof h.thread === "string" && h.thread) return h.thread;
+  const agent = typeof h.agent === "string" ? h.agent : "";
+  if (agent && WORKER_SUFFIX_RE.test(agent)) return agent.replace(WORKER_SUFFIX_RE, "");
+  return "__main__";
 }
