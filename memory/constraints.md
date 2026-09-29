@@ -72,4 +72,6 @@
 - **検証済みタスクが「退場→自動解放→再スポーン」ループに入る**: 検証だけしてfinish→退場した作業者のタスクが自動解放でopenへ戻り、追加ワーカーが連続スポーンされる(2026-09 issue-dependsでimpl-1/5/7/8/10/11/12がループ、実害はトークン浪費のみ)。対策の方向: (1)リーダーがverify-*承認時に該当implタスクを明示クローズ (2)「実装差分ゼロなら検証者がapproveまで実施してよい」運用をリードが明示 (3)作業者側は請求時にタスクが既にmain反映済みなら検証→approveまで通す。スレッドごとに複数ロールが混在すると主担当交代が揺れるため、impl→review→approveの役割固定が有効。
 - **validate後のタスクは「実装済み」を前提に検証する**: 請求したタスクが既にmain反映済み(codemerge済み)の場合は、worktree差分ゼロを確認→受け入れ基準テストの再実行で証跡→「追加コミット不要」と明示してfinish/approveするのが定型。コードを重複実装しない。
 - **usage等の時刻境界テストはUTC/ローカル混在でflakyになる**: new Date()から生成した日付期待値は実行時刻(TZ・日をまたぐ時刻帯)でズレる。テスト側はTZ環境変数を明示固定するか、期待値も実装と同一の関数(localDateKey等)から生成する(2026-09 issue-costで実害→解決済み)。
+- **browser-toolsの断片リンク契約は統一済み**: normalizeUrlが #断片に対しnullを返し、links/extractElements双方の遷移候補から除外する。browserSubmitレポートの接頭辞は「method: 」(テスト期待と一致、test/browser-tools*.test.js 13/13)(2026-09)。
+- **edit_fileでテンプレートリテラルを壊したときの最短修復**は `git show main:<file>` で原本を取り直して該当ブロックを復元する(node -eパッチ再試行より安全。2026-09 issue-browserラウンドでworktree.js修復に実証)。
 - **ボード投稿は自身のスレッドへ投稿すると自分のボードに載らない**: to_thread指定時の注意。lead報告の取りこぼしがあったら他スレッドの投稿を見る(gather_context source=threads)。
