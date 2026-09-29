@@ -105,7 +105,7 @@ export function parsePage(html, baseUrl) {
     const raw = am[1] ?? am[2] ?? am[3] ?? "";
     const text = btStripTags(am[4]);
     const href = normalizeUrl(raw, base);
-    if (href === null) { if (raw.startsWith("#")) { links.push({ text, href: null }); } continue; }
+    if (href === null) continue; // javascript:/断片(#)等は除外
     if (!text) continue;
     links.push({ text, href });
   }
@@ -144,7 +144,7 @@ export function extractElements(page, filter = {}) {
     if (type === "link") {
       for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href });
     } else if (type === "form") {
-      for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.methodRaw ?? f.method, action: f.action, fields: f.fields.length });
+      for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {
       const hRe = /<h([1-6])(\s[^>]*)?>([\s\S]*?)<\/h\1\s*>/gi;
       let hm;
