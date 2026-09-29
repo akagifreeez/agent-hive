@@ -52,16 +52,22 @@ test("chartModel: 折れ線の座標がY軸スケールに沿って並ぶ", () =
   assert.equal(m.series[1].key, "tasks");
   const ag = m.series[0].points;
   assert.equal(ag.length, 3);
-  // エージェント数 0→2→4(yMax=4なので 0,1/2,1 に正規化)
+  // yMaxは全系列最大値(タスク総数6)。エージェント数 0→2→4 は 0,4/6,2/6 の高さに正規化
   const ih = m.height - m.pad.t - m.pad.b;
   assert.ok(Math.abs(ag[0].y - (m.pad.t + ih)) < 0.11, "0は下端");
+<<<<<<< HEAD
   assert.ok(Math.abs(ag[2].y - m.pad.t - ih / 3) < 0.11, "最大は上端からih/3(共通yMax=6でagents=4)");
+=======
+  assert.ok(Math.abs(ag[1].y - (m.pad.t + (ih * 4) / 6)) < 0.11, "2/6は4/6の高さ");
+  assert.ok(Math.abs(ag[2].y - (m.pad.t + (ih * 2) / 6)) < 0.11, "4/6は2/6の高さ");
+>>>>>>> main
   // X座標は左パッドから右へ均等間隔
   assert.equal(ag[0].x, m.pad.l);
   assert.ok(ag[1].x > ag[0].x && ag[2].x > ag[1].x);
-  // タスク総数は open+claimed+done = 0,4,6
+  // タスク総数は open+claimed+done = 0,4,6(6=yMaxで上端)
   const tk = m.series[1].points;
-  assert.ok(tk[2].y < tk[1].y < tk[0].y, "タスク増加は上向き");
+  assert.ok(tk[2].y < tk[1].y, "タスク増加は上向き");
+  assert.ok(Math.abs(tk[2].y - m.pad.t) < 0.11, "最大値6は上端");
 });
 
 test("chartModel: 全0履歴でも0除算せずyMax=1", () => {
@@ -109,6 +115,7 @@ test("renderTokenBarsSvg: 空履歴でも壊れない(データなし表示)", (
   assert.ok(!svg.includes("NaN"));
 });
 
+<<<<<<< HEAD
 test("外部ライブラリ非依存: script/src/import/外部URL参照を含まない", () => {
   assert.ok(!code.includes("require("));
   assert.ok(!code.includes("import "));
@@ -116,5 +123,12 @@ test("外部ライブラリ非依存: script/src/import/外部URL参照を含ま
   // http:// の許容はSVG名前空間識別子のみ。fetch不能な固定識別子で外部依存ではない
   var httpRefs = code.split("http://").slice(1).filter(function (s) { return !s.startsWith("www.w3.org/2000/svg"); });
   assert.equal(httpRefs.length, 0, "SVG名前空間以外のhttp参照は無し");
+=======
+test("外部ライブラリ非依存: require/import/外部リソース参照を含まない", () => {
+  assert.ok(!code.includes("require("));
+  assert.ok(!code.includes("import "));
+>>>>>>> main
   assert.ok(!code.includes("src="));
+  // http://www.w3.org/2000/svg はSVG仕様の名前空間URI(取得はしない)なので除外対象外
+  assert.ok(!/https?:\/\/(?!www\.w3\.org)/.test(code), "w3.org名前空間以外のURL参照は無し");
 });

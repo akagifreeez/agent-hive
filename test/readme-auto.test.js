@@ -94,6 +94,21 @@ test("updateReadmeSections: マーカー間だけが自動更新される", () =
   } finally { closeFixture(ws); }
 });
 
+test("updateReadmeSections: 未閉鎖マーカー(startのみ)は保護される(旧splitAutoSections仕様の移植)", () => {
+  const root = mkdtempSync(join(tmpdir(), "hive-readme-auto-"));
+  try {
+    const readme = join(root, "README.md");
+    const broken = ["# agent-hive", "人間の書いた説明", "<!-- auto:cli-commands start -->", "手書き本文"].join("\n");
+    writeFileSync(readme, broken);
+    const r = updateReadmeSections({ repoRoot: root, sections: [{ id: "cli-commands", content: "機械生成" }] });
+    assert.deepEqual(r.skipped, ["cli-commands"], "end無しは触らない");
+    assert.equal(r.changed, false);
+    assert.equal(readFileSync(readme, "utf8"), broken, "1文字も変わらない");
+  } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* ロックは無視 */ }
+  }
+});
+
 test("updateReadmeSections: マーカーが無いREADMEは1文字も変わらない(保護)", () => {
   const readme = "# 手書きREADME\r\n\r\nここに自動セクションの目印は無い。\r\n";
   const ws = mkdtempSync(join(tmpdir(), "hive-readme-auto-"));
