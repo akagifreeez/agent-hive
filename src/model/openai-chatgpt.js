@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import {
   RETRY_MAX_RETRIES, EMPTY_COMPLETION_MAX_RETRIES,
-  computeRetryDelay, isRetryableStatus, modelSleep,
+  computeRetryDelay, isRetryableStatus, modelSleep, parseRetryAfterMs,
 } from "./openai.js";
 
 export class ChatGPTModel {
@@ -41,7 +41,18 @@ export class ChatGPTModel {
       if (!token?.access) {
         throw new Error("ChatGPTは未認証です。設定の「モデルと接続」から認証してください");
       }
-      const res = await this.request({ messages, tools, token, onDelta });
+      let res;
+      try {
+        res = await this.request({ messages, tools, token });
+      } catch (err) {
+        // ネットワーク系(タイムアウト含む)は一過性が多いのでOpenAIModelと同じくリトライする
+        if (attempt <= RETRY_MAX_RETRIES) {
+          await modelSleep(computeRetryDelay(attempt));
+          attempt++;
+          continue;
+        }
+        throw new Error(`モデルAPIに接続できません: ${err.message}`);
+      }
       if (res.status === 401 && !forceRefresh && attempt <= 2) {
         forceRefresh = true; // トークン失効。強制リフレッシュして1回だけやり直す
         continue;
@@ -49,13 +60,24 @@ export class ChatGPTModel {
       if (!res.ok) {
         const bodyText = await res.text().catch(() => "");
         if (isRetryableStatus(res.status) && attempt <= RETRY_MAX_RETRIES) {
-          await modelSleep(computeRetryDelay(attempt));
+          await modelSleep(computeRetryDelay(attempt, parseRetryAfterMs(res)));
           attempt++;
           continue;
         }
         throw new Error(translateHttpError(res.status, bodyText));
       }
-      const parsed = await consumeStream(res, onDelta);
+      let parsed;
+      try {
+        parsed = await consumeStream(res, onDelta);
+      } catch (err) {
+        // SSE途中切断も最初からやり直す(OpenAIModelと同じ)
+        if (attempt <= RETRY_MAX_RETRIES) {
+          await modelSleep(computeRetryDelay(attempt));
+          attempt++;
+          continue;
+        }
+        throw new Error(`ストリームが途切れました: ${err.message}`);
+      }
       const empty = !parsed.content && !(parsed.toolCalls?.length) && !parsed.usage;
       if (empty && emptyRetries < EMPTY_COMPLETION_MAX_RETRIES) {
         emptyRetries++;
@@ -74,7 +96,7 @@ export class ChatGPTModel {
     }
   }
 
-  async request({ messages, tools, token, onDelta }) {
+  async request({ messages, tools, token }) {
     const body = toCodexRequest({ messages, tools, cfg: this });
     const headers = buildHeaders(token, this.baseUrl);
     return fetch(codexUrl(this.baseUrl), {
@@ -115,6 +137,15 @@ export function buildHeaders(token, _baseUrl = "") {
 
 // ===== リクエスト変換(OpenAI形 → Responses input) =====
 
+// contentが配列(画像添付のマルチモーダル形)でもテキスト部分だけ取り出す。
+// String()直接は"[object Object]"になり文脈を汚染する。画像は本ワイヤ未対応(テキストのみ届ける)
+function textOf(content) {
+  if (Array.isArray(content)) {
+    return content.filter((c) => c?.type === "text").map((c) => c.text ?? "").join("\n");
+  }
+  return content ?? "";
+}
+
 /** @param {{messages: Array, tools: Array|null, cfg: ChatGPTModel}} p */
 export function toCodexRequest({ messages, tools, cfg }) {
   const system = [];
@@ -133,14 +164,15 @@ export function toCodexRequest({ messages, tools, cfg }) {
       continue;
     }
     if (m.role === "assistant" && (m.tool_calls?.length)) {
-      if (m.content) input.push({ role: "assistant", content: [{ type: "output_text", text: String(m.content) }] });
+      const t = textOf(m.content);
+      if (t) input.push({ role: "assistant", content: [{ type: "output_text", text: String(t) }] });
       for (const tc of m.tool_calls) {
         const fn = tc.function ?? tc;
         input.push({ type: "function_call", call_id: tc.id, name: fn.name, arguments: typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {}) });
       }
       continue;
     }
-    const text = m.content ?? "";
+    const text = textOf(m.content);
     if (!text) continue;
     input.push({ role: m.role === "assistant" ? "assistant" : "user", content: [{ type: m.role === "assistant" ? "output_text" : "input_text", text: String(text) }] });
   }
@@ -170,42 +202,47 @@ async function consumeStream(res, onDelta) {
   let usage = null;
   let completed = null;
   const calls = new Map(); // output_index => {call_id, name, args}
-  for (;;) {
-    const { done, value } = await readChunkWithIdleTimeout(reader);
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (!payload || payload === "[DONE]") continue;
-      let ev;
-      try { ev = JSON.parse(payload); } catch { continue; }
-      const type = ev.type;
-      if (type === "response.output_text.delta" && ev.delta) {
-        text += ev.delta;
-        onDelta?.({ kind: "say", text: ev.delta });
-      } else if (type === "response.reasoning_summary_text.delta" && ev.delta) {
-        reasoning += ev.delta;
-        onDelta?.({ kind: "think", text: ev.delta });
-      } else if (type === "response.output_item.added" && ev.item?.type === "function_call") {
-        calls.set(ev.output_index ?? 0, { call_id: ev.item.call_id ?? "", name: ev.item.name ?? "", args: ev.item.arguments ?? "" });
-      } else if (type === "response.function_call_arguments.delta" && ev.delta) {
-        const acc = calls.get(ev.output_index ?? 0);
-        if (acc) acc.args += ev.delta;
-      } else if (type === "response.completed" || type === "response.done" || type === "response.incomplete") {
-        completed = ev.response ?? null;
-        usage = completed?.usage ?? usage;
-      } else if (type === "response.failed") {
-        const detail = ev.response?.error?.message ?? JSON.stringify(ev.response?.error ?? ev).slice(0, 200);
-        throw new Error(`ChatGPT応答が失敗しました: ${detail}`);
-      } else if (type === "error") {
-        const detail = ev.message ?? ev.error?.message ?? JSON.stringify(ev).slice(0, 200);
-        throw new Error(`ChatGPTエラー: ${detail}`);
+  try {
+    for (;;) {
+      const { done, value } = await readChunkWithIdleTimeout(reader);
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        let ev;
+        try { ev = JSON.parse(payload); } catch { continue; }
+        const type = ev.type;
+        if (type === "response.output_text.delta" && ev.delta) {
+          text += ev.delta;
+          onDelta?.({ kind: "say", text: ev.delta });
+        } else if (type === "response.reasoning_summary_text.delta" && ev.delta) {
+          reasoning += ev.delta;
+          onDelta?.({ kind: "think", text: ev.delta });
+        } else if (type === "response.output_item.added" && ev.item?.type === "function_call") {
+          calls.set(ev.output_index ?? 0, { call_id: ev.item.call_id ?? "", name: ev.item.name ?? "", json: "" });
+        } else if (type === "response.function_call_arguments.delta" && ev.delta) {
+          const acc = calls.get(ev.output_index ?? 0);
+          if (acc) acc.args += ev.delta;
+        } else if (type === "response.completed" || type === "response.done" || type === "response.incomplete") {
+          completed = ev.response ?? null;
+          usage = completed?.usage ?? usage;
+        } else if (type === "response.failed") {
+          const detail = ev.response?.error?.message ?? JSON.stringify(ev.response?.error ?? ev).slice(0, 200);
+          throw new Error(`ChatGPT応答が失敗しました: ${detail}`);
+        } else if (type === "error") {
+          const detail = ev.message ?? ev.error?.message ?? JSON.stringify(ev).slice(0, 200);
+          throw new Error(`ChatGPTエラー: ${detail}`);
+        }
       }
     }
+  } finally {
+    // 中断(例外・リトライ)でも未読readerとサーバー接続を解放する(ハンドル残存でプロセスが終わらなくなる)
+    try { await reader.cancel(); } catch { /* 既に閉じている */ }
   }
   // 完了応答のoutputを最終値として使う(累積の取りこぼし保険)。無ければ累積から組み立てる
   let toolCalls = [];
@@ -233,13 +270,10 @@ function readChunkWithIdleTimeout(reader) {
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`ストリームが${Math.round(idle / 1000)}秒間無出力です(stall)`)), idle);
   });
-  return Promise.race([
-    reader.read().then((v) => {
-      clearTimeout(timer);
-      return v;
-    }),
-    timeout,
-  ]);
+  const readP = reader.read();
+  // read側がrejectしてもタイマーを解放する(放置するとプロセスが終了しない)
+  readP.finally(() => clearTimeout(timer));
+  return Promise.race([readP, timeout]);
 }
 
 // ===== usageとエラー =====

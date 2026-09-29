@@ -121,6 +121,15 @@ export function messagesUrl(baseUrl) {
   return b.endsWith("/v1") ? `${b}/messages` : `${b}/v1/messages`;
 }
 
+// contentが配列(画像添付のマルチモーダル形)でもテキスト部分だけ取り出す。
+// String()直接は"[object Object]"になり文脈を汚染する。画像は本ワイヤ未対応(テキストのみ届ける)
+function textOf(content) {
+  if (Array.isArray(content)) {
+    return content.filter((c) => c?.type === "text").map((c) => c.text ?? "").join("\n");
+  }
+  return content ?? "";
+}
+
 // ===== リクエスト変換(OpenAI形 → Anthropic形) =====
 
 /** @param {{messages: Array, tools: Array|null, cfg: AnthropicModel}} p */
@@ -146,7 +155,8 @@ export function toAnthropicRequest({ messages, tools, cfg }) {
     }
     if (m.role === "assistant" && (m.tool_calls?.length)) {
       const blocks = [];
-      if (m.content) blocks.push({ type: "text", text: String(m.content) });
+      const t = textOf(m.content);
+      if (t) blocks.push({ type: "text", text: String(t) });
       for (const tc of m.tool_calls) {
         const fn = tc.function ?? tc;
         blocks.push({ type: "tool_use", id: tc.id, name: fn.name, input: safeParseArgs(fn.arguments) });
@@ -154,7 +164,7 @@ export function toAnthropicRequest({ messages, tools, cfg }) {
       out.push({ role: "assistant", content: blocks });
       continue;
     }
-    out.push({ role: m.role === "assistant" ? "assistant" : "user", content: m.content ?? "" });
+    out.push({ role: m.role === "assistant" ? "assistant" : "user", content: textOf(m.content) });
   }
   const body = {
     model: cfg.model,
@@ -218,48 +228,53 @@ async function consumeStream(res, onDelta) {
   let stopReason = null;
   /** @type {Map<number, {type: string, text: string, thinking: string, id: string, name: string, json: string}>} */
   const blockAcc = new Map();
-  for (;;) {
-    const { done, value } = await readChunkWithIdleTimeout(reader);
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (!payload || payload === "[DONE]") continue;
-      let ev;
-      try {
-        ev = JSON.parse(payload);
-      } catch {
-        continue;
-      }
-      if (ev.type === "message_start") {
-        usage = { ...(ev.message?.usage ?? {}) };
-      } else if (ev.type === "content_block_start") {
-        const cb = ev.content_block ?? {};
-        blockAcc.set(ev.index, { type: cb.type, text: "", thinking: "", id: cb.id ?? "", name: cb.name ?? "", json: "" });
-      } else if (ev.type === "content_block_delta") {
-        const acc = blockAcc.get(ev.index);
-        const d = ev.delta ?? {};
-        if (!acc) continue;
-        if (d.type === "text_delta" && d.text) {
-          acc.text += d.text;
-          onDelta?.({ kind: "say", text: d.text });
-        } else if (d.type === "thinking_delta" && d.thinking) {
-          acc.thinking += d.thinking;
-          onDelta?.({ kind: "think", text: d.thinking });
-        } else if (d.type === "input_json_delta" && d.partial_json) {
-          acc.json += d.partial_json;
+  try {
+    for (;;) {
+      const { done, value } = await readChunkWithIdleTimeout(reader);
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        let ev;
+        try {
+          ev = JSON.parse(payload);
+        } catch {
+          continue;
         }
-      } else if (ev.type === "message_delta") {
-        if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
-        if (ev.usage) usage = { ...(usage ?? {}), ...ev.usage };
-      } else if (ev.type === "error") {
-        throw new Error(translateApiError(ev));
+        if (ev.type === "message_start") {
+          usage = { ...(ev.message?.usage ?? {}) };
+        } else if (ev.type === "content_block_start") {
+          const cb = ev.content_block ?? {};
+          blockAcc.set(ev.index, { type: cb.type, text: "", thinking: "", id: cb.id ?? "", name: cb.name ?? "", json: "" });
+        } else if (ev.type === "content_block_delta") {
+          const acc = blockAcc.get(ev.index);
+          const d = ev.delta ?? {};
+          if (!acc) continue;
+          if (d.type === "text_delta" && d.text) {
+            acc.text += d.text;
+            onDelta?.({ kind: "say", text: d.text });
+          } else if (d.type === "thinking_delta" && d.thinking) {
+            acc.thinking += d.thinking;
+            onDelta?.({ kind: "think", text: d.thinking });
+          } else if (d.type === "input_json_delta" && d.partial_json) {
+            acc.json += d.partial_json;
+          }
+        } else if (ev.type === "message_delta") {
+          if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
+          if (ev.usage) usage = { ...(usage ?? {}), ...ev.usage };
+        } else if (ev.type === "error") {
+          throw new Error(translateApiError(ev));
+        }
       }
     }
+  } finally {
+    // 中断(例外・リトライ)でも未読readerとサーバー接続を解放する
+    try { await reader.cancel(); } catch { /* 既に閉じている */ }
   }
   const blocks = [...blockAcc.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => {
     if (b.type === "tool_use") return { type: "tool_use", id: b.id, name: b.name, input: safeParseArgs(b.json) };
@@ -275,13 +290,10 @@ function readChunkWithIdleTimeout(reader) {
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`ストリームが${Math.round(idle / 1000)}秒間無出力です(stall)`)), idle);
   });
-  return Promise.race([
-    reader.read().then((v) => {
-      clearTimeout(timer);
-      return v;
-    }),
-    timeout,
-  ]);
+  const readP = reader.read();
+  // read側がrejectしてもタイマーを解放する(放置するとプロセスが終了しない)
+  readP.finally(() => clearTimeout(timer));
+  return Promise.race([readP, timeout]);
 }
 
 // ===== エラーとユーティリティ =====

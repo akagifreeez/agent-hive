@@ -213,9 +213,10 @@ const openAuthFlows = new Map();
  * トークンをストアに保存する(完了は/api/modelsのauthHintで見える)。再認証も同じ操作。
  * pasteUrlを渡した場合は「先に発行した認証URL」からのリダイレクト先URLとして処理する
  * (コールバックの自動受信が使えない環境向けのフォールバック)。
+ * トークン交換に失敗した場合はflowにerrorを残し、次の応答のlastErrorとして届ける。
  * @param {import("../config.js").HiveConfig} config
- * @param {{provider?: string|null, pasteUrl?: string|null}} [target] */
-export async function startOpenAIAuth(config, { provider = null, pasteUrl = null } = {}) {
+ * @param {{provider?: string|null, pasteUrl?: string|null, bus?: Object|null}} [target] */
+export async function startOpenAIAuth(config, { provider = null, pasteUrl = null, bus = null } = {}) {
   const catalog = buildCatalog(config.models);
   const baseDirs = [ROOT, dataDir()];
   const pid = provider ?? resolveModel(catalog, null).provider.id;
@@ -273,16 +274,21 @@ export async function startOpenAIAuth(config, { provider = null, pasteUrl = null
     };
   }
   const authUrl = buildAuthorizeUrl({ verifier, state, redirectUri });
-  openAuthFlows.set(pid, { verifier, state, redirectUri, close: opened.close });
-  // 受信はバックグラウンドで続ける。完了時トークン保存(失敗時はストアに触らず、次の認証/テストで分かる)
+  openAuthFlows.set(pid, { verifier, state, redirectUri, close: opened.close, error: null });
+  // 受信はバックグラウンドで続ける。完了時トークン保存。失敗時はflowに残して次の応答で届ける
+  // (ブラウザ側には「完了」と見えているため、ここで黙ると未認証のまま気付けない)
   void opened.promise
     .then(async ({ code }) => {
       const tokens = await exchangeCode(code, verifier, redirectUri);
       saveOAuthTokens(storeRef, tokens, baseDirs);
       openAuthFlows.delete(pid);
     })
-    .catch(() => { /* コールバックUIに完了メッセージを出しているため、ここでは握りつぶす */ });
-  return { ok: true, provider: pid, authUrl, redirectUri };
+    .catch((err) => {
+      const flow = openAuthFlows.get(pid);
+      if (flow) flow.error = err?.message ?? String(err);
+      bus?.emit("scenario.warn", { message: `ChatGPT認証のトークン交換に失敗しました: ${err?.message ?? err}` });
+    });
+  return { ok: true, provider: pid, authUrl, redirectUri, lastError: openAuthFlows.get(pid)?.error ?? null };
 }
 
 /** トークンをストアへ保存する(表示用のaccountId/emailも添える)。 */

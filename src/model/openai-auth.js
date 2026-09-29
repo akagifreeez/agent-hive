@@ -216,16 +216,28 @@ export function readTokenStore(file, baseDirs = []) {
   return {};
 }
 
-/** トークンストアへ書き戻す。リフレッシュトークンを含むため0600(新規作成時のモード)+
- * 既存ファイルへのchmod(Linuxのumask 022で0644になるのを防ぐ。Windowsではmode無視=無害)。 */
+/** トークンストアへ書き戻す。書き込み先はreadTokenStoreと同じ探索順で既存ファイルの所在に
+ * 追従する(読みと書きの場所がずれるとリフレッシュ結果が反映されなくなる)。無ければdataDirへ新規作成。
+ * リフレッシュトークンを含むため0600(新規作成時のモード)+既存ファイルへのchmod。 */
 export function writeTokenStore(file, store, baseDirs = []) {
-  const target = resolve(baseDirs[baseDirs.length - 1] ?? process.cwd(), file);
+  let target = null;
+  for (const base of baseDirs) {
+    const f = resolve(base, file);
+    if (existsSync(f)) { target = f; break; }
+  }
+  if (!target) target = resolve(baseDirs[baseDirs.length - 1] ?? process.cwd(), file);
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, JSON.stringify(store, null, 1), { mode: 0o600 });
   try { chmodSync(target, 0o600); } catch { /* Windowsでは不要 */ }
 }
 
+// 同一ストアへの並行リフレッシュを束ねるインフライト。複数エージェントが同一トークンを
+// 共有するため、期限の切れ目で全員が同時にrefreshするとOpenAI側のrotation+再利用検知で
+// 負け側が即死する(refresh_token_reused)。プロセス内で1本に直列化する
+const refreshInflight = new Map(); // "<file>::<provider>" => Promise
+
 /** 有効なaccess tokenを取得する(期限切れならリフレッシュして保存し直す)。
+ * 並行呼び出しは同じリフレッシュに束ねられる(全員が同じ新しいトークンを受け取る)。
  * @param {{provider: string, file: string}} storeRef
  * @param {string[]} baseDirs
  * @param {{forceRefresh?: boolean}} [opts]
@@ -238,19 +250,33 @@ export async function resolveOAuthToken(storeRef, baseDirs, opts = {}) {
   if (!opts.forceRefresh && entry.access && !expiresSoon) {
     return { access: entry.access, accountId: entry.accountId ?? null };
   }
-  const refreshed = await refreshToken(entry.refresh); // 失敗は理由つきの例外(上位で案内文にする)
-  const next = {
-    ...entry,
-    access: refreshed.access,
-    refresh: refreshed.refresh,
-    expires: refreshed.expires,
-    accountId: extractAccountId(refreshed.access) ?? entry.accountId ?? null,
-    email: extractEmail(refreshed.access) ?? entry.email ?? null,
-    updatedAt: Date.now(),
-  };
-  store[storeRef.provider] = next;
-  writeTokenStore(storeRef.file, store, baseDirs);
-  return { access: next.access, accountId: next.accountId ?? null };
+  // リフレッシュが必要: 既に走っていればそれに乗る(待って結果を共有する)
+  const key = `${storeRef.file}::${storeRef.provider}`;
+  if (refreshInflight.has(key)) return refreshInflight.get(key);
+  const p = (async () => {
+    // 待ちの間に他方が完了している可能性があるので、ストアを読み直して再判定する
+    const cur = readTokenStore(storeRef.file, baseDirs)[storeRef.provider];
+    if (cur?.access && cur.expires > Date.now() + 5 * 60_000 && !opts.forceRefresh) {
+      return { access: cur.access, accountId: cur.accountId ?? null };
+    }
+    const src = cur?.refresh ? cur : entry;
+    const refreshed = await refreshToken(src.refresh); // 失敗は理由つきの例外(上位で案内文にする)
+    const next = {
+      ...src,
+      access: refreshed.access,
+      refresh: refreshed.refresh,
+      expires: refreshed.expires,
+      accountId: extractAccountId(refreshed.access) ?? src.accountId ?? null,
+      email: extractEmail(refreshed.access) ?? src.email ?? null,
+      updatedAt: Date.now(),
+    };
+    const latest = readTokenStore(storeRef.file, baseDirs); // 書き戻しも最新のストアに載せ替える
+    latest[storeRef.provider] = next;
+    writeTokenStore(storeRef.file, latest, baseDirs);
+    return { access: next.access, accountId: next.accountId ?? null };
+  })().finally(() => refreshInflight.delete(key));
+  refreshInflight.set(key, p);
+  return p;
 }
 
 /** 認証済みかどうかの同期判定(UI表示用。access/refreshの有無のみ見る)。 */

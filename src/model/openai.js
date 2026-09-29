@@ -151,43 +151,48 @@ async function consumeStream(res, onDelta) {
   let usage = null;
   let webSearchResults = null;
   const toolAcc = new Map(); // index => {id, name, args}
-  for (;;) {
-    const { done, value } = await readChunkWithIdleTimeout(reader);
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (payload === "[DONE]") continue;
-      let chunk;
-      try {
-        chunk = JSON.parse(payload);
-      } catch {
-        continue;
-      }
-      if (chunk.usage) usage = chunk.usage;
-      if (chunk.web_search) webSearchResults = chunk.web_search; // 最終usageチャンクに付いてくる(Z.AI)
-      const d = chunk.choices?.[0]?.delta ?? {};
-      if (d.reasoning) {
-        reasoning += d.reasoning;
-        onDelta?.({ kind: "think", text: d.reasoning });
-      }
-      if (d.content) {
-        content += d.content;
-        onDelta?.({ kind: "say", text: d.content });
-      }
-      for (const tc of d.tool_calls ?? []) {
-        const i = tc.index ?? 0;
-        const acc = toolAcc.get(i) ?? { id: tc.id ?? `call-${i}`, name: "", args: "" };
-        if (tc.id) acc.id = tc.id;
-        if (tc.function?.name) acc.name += tc.function.name;
-        if (tc.function?.arguments) acc.args += tc.function.arguments;
-        toolAcc.set(i, acc);
+  try {
+    for (;;) {
+      const { done, value } = await readChunkWithIdleTimeout(reader);
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (payload === "[DONE]") continue;
+        let chunk;
+        try {
+          chunk = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+        if (chunk.usage) usage = chunk.usage;
+        if (chunk.web_search) webSearchResults = chunk.web_search; // 最終usageチャンクに付いてくる(Z.AI)
+        const d = chunk.choices?.[0]?.delta ?? {};
+        if (d.reasoning) {
+          reasoning += d.reasoning;
+          onDelta?.({ kind: "think", text: d.reasoning });
+        }
+        if (d.content) {
+          content += d.content;
+          onDelta?.({ kind: "say", text: d.content });
+        }
+        for (const tc of d.tool_calls ?? []) {
+          const i = tc.index ?? 0;
+          const acc = toolAcc.get(i) ?? { id: tc.id ?? `call-${i}`, name: "", args: "" };
+          if (tc.id) acc.id = tc.id;
+          if (tc.function?.name) acc.name += tc.function.name;
+          if (tc.function?.arguments) acc.args += tc.function.arguments;
+          toolAcc.set(i, acc);
+        }
       }
     }
+  } finally {
+    // 中断(例外・リトライ)でも未読readerとサーバー接続を解放する
+    try { await reader.cancel(); } catch { /* 既に閉じている */ }
   }
   const toolCalls = [...toolAcc.entries()]
     .sort((a, b) => a[0] - b[0])
@@ -208,13 +213,10 @@ function readChunkWithIdleTimeout(reader) {
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`ストリームが${Math.round(idle / 1000)}秒間無出力です(stall)`)), idle);
   });
-  return Promise.race([
-    reader.read().then((v) => {
-      clearTimeout(timer);
-      return v;
-    }),
-    timeout,
-  ]);
+  const readP = reader.read();
+  // read側がrejectしてもタイマーを解放する(放置するとプロセスが終了しない)
+  readP.finally(() => clearTimeout(timer));
+  return Promise.race([readP, timeout]);
 }
 
 // 成功したモデルを記憶して固定するフェイルオーバー(ZCode model-selection流)。

@@ -346,7 +346,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         req.on("end", async () => {
           try {
             const { provider, pasteUrl } = JSON.parse(body || "{}");
-            const r = await startOpenAIAuth(config, { provider: provider ?? null, pasteUrl: pasteUrl ?? null });
+            const r = await startOpenAIAuth(config, { provider: provider ?? null, pasteUrl: pasteUrl ?? null, bus });
             if (!r.ok) json(res, r, 400);
             else json(res, r);
           } catch (err) {
@@ -822,11 +822,15 @@ function saveApiKey(body, config) {
   let rel;
   if (pid) {
     let raw = config.models?.providers?.[pid];
+    const cp = buildCatalog(config.models).providers[pid];
+    if (!raw && !cp) return { ok: false, error: `未知のプロバイダ "${pid}"` };
+    // OAuth型(設定UIの「認証」で運用)には鍵ファイルを割り当てない(type:"oauth"の上書きで未認証化するため)
+    if (raw?.auth?.type === "oauth" || cp?.auth?.type === "oauth" || cp?.api === "openai-chatgpt-responses") {
+      return { ok: false, error: `プロバイダ "${pid}" はOAuth認証です。設定の「認証」ボタンから認証してください` };
+    }
     if (!raw) {
       // 内蔵カタログのみのプロバイダ(anthropic等・設定JSONに明記なし)も保存できるようにする:
       // 実行中configへ最小限の定義を足す(鍵自体はstate配下の暗黙ファイルに置くため再起動後も有効)
-      const cp = buildCatalog(config.models).providers[pid];
-      if (!cp) return { ok: false, error: `未知のプロバイダ "${pid}"` };
       raw = { id: pid, baseUrl: cp.baseUrl, api: cp.api, auth: {}, models: cp.models ?? [] };
       if (!config.models) config.models = { default: null, fallbacks: null, providers: {} };
       if (!config.models.providers) config.models.providers = {};

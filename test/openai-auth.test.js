@@ -108,6 +108,48 @@ test("resolveOAuthToken: 未認証はnull、期限切れは自動リフレッシ
   }
 });
 
+test("resolveOAuthToken: 並行呼び出しはリフレッシュ1本に束ねられる(全員が同じ新トークンを受け取る)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hive-oauth-"));
+  const storeRef = { provider: "openai", file: "s.json" };
+  writeTokenStore(storeRef.file, { openai: { access: "tok-old", refresh: "rt-1", expires: Date.now() - 1000 } }, [dir]);
+  const origFetch = globalThis.fetch;
+  let refreshCalls = 0;
+  globalThis.fetch = async (_url, opts) => {
+    if (new URLSearchParams(opts.body).get("grant_type") === "refresh_token") {
+      refreshCalls++;
+      await new Promise((r) => setTimeout(r, 60)); // 競合させるため少し遅らせる
+      return { ok: true, status: 200, text: async () => JSON.stringify({ access_token: "tok-new", refresh_token: "rt-2", expires_in: 3600 }) };
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify({}) };
+  };
+  try {
+    const [a, b] = await Promise.all([
+      resolveOAuthToken(storeRef, [dir]),
+      resolveOAuthToken(storeRef, [dir]),
+    ]);
+    assert.equal(refreshCalls, 1, "並行リフレッシュは1回に束ねられる(rotation再利用検知の回避)");
+    assert.equal(a.access, "tok-new");
+    assert.equal(b.access, "tok-new");
+    const saved = JSON.parse(readFileSync(join(dir, "s.json"), "utf8"));
+    assert.equal(saved.openai.refresh, "rt-2");
+  } finally {
+    globalThis.fetch = origFetch;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeTokenStore: 既存ファイルがある場所(先頭baseDirs)へ書く=読みと書きが対称", () => {
+  const dirA = mkdtempSync(join(tmpdir(), "hive-oauth-a-"));
+  const dirB = mkdtempSync(join(tmpdir(), "hive-oauth-b-"));
+  writeTokenStore("s.json", { openai: { access: "old", refresh: "r" } }, [dirA]);
+  writeTokenStore("s.json", { openai: { access: "new", refresh: "r2" } }, [dirA, dirB]);
+  assert.ok(existsSync(join(dirA, "s.json")), "既存ファイルと同じ場所へ書く");
+  assert.ok(!existsSync(join(dirB, "s.json")), "読み側から見えない場所へ新規作成しない");
+  assert.equal(readTokenStore("s.json", [dirA]).openai.access, "new");
+  rmSync(dirA, { recursive: true, force: true });
+  rmSync(dirB, { recursive: true, force: true });
+});
+
 test("oauthHint: email優先、無ければaccountId末尾、未認証はnull", () => {
   const dir = mkdtempSync(join(tmpdir(), "hive-oauth-"));
   const baseDirs = [dir];
@@ -116,6 +158,15 @@ test("oauthHint: email優先、無ければaccountId末尾、未認証はnull", 
   writeTokenStore(storeRef.file, { openai: { refresh: "r", accountId: "acc-abcdef" } }, baseDirs);
   assert.equal(oauthHint(storeRef, baseDirs), "…abcdef");
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("toCodexRequest: contentが配列(画像添付形)でもテキスト部分だけ届く", () => {
+  const body = toCodexRequest({
+    cfg: { model: "gpt-6-astra", temperature: null },
+    messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,xx" } }, { type: "text", text: "この画像を見て" }] }],
+  });
+  const item = body.input[0];
+  assert.equal(item.content[0].text, "この画像を見て", "text部分が落ちない・[object Object]に化けない");
 });
 
 test("codexUrl: baseUrlから/codex/responsesへ補完する", () => {

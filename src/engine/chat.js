@@ -230,8 +230,11 @@ export class ChatHost {
           drainInput: () => st.pending.splice(0), // ラウンド実行中の入力はターン境界で割込む(steering)
           peekInput: () => st.pending.length > 0, // idle退場が入力を捨てないための覗き見
         });
-          // 既読位置をラウンド間で保持(同じ入力の二重配信を防ぐ)
-        if (typeof r.seenBoard === "number") this.seen.set(main.id, r.seenBoard);
+          // 既読位置をラウンド間で保持(同じ入力の二重配信を防ぐ)。
+        // クランプ: /clearでボードが空になり投稿idが1から再採番されるため、走行中ラウンドが
+        // 旧値(例: 150)を持ち越すとsince(150)が空になり新着が一切注入されなくなる。
+        // board.lastId()へ下げるだけでよい(クリア後に蓄積した新着はlastId以降に含まれる)
+        if (typeof r.seenBoard === "number") this.seen.set(main.id, Math.min(r.seenBoard, this.board.lastId()));
         // 会話メモリを永続化(再起動後も続きから)
         this.saveMemories(main);
         // ラウンドごとの消費を運用データとして記録(state/usage.json)

@@ -1933,6 +1933,7 @@ async function renderModelsList() {
           try {
             const r = await (await hfetch("/api/openai-auth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: p.id }) })).json();
             if (r.error) { toast(`認証: ${r.error}`); result.textContent = ""; return; }
+            if (r.lastError) toast(`前回の認証は失敗しています: ${r.lastError}`);
             const a = document.createElement("a");
             a.href = r.authUrl;
             a.target = "_blank";
