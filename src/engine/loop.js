@@ -197,24 +197,14 @@ export async function runAgentLoop({
     }
     runTokens += (res.usage?.promptTokens ?? 0) + (res.usage?.completionTokens ?? 0);
     lastPromptTokens = res.usage?.promptTokens ?? 0;
-    // トークン内訳のトレース記録(消費分析用)。state/usage-trace.jsonl に1行ずつ追記する。
-    // prompt/completion/reasoningの内訳+コンテキストの概算サイズ(messages合計文字数)を記録する。
+    // トークン内訳のトレース記録(消費分析用)。ボードJSONLと同じ親の usage-trace/ 配下へ1ターン1行追記する
+    // (監査領域 state/ 直下は避ける)。prompt/completion/reasoningの内訳+コンテキスト概算サイズを記録。
     try {
-      const traceDir = "state";
-      mkdirSync(traceDir, { recursive: true });
-      const ctxChars = messages.reduce((n, m) => n + String(m.content ?? "").length, 0);
-      appendFileSync(join(traceDir, "usage-trace.jsonl"), JSON.stringify({
-        ts: new Date().toISOString(), agent: agent.id, turn,
-        prompt: res.usage?.promptTokens ?? 0,
-        completion: res.usage?.completionTokens ?? 0,
-        reasoning: res.usage?.reasoningTokens ?? 0,
-        ctxChars, msgCount: messages.length,
-      }) + "\n");
-    } catch { /* トレースの失敗でループを止めない */ }
-    // トークン内訳のトレース記録(消費分析用)。state/usage-trace.jsonl に1行ずつ追記する。
-    // prompt/completion/reasoningの内訳+コンテキストの概算サイズ(messages合計文字数)を記録する。
-    try {
-      const traceDir = board.persistPath ? dirname(board.persistPath) : "state";
+      // 書込先は監査領域(state/)を避ける: 監査台帳と同じディレクトリへのエンジン書込は運用と衝突する。
+      // board.persistPathがあればその親の下 usage-trace/ へ、無ければスキップ(監査領域へは書かない)
+      const baseDir = board.persistPath ? dirname(board.persistPath) : null;
+      if (!baseDir) throw new Error("usage-trace: persistPath無し(state/監査領域を避けるため書かない)");
+      const traceDir = join(baseDir, "usage-trace");
       mkdirSync(traceDir, { recursive: true });
       const ctxChars = messages.reduce((n, m) => n + String(m.content ?? "").length, 0);
       appendFileSync(join(traceDir, "usage-trace.jsonl"), JSON.stringify({
