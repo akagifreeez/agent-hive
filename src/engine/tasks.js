@@ -114,13 +114,6 @@ export class TaskBlackboard {
   // 指定した文脈のタスクだけを請求対象にするので、別の取り組みのタスクと混ざらない。
   // 文脈内に何も無い場合、発見器起票の共通仕事(fix-/review-/distill-)へだけフォールバックする
   // (放置されると誰にも消化されないため。ユーザー/他プロジェクトのタスクは混ざらせない)。
-  /**
-   * タスクを請求する(open→claimedへの原子的rename)。roleは「タスクrole===自分のrole」
-   * または「タスクrole無し」のときだけ請求できる(不一致はclaimMissの診断文面で教える)。
-   * @param {{id: string, role: string|null}} agent 請求するエージェント
-   * @param {{project?: string}} [opts] project指定時はその文脈のタスクに絞る(無ければ共通仕事へフォールバック)
-   * @returns {{id: string, body: string}|null} 請求できたらタスク情報、できなければnull
-   */
   // 依存が全部doneならtrue。depends_onに未完了タスクがあるopenはclaimできない(イシュー#2)。
   // 自己依存や壊れたグラフ(循環)で永遠に着手できない状態を作らないため、
   // 依存元が自分自身 / 未完了依存が全て自分自身のときは依存を無視してtrueを返す。
@@ -138,6 +131,13 @@ export class TaskBlackboard {
     return readdirSync(this.claimed).some((f) => f === `${id}.md` || f.endsWith(`--${id}.md`));
   }
 
+  /**
+   * タスクを請求する(open→claimedへの原子的rename)。roleは「タスクrole===自分のrole」
+   * または「タスクrole無し」のときだけ請求できる(不一致はclaimMissの診断文面で教える)。
+   * @param {{id: string, role: string|null}} agent 請求するエージェント
+   * @param {{project?: string}} [opts] project指定時はその文脈のタスクに絞る(無ければ共通仕事へフォールバック)
+   * @returns {{id: string, body: string}|null} 請求できたらタスク情報、できなければnull
+   */
   claim(agent, opts = {}) {
     const attempt = (files) => {
       for (const pass of [(r) => r === agent.role, (r) => r === null]) {
