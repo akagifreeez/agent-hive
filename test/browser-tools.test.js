@@ -197,7 +197,7 @@ test("browserSubmit: POSTでフォーム送信でき、303はlocation追従し�
     values: { user: "alice", pass: "s3cret" },
   });
   assert.equal(r.ok, true);
-  assert.match(r.text, /method: POST/);
+  assert.match(r.text, /^送信: POST/m); // 送信: POST <url>
   assert.match(r.text, /user=alice/);
   assert.match(r.text, /alice/); // 応答ページの抽出にも反映されている
   server.close();
