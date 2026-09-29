@@ -38,7 +38,7 @@ export class TaskBlackboard {
   /**
    * 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
    * acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
-   * @param {{id: string, role?: string|null, body?: string, project?: string, acceptance?: string, dependsOn?: string[], createdBy?: string|null}} t
+   * @param {{id: string, role?: string|null, body?: string, project?: string, acceptance?: string, dependsOn?: string[], createdBy?: string|null, model?: string|null}} t
    * @returns {boolean} 既存のidならfalse
    */
   // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
