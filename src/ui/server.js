@@ -721,7 +721,11 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       if (url.pathname === "/api/mcp" && req.method === "GET" && onMcpList) {
-        json(res, { servers: onMcpList() });
+        {
+          // ブラウザ実操作が要る場合の案内(#10): レンダリング必須の操作はMCP(Playwright等)で拡張する設計
+          const list = onMcpList();
+          json(res, { servers: list, browserHint: list.length ? `MCP接続済み(${list.map((s) => s.name).join(", ")})` : "MCP未接続 — リンク先のレンダリング等が要る実操作はPlaywright等のMCPサーバー接続で拡張できます" });
+        }
         return;
       }
       if (url.pathname === "/api/mcp" && req.method === "POST" && (onMcpAdd || onMcpRemove)) {
