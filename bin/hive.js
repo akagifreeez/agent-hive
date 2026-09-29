@@ -337,7 +337,7 @@ async function main() {
     return cmdTasks(opts, sub);
   }
   if (cmd === "audit") return cmdAudit(opts);
-  if (cmd === "notify") return cmdNotify(o);
+  if (cmd === "notify") return cmdNotify(opts);
   if (cmd === "board") return cmdBoard(opts);
   if (cmd === "say") return cmdSay(opts, args);
   if (cmd === "feedback") return cmdFeedback(opts, args);
