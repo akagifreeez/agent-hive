@@ -84,7 +84,7 @@ function btFormFields(formInner) {
  * HTMLをページ情報へ構造化する。
  * @param {string} html 生HTML
  * @param {string} baseUrl 絶対URL(相対リンク解決の基準)
- * @returns {{url: string, title: string, headings: string[], links: Array<{text: string, href: string|null}>, forms: Array<{index: number, method: string, action: string, html: string, fields: Array<{name: string, type: string, value: string, options?: string[], order: number}>}>, text: string, raw: string}}
+ * @returns {{url: string, title: string, headings: string[], links: Array<{text: string, href: string|null}>, forms: Array<{index: number, method: string, methodRaw?: string, action: string, html: string, fields: Array<{name: string, type: string, value: string, options?: string[], order: number}>}>, text: string, raw: string}}
  */
 export function parsePage(html, baseUrl) {
   const src = String(html ?? "");
@@ -105,7 +105,7 @@ export function parsePage(html, baseUrl) {
     const raw = am[1] ?? am[2] ?? am[3] ?? "";
     const text = btStripTags(am[4]);
     const href = normalizeUrl(raw, base);
-    if (href === null) continue; // javascript:/断片等は除外(誤遷移防止)
+    if (href === null) { if (raw.startsWith("#") && text) links.push({ text, href: null }); continue; } // #はページ内リンクとして保持、javascript:等は除外
     if (!text) continue;
     links.push({ text, href });
   }
@@ -119,6 +119,7 @@ export function parsePage(html, baseUrl) {
     forms.push({
       index: forms.length + 1,
       method: methodRaw || "GET",
+      methodRaw,
       action: normalizeUrl(actionRaw || base, base) ?? base,
       html: fm[2] ?? "",
       fields: btFormFields(fm[2] ?? ""),
@@ -152,7 +153,7 @@ export function extractElements(page, filter = {}) {
         out.push({ index: ++index, type, text, href: normalizeUrl(rawHref, page.url) });
       }
     } else if (type === "form") {
-      for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.methodRaw ?? f.method, action: f.action, fields: f.fields.length });
+      for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {
       const hRe = /<h([1-6])(\s[^>]*)?>([\s\S]*?)<\/h\1\s*>/gi;
       let hm;
@@ -226,13 +227,10 @@ export function buildSubmission(form, values, opts = {}) {
   if (!form) throw new Error("フォームが見つかりません");
   const f = applyFormValues(form, values);
   if (opts.selector) {
-    const sel = String(opts.selector);
-    const tagRe = new RegExp("<" + sel + "(" + BS + "s|>)", "i");
-    const nameAttrRe = new RegExp("name" + BS + BS + "s*=" + BS + BS + "s*[" + DQ + SQ + "]?" + sel + "(?:[" + DQ + SQ + "]|[^" + BS + "s/>])", "i");
-    const hasField = (f.fields ?? []).some((x) => x.name === sel);
-    if (!tagRe.test(String(form.html ?? "")) && !hasField && !nameAttrRe.test(String(form.html ?? ""))) {
-      throw new Error("フォーム内に要素 " + sel + " が見つかりません(誤送信防止のため送信しません)");
-    }
+    const sel = String(opts.selector).trim().toLowerCase();
+    const esc = sel.replace(new RegExp("[.*+?^\${}()|[\]\\]", "g"), "\\$&");
+    const inForm = new RegExp("<" + esc + "(\s|>)", "i").test(String(form.html ?? "")) || (form.fields ?? []).some((x) => x.name.toLowerCase() === sel);
+    if (!inForm) throw new Error("フォーム内に要素 " + String(opts.selector) + " が見つかりません(誤送信防止のため送信しません)");
   }
   const pairs = f.fields.filter((x) => x.name).map((x) => [x.name, x.value ?? ""]);
   const body = new URLSearchParams(pairs).toString();

@@ -353,6 +353,8 @@ export function readMeta(file) {
       const a = l.match(/^acceptance:\s*(.+)$/);
       if (a) meta.acceptance = a[1].trim();
       const d = l.match(/^depends_on:\s*(.+)$/);
+      const m = l.match(/^model:\s*(.+)$/);
+      if (m) meta.model = m[1].trim() || null;
       if (d) meta.dependsOn = String(d[1]).split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
       const mo = l.match(/^model:\s*(.+)$/);
       if (mo) meta.model = mo[1].trim() || null;
@@ -369,6 +371,13 @@ function dependsLine(dependsOn) {
     .map((s) => String(s ?? "").trim().replace(/[\r\n]/g, ""))
     .filter((s) => /^[a-z0-9][a-z0-9-]*$/.test(s)))];
   return ids.length ? `depends_on: ${ids.join(",")}` : "";
+}
+// タスク別モデル指定(イシュー#12)。refは provider/model 形式の緩い検証(パス区切りと記号のみ許容)
+function modelLine(model) {
+  const ref = String(model ?? "").trim().replace(/[\r\n]/g, "");
+  if (!ref) return "";
+  if (!/^[A-Za-z0-9._\/-]+$/.test(ref)) return "";
+  return `model: ${ref.slice(0, 120)}`;
 }
 
 function metaLines(project, role, acceptance = "", dependsOn = [], model = null) {
