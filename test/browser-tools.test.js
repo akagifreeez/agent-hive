@@ -46,7 +46,7 @@ function startLocalServer(routes) {
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", () => {
-      const route = routes[req.url] ?? {};
+      const route = routes[req.url] ?? {}; console.log("SRV:", req.method, req.url);
       if (route.seeOther) {
         res.writeHead(303, { location: route.seeOther });
         res.end();
@@ -56,7 +56,7 @@ function startLocalServer(routes) {
       const echo = route.echoBody
         ? PAGE_HTML.replace("__METHOD__", req.method).replace("__BODY__", body).replace("__CT__", req.headers["content-type"] ?? "(none)")
         : route.body ?? "";
-      res.end(echo);
+      console.log("SRV-echo len:", (echo??"").length, "bodyLen:", (route.body??"").length); res.end(echo);
     });
   });
   return new Promise((done) => {
@@ -169,7 +169,7 @@ test("browserFetch: ローカルサーバーからGETし、page+rawが返る(絶
   const { server, base } = await startLocalServer({ "/page.html": { body: PAGE_HTML } });
   const r = await browserFetch(`${base}/page.html`);
   assert.equal(r.ok, true);
-  assert.equal(r.page.title, "フォームページ");
+  console.log("DBG:", r.ok, r.status, JSON.stringify(r.page?.title), (r.raw??"").length); assert.equal(r.page.title, "フォームページ");
   assert.ok(r.status === 200);
   assert.ok(String(r.raw).includes("見出しH1"));
 
