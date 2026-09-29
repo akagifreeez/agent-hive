@@ -262,7 +262,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (r) r.state = p.verdict === "approve" ? "approved" : "denied";
     },
     "scenario.started": (p) => { live.scenario = { name: p.name, phase: "running" }; },
-    "usage.summary": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), totals: p.usage ?? null }),
+    // runner.jsは{byAgent, totals}をemitする(旧契約のp.usageも後方互換で受ける)
+    "usage.summary": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), totals: p.totals ?? p.usage ?? null }),
     "usage.round": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), agent: p.agent, thread: p.thread ?? '__main__', endedBy: p.endedBy ?? 'ok', totals: p.totals ?? null }),
     "scenario.finished": () => { if (live.scenario) live.scenario.phase = "done"; },
   };
