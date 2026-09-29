@@ -143,7 +143,7 @@ export function extractElements(page, filter = {}) {
   for (const type of want) {
     if (type === "link") {
       // リンクはrawから直接列挙する(断片#...はhref=nullで残す。遷移候補の一覧性優先)。javascript:等は除外
-      const aRe = new RegExp("<a\\\\s[^>]*?href=(?:\\\"([^\"]*)\\\"|\\'[^']*\\'|([^\\\\s>]+))[^>]*>(\\\\s\\\\S*?)</a\\\\s*>", "gi");
+      const aRe = new RegExp("<a\\s[^>]*?href=(?:\"([^\"]*)\"|'[^']*'|([^\\s>]+))[^>]*>(\\s\\S*?)</a\\s*>", "gi");
       let am;
       while ((am = aRe.exec(String(page.raw ?? ""))) && index < 100) {
         const rawHref = am[1] ?? am[2] ?? am[3] ?? "";
