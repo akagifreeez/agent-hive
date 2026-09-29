@@ -1074,16 +1074,29 @@ async function startMonitor({ config, live, tasks, startedAt }) {
   .ok{color:#86efac}.warn{color:#fbbf24}.err{color:#fca5a5}.dim{color:#a3a3a8}
   .board div{padding:3px 0;border-bottom:1px solid #1d1d1f;color:#a3a3a8;white-space:pre-wrap;word-break:break-word}
   .board b{color:#eaeaea;font-weight:600}
+  .chart{display:block;background:#1d1d1f;border:1px solid #2c2c31;border-radius:6px;margin:4px 0 8px}
+  .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:860px){.charts{grid-template-columns:1fr}}
 </style></head><body>
 <header><h1>agent-hive <span class="accent">monitor</span></h1><span id="phase" class="ph"></span><span class="sub" id="meta">読み込み中...</span><span class="sub">読み取り専用・3秒ごとに更新</span></header>
 <main id="body"></main>
+<script src="/monitor-chart.js"></script>
 <script>
 const esc=(s)=>String(s??"").replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const rows=(a,f)=>a.map(f).join("");
 const hue=(s)=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))%360;return h;};
+const hist=[];
+function renderCharts(d){
+  try{
+    monitorChart.pushSample(hist,d);
+    let el=document.getElementById("charts");
+    if(!el){el=document.createElement("div");el.id="charts";el.className="charts";const b=document.getElementById("body");b.parentNode.insertBefore(el,b);}
+    el.innerHTML="<div><h2>エージェント数・タスク進捗の推移</h2>"+monitorChart.renderChartSvg(hist)+"</div><div><h2>トークン消費の推移</h2>"+monitorChart.renderTokenBarsSvg(hist)+"</div>";
+  }catch(e){}
+}
 async function tick(){
   try{
     const d=await (await fetch("/api/monitor")).json();
+    renderCharts(d);
     const ph={working:["作業中","#fbbf24"],done:["完了","#86efac"],idle:["待機","#6e6e73"]}[d.phase]||["?","#6e6e73"];
     const remain=d.tasks.open.length+d.tasks.claimed.length;
     const pe=document.getElementById("phase");
@@ -1109,6 +1122,10 @@ tick();setInterval(tick,3000);
     try {
       const url = new URL(req.url ?? "/", "http://monitor");
       if (url.pathname === "/api/monitor") return json(res, buildMonitorSnapshot({ config, live, tasks, startedAt }));
+      if (url.pathname === "/monitor-chart.js") {
+        res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+        return res.end(readFileSync(join(PUBLIC, "monitor-chart.js")));
+      }
       if (req.method === "GET") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         return res.end(html);
