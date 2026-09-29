@@ -1342,11 +1342,6 @@ function renderStatusTab(body) {
     tbl.appendChild(tb);
     body.appendChild(tbl);
   }
-  // 日別・スレッド別の集計ビュー(GitHubイシュー#6): /api/usage のaggregateを表示
-  const aggBox = document.createElement("div");
-  aggBox.id = "usage-aggregate";
-  body.appendChild(aggBox);
-  renderUsageAggregate(aggBox);
   // セッション保存/読込
   const h2 = document.createElement("div");
   h2.className = "sec";
