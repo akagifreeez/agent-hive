@@ -67,6 +67,21 @@ test("toAnthropicRequest: thinking未対応の間はreasoningEffort指定時にt
   assert.equal(body.temperature, undefined);
 });
 
+test("toAnthropicRequest: contentが配列(画像添付形)はimage source(base64)へ変換する", () => {
+  const body = toAnthropicRequest({
+    cfg: { model: "claude-sonnet-5-5", maxTokens: 100, temperature: 0.5, reasoningEffort: null },
+    messages: [{ role: "user", content: [
+      { type: "text", text: "この画像を見て" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,aGk=" } },
+    ] }],
+  });
+  const content = body.messages[0].content;
+  assert.equal(content[0].type, "text");
+  assert.equal(content[0].text, "この画像を見て");
+  assert.equal(content[1].type, "image");
+  assert.deepEqual(content[1].source, { type: "base64", media_type: "image/png", data: "aGk=" });
+});
+
 test("fromContentBlocks: text/thinking/tool_useを正規形へ", () => {
   const r = fromContentBlocks([
     { type: "thinking", thinking: "考え" },

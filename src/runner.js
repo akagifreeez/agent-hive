@@ -50,6 +50,18 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   }
   await ensureGitRepo(config.workspace);
 
+  // 起動時のゾンビclaim回収: プロセス再起動で走行中ラウンドは全て死んでいるため、claimedのまま
+  // 残ったタスクは誰にも進められない(idle-claim待ちのデッドロック)。起動直後なので全claimedは
+  // ゾンビと見なして解放する(task.releasedが出るが、この時点でラウンドは無いので無害)
+  const zombies = tasks.list().claimed;
+  for (const t of zombies) {
+    tasks.release(t.agent, "[起動時回収] プロセス再起動により走行中ラウンドが消滅したため解放しました");
+  }
+  if (zombies.length) {
+    console.log(`[agent-hive] 起動時: 前回走行中だったclaimedタスク${zombies.length}件を解放しました`);
+    bus.emit("scenario.warn", { message: `起動時: 前回のclaimedタスク${zombies.length}件を回収(解放)しました` });
+  }
+
   const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
   // 永続記憶(memory/)+スキル索引を毎回読み直す(distill反映・スキル追加を次ラウンドから効かせる)
   const memoryFn = () => {

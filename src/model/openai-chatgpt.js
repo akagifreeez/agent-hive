@@ -172,6 +172,18 @@ export function toCodexRequest({ messages, tools, cfg }) {
       }
       continue;
     }
+    if (Array.isArray(m.content)) {
+      // マルチモーダル(画像添付): input_text+input_imageのcontent配列へ変換する
+      // (attachImageはOpenAI形のimage_url/data URLで積む)
+      const content = [];
+      const t = m.content.filter((c) => c?.type === "text").map((c) => c.text ?? "").join("\n");
+      if (t) content.push({ type: m.role === "assistant" ? "output_text" : "input_text", text: String(t) });
+      for (const c of m.content) {
+        if (c?.type === "image_url" && c.image_url?.url) content.push({ type: "input_image", image_url: c.image_url.url });
+      }
+      if (content.length) input.push({ role: m.role === "assistant" ? "assistant" : "user", content });
+      continue;
+    }
     const text = textOf(m.content);
     if (!text) continue;
     input.push({ role: m.role === "assistant" ? "assistant" : "user", content: [{ type: m.role === "assistant" ? "output_text" : "input_text", text: String(text) }] });

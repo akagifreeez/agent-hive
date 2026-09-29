@@ -169,6 +169,17 @@ test("toCodexRequest: contentが配列(画像添付形)でもテキスト部分�
   assert.equal(item.content[0].text, "この画像を見て", "text部分が落ちない・[object Object]に化けない");
 });
 
+test("toCodexRequest: 画像はinput_imageへ変換される(ChatGPTでスクリーンショット運用可)", () => {
+  const body = toCodexRequest({
+    cfg: { model: "gpt-6-astra", temperature: null },
+    messages: [{ role: "user", content: [{ type: "text", text: "見て" }, { type: "image_url", image_url: { url: "data:image/png;base64,aGk=" } }] }],
+  });
+  const content = body.input[0].content;
+  assert.equal(content[0].type, "input_text");
+  assert.equal(content[1].type, "input_image");
+  assert.equal(content[1].image_url, "data:image/png;base64,aGk=");
+});
+
 test("codexUrl: baseUrlから/codex/responsesへ補完する", () => {
   assert.equal(codexUrl("https://chatgpt.com/backend-api"), "https://chatgpt.com/backend-api/codex/responses");
   assert.equal(codexUrl("https://chatgpt.com/backend-api/codex"), "https://chatgpt.com/backend-api/codex/responses");

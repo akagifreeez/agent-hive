@@ -164,6 +164,20 @@ export function toAnthropicRequest({ messages, tools, cfg }) {
       out.push({ role: "assistant", content: blocks });
       continue;
     }
+    if (Array.isArray(m.content)) {
+      // マルチモーダル(画像添付): Anthropic形のimage source(base64)へ変換する
+      // (attachImageはOpenAI形のimage_url/data URLで積む)
+      const blocks = [];
+      for (const c of m.content) {
+        if (c?.type === "text" && c.text) blocks.push({ type: "text", text: String(c.text) });
+        else if (c?.type === "image_url" && c.image_url?.url) {
+          const dm = /^data:([^;]+);base64,(.+)$/.exec(String(c.image_url.url));
+          if (dm) blocks.push({ type: "image", source: { type: "base64", media_type: dm[1], data: dm[2] } });
+        }
+      }
+      if (blocks.length) out.push({ role: m.role === "assistant" ? "assistant" : "user", content: blocks });
+      continue;
+    }
     out.push({ role: m.role === "assistant" ? "assistant" : "user", content: textOf(m.content) });
   }
   const body = {
