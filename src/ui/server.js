@@ -770,6 +770,16 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         try { const parsed = JSON.parse(raw ?? "null"); if (Array.isArray(parsed)) history = parsed; } catch {}
         return json(res, { usage: raw, aggregate: aggregateUsage(history, { days: 14 }) });
       }
+      if (url.pathname === "/api/usage-trace") {
+        // トレース可視化(イシュー#15): usage-trace.jsonlのワーカー別・ターン別推移。
+        // agent= で絞り込み、fromTurn/toTurn でターン範囲を指定できる
+        const r = analyzeUsageTrace(config.workspace, {
+          agent: url.searchParams.get("agent"),
+          fromTurn: url.searchParams.get("fromTurn"),
+          toTurn: url.searchParams.get("toTurn"),
+        });
+        return json(res, r);
+      }
       if (url.pathname === "/api/memory") return json(res, { memory: listMemoryWithExpiry(config.workspace) });
       if (url.pathname === "/api/scripts") return json(res, { scripts: detectNpmScripts(config.workspace) });
       if (url.pathname === "/api/devserver") {
