@@ -80,6 +80,7 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
   // 日別xスレッド
   const key = (date, thread) => `${date}|${thread}`;
   const m = Object.fromEntries(agg.matrix.map((r) => [key(r.date, r.thread), r]));
+  // 今日のスレッド別内訳: __main__はleadラウンドのみ(calls=2)、issue-xはalpha(推測)3+thread付き1で4
   const todayMain = m[key(now.toISOString().slice(0, 10), "__main__")];
   assert.ok(todayMain && todayMain.calls === 2, "今日のmain分はleadラウンドのみ(summaryは昨日)");
 });
