@@ -42,12 +42,11 @@ async function setup() {
 
 test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレッドの集計を作る", () => {
   const now = new Date();
-  const d = (offsetDays, hour) => {
-    const t = new Date(now);
-    t.setDate(t.getDate() - offsetDays);
-    t.setHours(hour, 0, 0, 0);
-    return t.toISOString();
-  };
+  // 実装(usage.js)はUTC基準(toISOString)で日付を付けるため、テストもUTCで組み立てて決定的にする。
+  // ローカル時刻(setHours)で作るとJST 0-9時などUTCと日付がずれる帯で期待が壊れる(2026-09-30 実害)。
+  const utcBase = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const todayUTC = new Date(utcBase).toISOString().slice(0, 10);
+  const d = (offsetDays, hour) => new Date(utcBase - offsetDays * 86400000 + hour * 3600000).toISOString();
   const history = [
     { at: d(0, 10), agent: "lead", endedBy: "ok", totals: { calls: 2, promptTokens: 100, completionTokens: 50, reasoningTokens: 10, costUsd: 0.2 } },
     { at: d(0, 15), agent: "issue-x-alpha", endedBy: "turn-limit", totals: { calls: 3, promptTokens: 200, completionTokens: 80, reasoningTokens: 20, costUsd: 0.4 } },
@@ -62,7 +61,7 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
   const agg = aggregateUsage(history, { days: 14 });
   // 日別(新しい順)
   assert.ok(agg.byDate.length >= 2);
-  assert.equal(agg.byDate[0].date, now.toISOString().slice(0, 10), "1件目は今日");
+  assert.equal(agg.byDate[0].date, todayUTC, "1件目は今日");
   const today = agg.byDate[0];
   assert.equal(today.calls, 6);
   assert.ok(Math.abs(today.costUsd - 0.7) < 1e-9, 'costUsd合計(浮動小数は接近比較)');
@@ -81,7 +80,7 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
   const key = (date, thread) => `${date}|${thread}`;
   const m = Object.fromEntries(agg.matrix.map((r) => [key(r.date, r.thread), r]));
   // 今日のスレッド別内訳: __main__はleadラウンドのみ(calls=2)、issue-xはalpha(推測)3+thread付き1で4
-  const todayMain = m[key(now.toISOString().slice(0, 10), "__main__")];
+  const todayMain = m[key(todayUTC, "__main__")];
   assert.ok(todayMain && todayMain.calls === 2, "今日のmain分はleadラウンドのみ(summaryは昨日)");
 });
 
