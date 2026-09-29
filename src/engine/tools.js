@@ -423,7 +423,12 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           return { ok: false, text: "task_idは英小文字数字とハイフンで付けてください。" };
         }
         const dependsOn = Array.isArray(args.depends_on) ? args.depends_on.map((s) => String(s ?? "").trim()).filter(Boolean) : [];
-        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "", dependsOn, createdBy: agent.id });
+        // 代替モデル指定(#12): 基本は既定モデル。リーダー(スレッド開設権持ち)だけ特例で指定可
+        const modelArg = String(args.model ?? "").trim() || null;
+        if (modelArg && !threadOpener) {
+          return { ok: false, text: "model指定はリーダー専用です(基本は既定モデルを使います。代替は相当な理由があるときだけ)。" };
+        }
+        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "", dependsOn, createdBy: agent.id, model: modelArg });
         if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
         // 重複検知: 未着手/作業中の既存タスクと共有ファイルがあれば警告を添える(ブロックはしない)
         const l = tasks.list();
@@ -440,7 +445,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           .join("\n");
         return {
           ok: true,
-          text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""}${dependsOn.length ? ` / 依存: ${dependsOn.join(",")}` : ""})。` + (warn ? "\n\n" + warn : ""),
+          text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""}${dependsOn.length ? ` / 依存: ${dependsOn.join(",")}` : ""}${modelArg ? ` / model: ${modelArg}` : ""})。` + (warn ? "\n\n" + warn : ""),
         };
       }
       case "spawn_agent": {
