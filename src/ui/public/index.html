@@ -2172,7 +2172,7 @@ async function renderMcpList() {
     if (!servers.length) {
       const none = document.createElement("div");
       none.style.cssText = "font-size:11px;color:var(--label-tertiary)";
-      none.textContent = "接続中のサーバーはありません";
+      none.textContent = guidance || "接続中のサーバーはありません";
       box.appendChild(none);
       return;
     }

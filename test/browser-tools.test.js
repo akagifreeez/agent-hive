@@ -41,7 +41,7 @@ const PAGE_HTML = `<!doctype html>
 </html>`;
 
 /** ローカル検証サーバー。routes: { "/path": { status?, contentType?, body, echoMethod?, redirect? } } */
-function startLocalServer(routes) {
+function startLocalServer(_t, routes) { // 呼び出し側と整合(tはnode:testのコンテキスト・未使用)
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (d) => (body += d));

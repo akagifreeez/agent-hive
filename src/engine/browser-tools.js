@@ -143,7 +143,8 @@ export function extractElements(page, filter = {}) {
   let index = 0;
   for (const type of want) {
     if (type === "link") {
-      for (const l of [...(page.links ?? []), ...(page.anchors ?? [])]) out.push({ index: ++index, type, text: l.text, href: l.href });
+      // 遷移可能リンクのみ(断片#等はparsePageがanchorsへ分離・遷移先を持たないため要素一覧には含めない)
+      for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href });
     } else if (type === "form") {
       for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {
