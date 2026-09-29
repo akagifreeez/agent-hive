@@ -260,6 +260,20 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         a.costUsd = (a.costUsd ?? 0) + (u.costUsd ?? 0);
       }
     },
+    "usage.trace": (p) => {
+      // コンテキストウィンドウ消費のリアルタイム表示(イシュー#17)。
+      // loop.jsがusage-trace記録時に流すctxChars(コンテキスト概算文字数)を
+      // トークンへ換算して live.agents[id].ctx に使用/上限/残りを保持する。
+      // 換算式は engine/compact.js の estimateTokens と同じ「文字数/3(切り上げ)」。
+      const id = p?.agent;
+      if (!id) return;
+      const ctxChars = Number(p.ctxChars ?? 0);
+      const usedTokens = Math.ceil(ctxChars / 3);
+      // 上限はconfig.model.contextWindow(無ければ200K。推定系の既定と同じ)
+      const ctxWindow = Number(config.model?.contextWindow ?? 200000) || 200000;
+      const remainTokens = Math.max(0, ctxWindow - usedTokens);
+      live.agents[id] = { ...(live.agents[id] ?? {}), ctx: { ctxChars, usedTokens, ctxWindow, remainTokens, at: Date.now() } };
+    },
     "board": (p) => {
       live.board.push(p);
       // RAMに置くのは末尾だけ。全文はJSONLが真実で、古い分は/api/boardがディスクから読む

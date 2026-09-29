@@ -1062,6 +1062,27 @@ function showWtdiff(id, r) {
 function renderAgentLog(a) {
   const wrap = document.createElement("div");
   wrap.className = "alog";
+  // コンテキストウィンドウ消費量(イシュー#17): 使用/上限/残り+バー。
+  // server.jsがusage.traceから計算した a.ctx を表示するのみ(UI側で再計算しない)
+  if (a.ctx) {
+    const cbox = document.createElement("div");
+    cbox.className = "ctxbox";
+    const ctext = document.createElement("div");
+    ctext.className = "ctxtext";
+    ctext.textContent = "コンテキスト " + (a.ctx.usedTokens ?? 0).toLocaleString() + " / " + (a.ctx.ctxWindow ?? 200000).toLocaleString() + " tok(残り " + (a.ctx.remainTokens ?? 0).toLocaleString() + ")";
+    cbox.appendChild(ctext);
+    const cbar = document.createElement("div");
+    cbar.className = "ctxbar";
+    const cfill = document.createElement("div");
+    cfill.className = "ctx-fill";
+    const win = a.ctx.ctxWindow ?? 200000;
+    const ratio = win > 0 ? Math.min(1, (a.ctx.usedTokens ?? 0) / win) : 0;
+    cfill.style.width = (ratio * 100).toFixed(2) + "%";
+    if (ratio >= 0.9) cfill.classList.add("hot"); // 90%超は警告色(autocompactしきい値と同じ)
+    cbar.appendChild(cfill);
+    cbox.appendChild(cbar);
+    wrap.appendChild(cbox);
+  }
   if (a.live && (a.live.think || a.live.say)) {
     const d = document.createElement("div");
     d.className = "entry think";
