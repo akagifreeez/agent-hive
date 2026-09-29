@@ -210,16 +210,20 @@ export function applyFormValues(form, values) {
  * 送信リクエストを組み立てる(GETはURL結合・POSTはurlenc)。
  * opts.selector指定時はフォームHTML内一致を検証し、無ければthrow(誤送信防止)。
  */
+const BS = String.fromCharCode(92); // バックスラッシュ(正規表現を文字列連結で組むための定数)
+const DQ = String.fromCharCode(34); // ダブルクォート
+const SQ = String.fromCharCode(39); // シングルクォート
 export function buildSubmission(form, values, opts = {}) {
   if (!form) throw new Error("フォームが見つかりません");
   const f = applyFormValues(form, values);
   if (opts.selector) {
     const sel = String(opts.selector);
     const tagRe = new RegExp("<" + sel + "(" + BS + "s|>)", "i");
-    const nameAttrRe = new RegExp("name" + BS + BS + "s*=" + BS + BS + "s*[" + DQ + SQ + "]?" + sel + "(?:" + DQ + SQ + "]|[" + BS + "s/>])", "i");
+    const nameAttrRe = new RegExp("name" + BS + BS + "s*=" + BS + BS + "s*[" + DQ + SQ + "]?" + sel + "(?:[" + DQ + SQ + "]|[^" + BS + "s/>])", "i");
     const hasField = (f.fields ?? []).some((x) => x.name === sel);
     if (!tagRe.test(String(form.html ?? "")) && !hasField && !nameAttrRe.test(String(form.html ?? ""))) {
-    if (!selRe.test(String(form.html ?? ""))) throw new Error("フォーム内に要素 " + String(opts.selector) + " が見つかりません(誤送信防止のため送信しません)");
+      throw new Error("フォーム内に要素 " + sel + " が見つかりません(誤送信防止のため送信しません)");
+    }
   }
   const pairs = f.fields.filter((x) => x.name).map((x) => [x.name, x.value ?? ""]);
   const body = new URLSearchParams(pairs).toString();
