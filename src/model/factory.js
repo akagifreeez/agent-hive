@@ -11,7 +11,7 @@ import {
   openCallbackServer, buildAuthorizeUrl, createPKCE,
   exchangeCode, extractAccountId, extractEmail,
   resolveOAuthToken, readTokenStore, writeTokenStore,
-  oauthHint, CALLBACK_PORT_CANDIDATES,
+  oauthHint, hasOAuthEntry, CALLBACK_PORT_CANDIDATES,
 } from "./openai-auth.js";
 import { randomBytes } from "node:crypto";
 
@@ -101,9 +101,17 @@ export function modelStateInfo(config) {
     const catalog = buildCatalog(config.models);
     const spec = resolveModel(catalog, null);
     const baseDirs = [ROOT, dataDir()];
+    // 既定モデルが即座に使えるか(鍵解決/OAuth認証済み)。UIの未接続警告に使う
+    let modelReady = true;
+    try {
+      modelReady = spec.provider.api === "openai-chatgpt-responses"
+        ? hasOAuthEntry(oauthStoreRef(spec.provider), baseDirs)
+        : Boolean(resolveAuthValue(spec.provider, baseDirs));
+    } catch { modelReady = false; }
     return {
       name: spec.model.name,
       ref: specRef(spec),
+      ready: modelReady,
       fallbacks: catalog.fallbackRefs,
       providers: Object.values(catalog.providers).map((p) => {
         if (p.auth?.type === "oauth") {

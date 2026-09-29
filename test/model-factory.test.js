@@ -71,6 +71,7 @@ test("modelStateInfo: ref/providersを返し、生の鍵は含まない", () => 
   const info = modelStateInfo(mkCfg());
   assert.equal(info.name, "Main");
   assert.equal(info.ref, "prov/main-model");
+  assert.equal(info.ready, true, "鍵(value)があるので即使用可能");
   assert.deepEqual(info.fallbacks, ["prov/backup-model"]);
   // 内蔵カタログ(zai)が常に入るので設定のprovを検索して検証する
   const prov = info.providers.find((p) => p.id === "prov");
@@ -78,6 +79,13 @@ test("modelStateInfo: ref/providersを返し、生の鍵は含まない", () => 
   assert.equal(prov.auth, "value");
   assert.deepEqual(prov.models, ["main-model", "backup-model"]);
   assert.ok(!JSON.stringify(info).includes("test-key-123456"), "生の鍵をstateに載せない");
+});
+
+test("modelStateInfo: 既定モデルの鍵が無いとready:false(UIの未接続警告に使う)", () => {
+  const c = mkCfg();
+  delete c.models.providers.prov.auth;
+  const info = modelStateInfo(c);
+  assert.equal(info.ready, false);
 });
 
 test("resolveDefaultSpec: 既定モデルのSpecを返し、壊れた設定ではnull", () => {

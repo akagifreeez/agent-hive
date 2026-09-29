@@ -254,6 +254,11 @@ export class ChatHost {
           }
         } catch (err) {
           this.bus.emit("scenario.warn", { message: `ラウンド異常(${main.id}): ${err.message}` });
+          // 理由を会話内にも見せる(scenario.warnだけだとチャット画面に出ず「返事がない」に見える:
+          // モデル未接続の鍵エラー等はここで初めて利用者に届く)
+          try {
+            this.board.post("system", `[エラー] ${main.displayName}のラウンドが失敗しました: ${err.message}\n設定の「モデルと接続」から接続と鍵を確認してください。`);
+          } catch { /* ボード書き込みに失敗しても元の例外を優先 */ }
         }
         // 自動継続: ターン上限で止まっても、まだ仕事が残っていれば次ラウンドへ(上限回数まで)
         let again = false;

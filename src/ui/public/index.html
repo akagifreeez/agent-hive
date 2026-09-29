@@ -281,6 +281,11 @@
   #settings-dlg .set-row input, #settings-dlg .set-row select { flex: 1; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 5px 8px; font-size: 12px; font-family: var(--font-ui); box-shadow: var(--inset-field); }
   #settings-dlg .set-row input:focus, #settings-dlg .set-row select:focus { outline: none; border-color: var(--accent); }
   #settings-dlg .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+  /* 詳細設定(初回は閉じたまま。作業先・モデル接続が先) */
+  #settings-advanced { margin: 8px 0; border-top: 1px solid var(--separator); padding-top: 6px; }
+  #settings-advanced summary { cursor: pointer; font-size: 12px; color: var(--sub); padding: 3px 0; user-select: none; }
+  #settings-advanced summary:hover { color: var(--label); }
+  #settings-advanced[open] summary { margin-bottom: 10px; }
   /* モデルと接続: プロバイダごとのカード(鍵保存・疎通テスト) */
   #set-models-list .prov-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; margin-bottom: 4px; background: var(--recess); border: 1px solid var(--separator); border-radius: 6px; box-shadow: var(--inset-field); }
   #set-models-list .prov-row .prov-name { font-size: 12px; color: var(--label); flex-shrink: 0; }
@@ -303,6 +308,12 @@
   #settings-btn:hover { color: var(--label); border-color: var(--line-strong); }
   /* ボード全文検索: ヘッダ右の入力欄と、ヒット一覧のオーバーレイ */
   #board-search-box { position: absolute; right: 252px; top: 9px; }
+  /* 作業先チップ: ヘッダ左の常時表示。クリックで設定へ */
+  #ws-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--sub); background: var(--fill); border: 1px solid var(--separator); border-radius: 4px; padding: 2px 8px; margin-left: 10px; cursor: pointer; flex-shrink: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #ws-chip:hover { color: var(--label); border-color: var(--line-strong); }
+  /* モデル未接続の警告バー(composerの上・鍵/認証がないときだけ出る。JSでflex/none切替) */
+  #model-warn { display: none; align-items: center; gap: 8px; margin: 0 12px 6px; padding: 5px 10px; background: var(--recess); border: 1px solid var(--separator); border-left: 2px solid var(--accent); border-radius: 6px; font-size: 12px; color: var(--label); }
+  #model-warn .btn { margin-left: auto; flex-shrink: 0; padding: 2px 8px; font-size: 11px; }
   #board-search { width: 120px; background: var(--recess); border: 1px solid var(--separator); color: var(--label); border-radius: 4px; padding: 3px 8px; font-size: 11px; font-family: var(--font-ui); box-shadow: var(--inset-field); }
   #board-search:focus { outline: none; border-color: var(--accent); width: 200px; }
   #board-search::placeholder { color: var(--label-tertiary); }
@@ -338,6 +349,7 @@
 
   <main id="chat">
     <header id="roomhead">
+    <div id="ws-chip" title="クリックで変更">作業先</div>
       <div id="room-title"></div>
       <div id="room-goal"></div>
       <div id="room-members"></div>
@@ -350,6 +362,10 @@
     </header>
     <div id="permzone"></div>
     <div id="board-search-results"></div>
+    <div id="model-warn">
+      <span id="model-warn-text"></span>
+      <button id="model-warn-open" class="btn">設定を開く</button>
+    </div>
     <div id="stream"></div>
     <div id="composer">
       <div id="suggest" style="display:none"></div>
@@ -408,10 +424,7 @@
 
   <dialog id="settings-dlg">
     <h3>設定</h3>
-      <div class="set-row"><label>権限モード</label>
-        <select id="set-perm"><option value="normal">normal(要承認)</option><option value="auto">auto(自動許可)</option></select>
-      </div>
-    <div class="set-row"><label>ワークスペース</label>
+      <div class="set-row"><label>ワークスペース</label>
         <div style="flex:1">
           <div style="display:flex;gap:6px">
             <input id="set-ws" placeholder="現在のパス" spellcheck="false">
@@ -425,6 +438,11 @@
           <div id="set-models-list"></div>
           <div style="font-size:11px;color:var(--label-tertiary);margin-top:3px">鍵を入れて保存すると次のラウンドから使えます。「テスト」は軽量リクエスト1発で接続と鍵を確かめます(エージェントは起こしません)</div>
         </div>
+      </div>
+    <details id="settings-advanced">
+      <summary>詳細設定(権限・MCP・メモリ)</summary>
+      <div class="set-row"><label>権限モード</label>
+        <select id="set-perm"><option value="normal">normal(要承認)</option><option value="auto">auto(自動許可)</option></select>
       </div>
     <div class="set-row"><label>MCPサーバー</label>
         <div style="flex:1">
@@ -440,6 +458,7 @@
         </div>
       </div>
     <div class="set-row"><label>メモリ</label><span class="mono" id="set-mem" style="font-size:11px;color:var(--sub)"></span></div>
+    </details>
     <div class="row">
       <button class="btn" id="settings-cancel">閉じる</button>
       <button class="btn primary" id="settings-save">保存</button>
@@ -1427,18 +1446,24 @@ async function sendSay() {
   const el = $("saytext");
   const text = el.value.trim();
   if (!text && !pendingImage) return;
-  el.value = "";
-  if (text.startsWith("/")) { handleCommand(text); return; }
+  if (text.startsWith("/")) { el.value = ""; handleCommand(text); return; }
   const img = pendingImage;
+  const th = selectedThread === "__main__" ? null : selectedThread;
+  // 成功応答を確認してから入力を消す(サーバーエラーや通信断で書いた指示を失わない)
+  if (text) {
+    const r = await (await sendSayText(text)).json();
+    if (r.error) {
+      toast(`送信に失敗しました: ${r.error}(入力は残っています)`);
+      return;
+    }
+  }
+  el.value = "";
   pendingImage = null;
   if (img) {
-    // 画像添付: 保存→メンバーへマルチモーダルで届く。テキストがあれば本文としても送る
-    await hfetch("/api/attach", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ thread: selectedThread === "__main__" ? null : selectedThread, dataUrl: img.dataUrl, note: text }) });
-    if (text) await hfetch("/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, thread: selectedThread === "__main__" ? null : selectedThread }) });
-    refresh();
-    return;
+    // 画像添付: 保存→メンバーへマルチモーダルで届く。テキストがあれば本文としても届く(note)
+    await hfetch("/api/attach", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ thread: th, dataUrl: img.dataUrl, note: text }) });
   }
-  await sendSayText(text);
+  refresh();
 }
 
 // スラッシュコマンド: 入力欄からローカル操作(エージェントを起こさない)
@@ -1601,12 +1626,16 @@ function renderAll() {
   if (!lastState) return;
   renderNav(lastState.live.threads);
   renderRoomHead(lastState);
+  syncWsChip();
+  syncModelWarn();
   renderStream(lastState);
   renderPerms(lastState.live.requests);
   renderCtx(lastState);
   const permTxt = lastState.live.permMode === "auto" ? "perm:auto" : "perm:normal";
-  const effTxt = uiEffort ?? lastState?.live?.modelEffort ? `effort:${uiEffort ?? lastState.live.modelEffort}` : null;
-  const mdl = uiModelName ?? lastState.live.modelName ?? lastState.model?.name ?? "";
+  const effVal = lastState?.live?.modelEffort ?? uiEffort;
+  const effTxt = effVal ? `effort:${effVal}` : null;
+  // モデル表示はサーバー側状態(live.modelName)を唯一の真実にする(null=設定どおり)
+  const mdl = lastState?.live?.modelName ?? lastState?.model?.name ?? "";
   // usage予算アラート: /api/stateのlive.budget(exceeded/costUsd)をステータスライン(左下)へ出す
   const b = lastState.live.budget;
   const budgetTxt = b?.exceeded ? `予算超過: 累積${Number(b.costUsd ?? 0).toFixed(2)}` : null;
@@ -1812,8 +1841,26 @@ function openSettings() {
   $("set-mem").textContent = memFiles.length ? `${memFiles.length}件(メモリタブで閲覧可)` : "なし";
   $("settings-dlg").showModal();
 }
-$("settings-btn").onclick = openSettings;
-
+// 作業先チップ(ヘッダ左)とモデル未接続警告バー(composer上)。どちらもlastStateから描画する
+function syncWsChip() {
+  const chip = $("ws-chip");
+  const ws = lastState?.workspace ?? "";
+  const name = ws.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "(未設定)";
+  chip.textContent = `作業先: ${name}`;
+  chip.title = `${ws}\nクリックで変更できます(保存後に再起動で反映)`;
+}
+function syncModelWarn() {
+  const box = $("model-warn");
+  const m = lastState?.model;
+  if (m && m.ready === false) {
+    box.style.display = "flex";
+    $("model-warn-text").textContent = `モデル未接続: ${m.name}(${m.ref})の鍵・認証がありません。送信しても応答できません。`;
+  } else {
+    box.style.display = "none";
+  }
+}
+$("ws-chip").onclick = () => openSettings();
+$("model-warn-open").onclick = () => openSettings();
 $("settings-btn").onclick = openSettings;
 
 /* ================= 設定ウィンドウ: ワークスペース(開発フォルダ) ================= */
@@ -2104,7 +2151,7 @@ es.onmessage = (e) => {
     else if (lastState) renderNav(lastState.live.threads);
     return;
   }
-  if (["agent.turn", "agent.delta", "tool.call", "tool.result", "agent.status", "agent.spawned", "thread.opened", "merge.completed",
+  if (["agent.turn", "agent.delta", "tool.call", "tool.result", "agent.status", "agent.spawned", "thread.opened", "merge.completed", "model.changed",
        "task.claimed", "task.finished", "task.created", "task.released", "task.cancelled", "task.autoResolved",
        "scenario.started", "scenario.finished"].includes(type)) {
     refreshSoon();

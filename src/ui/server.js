@@ -217,9 +217,9 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     },
     "perm.mode": (p) => { live.permMode = p.mode; },
     "model.changed": (p) => {
-      // /model・/effort・設定ウィンドウからの切替。nullはconfig値に戻す操作なので反映しない
-      if (p.model) live.modelName = p.model;
-      if (p.effort) live.modelEffort = p.effort;
+      // /model・/effort・設定ウィンドウからの切替。null(設定どおりへ戻す)はliveもnullへ(旧値の残存を防ぐ)
+      live.modelName = p.model ?? null;
+      live.modelEffort = p.effort ?? null;
     },
     "thread.opened": (p) => {
       live.threads.push({ name: p.name, goal: p.goal, folder: p.folder ?? null });
@@ -333,7 +333,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       // 総件数: チャットモードではディスクが真実。RAMのみのボード(未永続化)はRAM件数で代用
-      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length), budget: budgetState }, model: modelStateInfo(config), apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, budget: budgetState, mcp: config.mcp?.servers ?? {} });
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length), budget: budgetState }, workspace: config.workspace, model: modelStateInfo(config), apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, budget: budgetState, mcp: config.mcp?.servers ?? {} });
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       // ?q= があるときは全文検索モード(全スレッド横断の本文部分一致)
