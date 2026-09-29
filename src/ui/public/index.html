@@ -337,6 +337,11 @@
   .toast { background: var(--panel2); border: 1px solid var(--line-strong); border-left: 3px solid var(--accent); color: var(--label); border-radius: 6px; padding: 8px 12px; font-size: 12px; box-shadow: var(--shadow-overlay); max-width: 380px; word-break: break-word; cursor: pointer; }
   .toast.err { border-left-color: var(--err); }
   .toast.expanded { max-width: 600px; max-height: 50vh; overflow-y: auto; white-space: pre-wrap; }
+  .ctxbox { margin: 2px 0 8px; padding: 6px 8px; background: var(--recess); border: 1px solid var(--separator); border-radius: 4px; font-family: var(--font-mono); font-size: 11.5px; }
+  .ctxtext { color: var(--label-tertiary); }
+  .ctxbar { margin-top: 4px; height: 6px; background: var(--fill); border-radius: 3px; overflow: hidden; }
+  .ctx-fill { display: block; height: 100%; width: 0; background: var(--ok); border-radius: 3px; transition: width var(--duration) var(--ease); }
+  .ctx-fill.hot { background: var(--err); }
 </style>
 </head>
 <body>
