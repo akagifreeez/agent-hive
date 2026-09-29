@@ -14,6 +14,7 @@ import { join } from "node:path";
  * @property {string|null} project 文脈(取り組み名=スレッド名)
  * @property {string} acceptance 受け入れ基準
  * @property {string[]} dependsOn 依存タスクid(未完了があるとclaim不可)
+ * @property {string|null} model タスク別モデル指定(ModelRef文字列)。リーダーだけ設定可・null=既定モデル
  * @property {boolean} blocked 依存未完了でclaim不可のときtrue(openのみ計算)
  * @property {string} summary 本文の要約(先頭の実質行)
  * @property {string} path タスクファイルのパス
@@ -42,10 +43,10 @@ export class TaskBlackboard {
    */
   // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
   // acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
-  create({ id, role, body, project = "", acceptance = "", dependsOn = [], createdBy = null }) {
+  create({ id, role, body, project = "", acceptance = "", dependsOn = [], model = null, createdBy = null }) {
     const f = join(this.open, `${id}.md`);
     if (existsSync(f)) return false;
-    const meta = metaLines(project, role, acceptance, dependsOn);
+    const meta = metaLines(project, role, acceptance, dependsOn, model);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
     if (createdBy) this.createdBy.set(id, createdBy);
     this.bus?.emit("task.created", { taskId: id, project: String(project ?? "") });
@@ -53,10 +54,10 @@ export class TaskBlackboard {
   }
 
   // スポーンなどで最初から請求済みとしてタスクを投入する(ブリーフ=そのエージェントの担当)
-  assign({ agentId, taskId, body, project = "" }) {
+  assign({ agentId, taskId, body, project = "", model = null }) {
     const f = join(this.claimed, `${agentId}--${taskId}.md`);
     if (existsSync(f)) return false;
-    const meta = metaLines(project, null);
+    const meta = metaLines(project, null, "", [], model);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
     return true;
   }
