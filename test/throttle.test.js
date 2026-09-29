@@ -120,7 +120,8 @@ test("throttle: エージェント横断でクールダウンが共有され429�
 test("throttle: 別プロバイダは互いに影響しない", async () => {
   resetProviderThrottleForTest();
   const origFetch = globalThis.fetch;
-  setModelSleep(async () => {});
+  const sleeps = [];
+  setModelSleep(async (ms) => sleeps.push(ms));
   globalThis.fetch = async () => statusResponse(429, "0.05");
   try {
     const limited = makeModel("http://only-a");
@@ -134,8 +135,11 @@ test("throttle: 別プロバイダは互いに影響しない", async () => {
     await gateProvider("http://only-b");
     assert.ok(providerRateLimits().has("http://only-a"), "Aはクールダウン記録済み");
     assert.equal(providerRateLimits().has("http://only-b"), false, "Bは影響を受けない");
-    await clean.chat({ messages: [{ role: "user", content: "hi" }] });
-    void before;
+    // Bは同じfetch(常に429)でも自分のクールダウンを持つだけで、Aのせいで待たされたりはしない
+    const sleepsBefore = sleeps.length;
+    await assert.rejects(() => clean.chat({ messages: [{ role: "user", content: "hi" }] }), /429/);
+    assert.equal(providerRateLimits().get("http://only-b").retryAfterMs, 50, "Bは自分の429で自分のクールダウンを持つ");
+    void before; void sleepsBefore;
   } finally {
     globalThis.fetch = origFetch;
     setModelSleep((ms) => new Promise((r) => setTimeout(r, ms)));
