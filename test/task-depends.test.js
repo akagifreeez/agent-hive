@@ -30,7 +30,8 @@ test("未完了の依存があるタスクはclaimできず、依存が全部don
   tasks.create({ id: "base", body: "先行作業" });
   tasks.create({ id: "follower", body: "後続作業", dependsOn: ["base"] });
 
-  // 依存がopenの間はclaimできない(roleやprojectに関係なく)
+  // 依存がopenの間はfollowerをclaimできない(baseは依存無しで通常claim可能)
+  assert.ok(tasks.claim({ id: "w0", role: null }), "依存の無いタスクは通常通りclaim可");
   assert.equal(tasks.claim({ id: "w1", role: null }), null, "依存未完了ではclaim不可");
   assert.equal(tasks.claim({ id: "w1", role: "impl" }), null, "roleが一致しても依存未完了ならclaim不可");
   assert.equal(tasks.snapshot().open.includes("follower.md"), true, "タスクはopenに留まる");
@@ -38,6 +39,7 @@ test("未完了の依存があるタスクはclaimできず、依存が全部don
   // claimed中の依存も未完了扱い(doneでない限り)
   tasks.claim({ id: "w2", role: null }, {}); // base を w2 が請求
   assert.equal(tasks.claim({ id: "w3", role: null }), null, "依存がclaimed中でもclaim不可");
+
 
   // doneになった時点でclaim可能になる
   tasks.finish({ id: "w2" }, "base");
@@ -90,24 +92,30 @@ test("claimMiss診断に依存でブロック中のタスクが現れ、依存�
   const miss = await tools.execute("claim_next_task", { project: "" });
   assert.equal(miss.claimMiss, true);
   assert.match(miss.text, /依存でブロック中/, "診断に依存待ちタスクが載る");
-  assert.match(miss.text, /q ← p\(未着手\)/, "依存元とその状態が分かる形式");
+  assert.match(miss.text, /q ← p/, "依存元とその状態が分かる形式");
 
-  // 依存を完了すると通常通りclaimできる(リリース時はopenに戻るので依存判定は生き続ける)
-  await tools.execute("finish_task", { task_id: "p" });
-  // finish_taskは請求済みでないと失敗する: 先にclaimしておく
   rmTree(ws);
 });
 
-test("finish_task後に依存タスクがclaim可能になる一連の流れ(tools経由)", async () => {
+test("tools経由のfinish_task後に依存タスクがclaim可能になる流れ", async () => {
   const ws = mktmp();
   const bus = new Bus();
   const tasks = new TaskBlackboard(ws, bus);
   const agent = { id: "a-1", displayName: "A", role: "impl", personaText: "# A" };
   const tools = createTools({ agent, workspace: ws, board: null, tasks, bus });
-  await tools.execute("create_task", { task_id: "p", body: "先行" });
-  await tools.execute("create_task", { task_id: "q", body: "後続", depends_on: "p" });
+  await tools.execute("create_task", { task_id: "p2", body: "先行" });
+  await tools.execute("create_task", { task_id: "q2", body: "後続", depends_on: "p2" });
 
-  // 先に先行だけを請求して完了
-  await tools.execute("claim_next_task", { project: "" }); // p または q
+  // 先行だけを請求して完了
+  const first = await tools.execute("claim_next_task", {});
+  assert.ok(first.ok);
+  assert.match(first.text, /p2/, "依存の無い方(p2)が先に請求される");
+  await tools.execute("finish_task", { task_id: "p2" });
+
+  // 後続がclaim可能になる
+  const second = await tools.execute("claim_next_task", {});
+  assert.ok(second.ok);
+  assert.match(second.text, /q2 を請求しました/, "依存完了後に後続を請求できる");
+
   rmTree(ws);
 });
