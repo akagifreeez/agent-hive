@@ -193,8 +193,9 @@ export async function runAgentLoop({
       bus.emit("agent.error", { agent: agent.id, turn, error: err.message });
       return { ok: false, endedBy: "error", error: err.message, seenBoard: seen };
     }
+    const chatMs = Date.now() - chatStartedAt;
     if (ledger) {
-      ledger.add(agent.id, res.usage);
+      ledger.add(agent.id, res.usage, { ms: chatMs });
       bus.emit("usage", { agent: agent.id, usage: res.usage });
     }
     runTokens += (res.usage?.promptTokens ?? 0) + (res.usage?.completionTokens ?? 0);
@@ -209,13 +210,13 @@ export async function runAgentLoop({
       const traceDir = join(baseDir, "usage-trace");
       mkdirSync(traceDir, { recursive: true });
       const ctxChars = messages.reduce((n, m) => n + String(m.content ?? "").length, 0);
-      const chatMs = Date.now() - chatStartedAt;
       appendFileSync(join(traceDir, "usage-trace.jsonl"), JSON.stringify({
         ts: new Date().toISOString(), agent: agent.id, turn,
         prompt: res.usage?.promptTokens ?? 0,
         completion: res.usage?.completionTokens ?? 0,
         reasoning: res.usage?.reasoningTokens ?? 0,
         ms: chatMs,
+        tokPerSec: chatMs > 0 ? (res.usage?.completionTokens ?? 0) / (chatMs / 1000) : null,
         ctxChars, msgCount: messages.length,
       }) + "\n");
       // UIのリアルタイム表示用(イシュー#17): トレースと同じ値をbusへ流す。
@@ -308,8 +309,9 @@ export async function runAgentLoop({
     });
     if (ac.should && autocompactFailures < AUTOCOMPACT_FAILURE_LIMIT) {
       try {
+        const acStartedAt = Date.now();
         const summary = await model.chat({ messages: buildCompactRequest(messages, { taskContext: currentTaskContext(tasks, agent, messages), hasMemory: Boolean(memory) }) });
-        if (ledger) ledger.add(agent.id, summary.usage);
+        if (ledger) ledger.add(agent.id, summary.usage, { ms: Date.now() - acStartedAt });
         runTokens += (summary.usage?.promptTokens ?? 0) + (summary.usage?.completionTokens ?? 0);
         const text = (summary.content ?? "").trim();
         if (!text) throw new Error("要約が空でした");

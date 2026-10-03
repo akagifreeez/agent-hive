@@ -51,6 +51,8 @@ test("loop.jsはusage-trace記録時にusage.traceイベントを発行する", 
   // 生成速度(tok/s)計測: 呼出経過時間msをトレースへ残し、イベントにも載せる
   assert.match(src, /chatStartedAt/);
   assert.match(src, /ms: chatMs/);
+  // トレース行には計算済みtokPerSecも書く(ログ単体で生成速度が読めるように)
+  assert.match(src, /tokPerSec: chatMs > 0/);
 });
 
 test("server: usage.trace(ms付き)からagent.tokに直近/平均tok/sが入る", async () => {
