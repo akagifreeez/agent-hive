@@ -664,7 +664,7 @@ function renderRoomHead(state) {
     chip.className = "member" + (selectedAgent === id ? " sel" : "");
     chip.style.setProperty("--ah", agentHue(id));
     chip.innerHTML = `<span class="dot ${(a.status ?? "idle").replace(/\s/g, "")}"></span><span class="anm">${escapeHtml(a.displayName ?? NAMES[id] ?? id)}</span>`;
-    chip.title = `${statusJa(a.status)} · turn ${a.turn ?? 0} · クリックでログ`;
+    chip.title = `${statusJa(a.status)} · turn ${a.turn ?? 0}${a.tok?.avgTokPerSec != null ? ` · ${fmtTps(a.tok.avgTokPerSec)}tok/s` : ""} · クリックでログ`;
     chip.onclick = () => { selectedAgent = selectedAgent === id ? null : id; ctxTab = "agents"; renderAll(); };
     mem.appendChild(chip);
   }
@@ -907,7 +907,8 @@ async function renderUsageTrace(body) {
     note.textContent = "トレースはまだありません。";
     return;
   }
-  note.textContent = data.total.turns + "ターン / 合計" + data.total.totalTokens.toLocaleString() + "トークン";
+  note.textContent = data.total.turns + "ターン / 合計" + data.total.totalTokens.toLocaleString() + "トークン" +
+    (data.total.tokPerSec != null ? " / 生成速度 平均 " + fmtTps(data.total.tokPerSec) + " tok/s" : "");
   const view = document.createElement("div");
   view.className = "usage-trace-view";
   view.appendChild(renderTraceChart(data));
@@ -915,7 +916,7 @@ async function renderUsageTrace(body) {
   const tbl = document.createElement("table");
   tbl.className = "usage-tbl";
   tbl.style.cssText = "margin-top:6px;";
-  tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th></tr></thead>";
+  tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th><th>tok/s</th></tr></thead>";
   const tb = document.createElement("tbody");
   for (const s of data.series) {
     const tr = document.createElement("tr");
@@ -926,7 +927,10 @@ async function renderUsageTrace(body) {
     nm.appendChild(document.createTextNode(s.agent));
     const tn = document.createElement("td"); tn.textContent = String(s.points.length);
     const tt = document.createElement("td"); tt.textContent = s.totalTokens.toLocaleString();
-    tr.append(nm, tn, tt);
+    const tp = document.createElement("td");
+    tp.textContent = fmtTps(s.tokPerSec);
+    tp.title = "直近 " + fmtTps(s.lastTokPerSec) + " tok/s";
+    tr.append(nm, tn, tt, tp);
     tb.appendChild(tr);
   }
   tbl.appendChild(tb);
@@ -1122,7 +1126,7 @@ function renderAgentsTab(body, state) {
     card.style.setProperty("--ah", agentHue(id));
     const label = a.displayName ?? NAMES[id] ?? id;
     card.innerHTML = `<span class="nm">${escapeHtml(label)}</span><span class="st ${(a.status ?? "idle").replace(/\s/g, "")}">${escapeHtml(statusJa(a.status))}</span>` +
-      `<div class="meta">turn ${a.turn ?? 0}${a.lastTool ? ` / ${escapeHtml(a.lastTool)}` : ""}${a.tokens ? ` / ${a.tokens.toLocaleString()}tok / $${(a.costUsd ?? 0).toFixed(4)}` : ""}</div>`;
+      `<div class="meta">turn ${a.turn ?? 0}${a.lastTool ? ` / ${escapeHtml(a.lastTool)}` : ""}${a.tokens ? ` / ${a.tokens.toLocaleString()}tok / $${(a.costUsd ?? 0).toFixed(4)}` : ""}${a.tok?.avgTokPerSec != null ? ` / ${fmtTps(a.tok.avgTokPerSec)}tok/s` : ""}</div>`;
     const wdb = document.createElement("button");
     wdb.className = "wtdiff-btn";
     wdb.textContent = "差分";
@@ -1193,6 +1197,11 @@ function showWtdiff(id, r) {
   dlg.onclose = () => dlg.remove();
 }
 
+// tok/sの表示整形(未計測は「—」。usage.traceのmsが載る行からのみ集計される)
+function fmtTps(v) {
+  return v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(1);
+}
+
 function renderAgentLog(a) {
   const wrap = document.createElement("div");
   wrap.className = "alog";
@@ -1215,6 +1224,13 @@ function renderAgentLog(a) {
     if (ratio >= 0.9) cfill.classList.add("hot"); // 90%超は警告色(autocompactしきい値と同じ)
     cbar.appendChild(cfill);
     cbox.appendChild(cbar);
+    // 生成速度(トークン/秒): server.jsがusage.trace(ms付き)から出した直近/平均を実測値として出す
+    if (a.tok && (a.tok.lastTokPerSec != null || a.tok.avgTokPerSec != null)) {
+      const ttext = document.createElement("div");
+      ttext.className = "ctxtext";
+      ttext.textContent = "生成速度 " + fmtTps(a.tok.lastTokPerSec) + " tok/s(直近) / 平均 " + fmtTps(a.tok.avgTokPerSec) + " tok/s";
+      cbox.appendChild(ttext);
+    }
     wrap.appendChild(cbox);
   }
   if (a.live && (a.live.think || a.live.say)) {
@@ -1372,7 +1388,7 @@ function renderStatusTab(body) {
   } else {
     const tbl = document.createElement("table");
     tbl.className = "usage-tbl";
-    tbl.innerHTML = "<thead><tr><th>エージェント</th><th>状態</th><th>turn</th><th>tokens</th><th>cost</th></tr></thead>";
+    tbl.innerHTML = "<thead><tr><th>エージェント</th><th>状態</th><th>turn</th><th>tokens</th><th>tok/s</th><th>cost</th></tr></thead>";
     const tb = document.createElement("tbody");
     let totTok = 0, totUsd = 0;
     for (const [id, a] of agents) {
@@ -1381,12 +1397,14 @@ function renderStatusTab(body) {
       const tr = document.createElement("tr");
       tr.innerHTML = `<td>${escapeHtml(a.displayName ?? NAMES[id] ?? id)}</td>` +
         `<td class="st ${(a.status ?? "idle").replace(/\s/g, "")}">${escapeHtml(statusJa(a.status))}</td>` +
-        `<td>${a.turn ?? 0}</td><td>${(a.tokens ?? 0).toLocaleString()}</td><td>$${(a.costUsd ?? 0).toFixed(4)}</td>`;
+        `<td>${a.turn ?? 0}</td><td>${(a.tokens ?? 0).toLocaleString()}</td>` +
+        `<td title="平均(直近 ${fmtTps(a.tok?.lastTokPerSec)}tok/s)">${fmtTps(a.tok?.avgTokPerSec)}</td>` +
+        `<td>$${(a.costUsd ?? 0).toFixed(4)}</td>`;
       tb.appendChild(tr);
     }
     const tr = document.createElement("tr");
     tr.className = "total";
-    tr.innerHTML = `<td>合計</td><td></td><td></td><td>${totTok.toLocaleString()}</td><td>${totUsd.toFixed(4)}</td>`;
+    tr.innerHTML = `<td>合計</td><td></td><td></td><td>${totTok.toLocaleString()}</td><td></td><td>${totUsd.toFixed(4)}</td>`;
     tb.appendChild(tr);
     tbl.appendChild(tb);
     body.appendChild(tbl);
@@ -1713,7 +1731,7 @@ async function handleCommand(text) {
   } else if (cmd === "usage") {
     if (!lastState) return post("まだ状態を取得していません");
     const rows = Object.entries(lastState.live.agents).map(([id, a]) =>
-      `${a.displayName ?? id}: ${statusJa(a.status)} / ${a.tokens?.toLocaleString() ?? 0}tok / $${(a.costUsd ?? 0).toFixed(4)}`);
+      `${a.displayName ?? id}: ${statusJa(a.status)} / ${a.tokens?.toLocaleString() ?? 0}tok${a.tok?.avgTokPerSec != null ? ` / ${fmtTps(a.tok.avgTokPerSec)}tok/s` : ""} / $${(a.costUsd ?? 0).toFixed(4)}`);
     post(rows.length ? rows.join("\n") : "usageはまだありません");
   } else if (cmd === "threads") {
     const ts = lastState?.live.threads ?? [];

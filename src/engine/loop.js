@@ -182,6 +182,8 @@ export async function runAgentLoop({
     if (mc.changed) bus.emit("compact.micro", { agent: agent.id, savingsTokens: mc.savingsTokens });
 
     let res;
+    // 生成速度(tok/s)計測用: 1呼出の実経過時間。トレースへ残してUIの「トークン/秒」表示に使う
+    const chatStartedAt = Date.now();
     try {
       // ストリーミング: 断片をbusへ流してUIのライブ表示に使う
       res = await model.chat({ messages, tools: tools.specs, onDelta: (d) => bus.emit("agent.delta", { agent: agent.id, ...d }) });
@@ -198,7 +200,7 @@ export async function runAgentLoop({
     runTokens += (res.usage?.promptTokens ?? 0) + (res.usage?.completionTokens ?? 0);
     lastPromptTokens = res.usage?.promptTokens ?? 0;
     // トークン内訳のトレース記録(消費分析用)。ボードJSONLと同じ親の usage-trace/ 配下へ1ターン1行追記する
-    // (監査領域 state/ 直下は避ける)。prompt/completion/reasoningの内訳+コンテキスト概算サイズを記録。
+    // (監査領域 state/ 直下は避ける)。prompt/completion/reasoningの内訳+呼出時間(ms)+コンテキスト概算サイズを記録。
     try {
       // 書込先は監査領域(state/)を避ける: 監査台帳と同じディレクトリへのエンジン書込は運用と衝突する。
       // board.persistPathがあればその親の下 usage-trace/ へ、無ければスキップ(監査領域へは書かない)
@@ -207,16 +209,18 @@ export async function runAgentLoop({
       const traceDir = join(baseDir, "usage-trace");
       mkdirSync(traceDir, { recursive: true });
       const ctxChars = messages.reduce((n, m) => n + String(m.content ?? "").length, 0);
+      const chatMs = Date.now() - chatStartedAt;
       appendFileSync(join(traceDir, "usage-trace.jsonl"), JSON.stringify({
         ts: new Date().toISOString(), agent: agent.id, turn,
         prompt: res.usage?.promptTokens ?? 0,
         completion: res.usage?.completionTokens ?? 0,
         reasoning: res.usage?.reasoningTokens ?? 0,
+        ms: chatMs,
         ctxChars, msgCount: messages.length,
       }) + "\n");
       // UIのリアルタイム表示用(イシュー#17): トレースと同じ値をbusへ流す。
-      // server.jsが受けて live.agents[id].ctx へ使用/上限/残りを計算して保持する
-      bus.emit("usage.trace", { agent: agent.id, turn, ctxChars });
+      // server.jsが受けて live.agents[id].ctx へ使用/上限/残りを、tok へ直近/平均のtok/sを計算して保持する
+      bus.emit("usage.trace", { agent: agent.id, turn, ctxChars, ms: chatMs, completion: res.usage?.completionTokens ?? 0 });
     } catch { /* トレースの失敗でループを止めない */ }
     // サーバー側web_searchが走ったら活動ログへ(ZCodeの検索表示相当)
     if (res.searches?.length) {
