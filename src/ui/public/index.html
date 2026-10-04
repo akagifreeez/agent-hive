@@ -2465,7 +2465,17 @@ const ALL_COMMANDS = () => ({
     body.appendChild(out);
   }
   $("saybtn").onclick = sendSay;
-$("saytext").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) sendSay(); });
+// Enterはdocumentレベルの委譲で受ける(saytextノードが何者かに張り替えられても結線が死なない。
+// 長寿命タブでkeydownだけ無効になる報告の対策。通常時の挙動は従来と同一)
+// preventDefaultは必須: これがないとFirefoxでshowModal直後にフォーカスがダイアログの
+// 先頭ボタン(=キャンセル)へ移り、同じEnter押下の既定の活性化でキャンセルが即クリックされる
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (t && t.id === "saytext" && e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    sendSay();
+  }
+});
 // 画像添付: 添付ボタン or 入力欄へのペースト。dataURL化してからサーバーへ保存させる
 let pendingImage = null;
 const attachFile = document.getElementById("attachfile");
