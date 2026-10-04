@@ -378,6 +378,45 @@ export class ChatHost {
 // 検知する。化けた入力をそのまま渡すとリーダーが断片から主題を推測してしまうため、
 // say()注入時に警告文を付けて「再送を求める」運用へ切り替える。
 // 加えて UTF-8→cp932 二重エンコードの典型兆候(日本語UTF-8先頭バイト由来のラテン文字塊)も検知。
+// ===== 会話メモリの刈り取り(イシュー#20-2: mem-*.json 肥大化対策)=====
+
+// mem-<id>.json の既定上限(メッセージ数)。chat.memMaxMessages で上書きできる。
+export const DEFAULT_MEM_MAX_MESSAGES = 200;
+
+// ボード投稿参照(番号単独)の検出。刈り取り要約時にラベル付きへ補正する。
+export const MEM_REF_RE = /(?:ボード|board)?#(\d{1,4})(?!\d)(?!\s*\()/g;
+
+// メッセージ配列を1行ずつ要約する(LLM不要の手軽方式)。参照はラベル/日時付きへ補正。
+function summarizeForPrune(messages, boardName) {
+  const lines = [];
+  for (const m of messages) {
+    const text = String(m.content ?? "").replace(/s+/g, " ").trim();
+    if (!text) continue;
+    const labeled = text.replace(MEM_REF_RE, (all) => all + "(" + (boardName ?? "main") + "・日時不明)");
+    lines.push((m.role === "user" ? "- 入力: " : "- 応答: ") + labeled.slice(0, 160));
+  }
+  return lines.join("\n");
+}
+
+// ラウンド境界の記憶刈り取り。上限超過時は「system + 要約 + 直近分」へ縮める。
+// @returns messages(非配列はnull)。上限以内なら同一配列をそのまま返す。
+export function trimMemories(messages, opts = {}) {
+  if (!Array.isArray(messages)) return null;
+  const max = Math.max(4, Number(opts.memMaxMessages ?? DEFAULT_MEM_MAX_MESSAGES));
+  if (messages.length <= max) return messages;
+  const system = messages.find((m) => m.role === "system");
+  const rest = messages.filter((m) => m !== system);
+  const pruned = rest.slice(0, Math.max(1, rest.length - (max - (system ? 1 : 0) - 2)));
+  const kept = rest.slice(-Math.max(0, max - (system ? 1 : 0) - 2));
+  const summary = summarizeForPrune(pruned, opts.boardName);
+  const note = { role: "user", content: "[Memory pruned] 古い会話を要約しました(参照はボード名・日時付き)。\n" + summary };
+  return [
+    ...(system ? [system] : []),
+    note,
+    ...kept,
+  ];
+}
+
 // U+FFFD(置換文字)を含むか。エンコード壊れの決定打。
 export function containsReplacementChar(text) {
   return typeof text === "string" && text.includes(String.fromCharCode(0xfffd));
