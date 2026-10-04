@@ -25,3 +25,4 @@
 - 承認待ちタスクの孤立対策: verify-*(role:review)は実装者が自己承認できない。スレッドのreviewロールが退場すると承認待ちが無人になるが、リーダー(lead)もreviewタスクは請求不可。対処は lead が reviewロールのワーカーを spawn して検証→approve まで通す(issue-checkpointスレッドで実証)。spawnは同時エージェント数上限があるため、まず既存ワーカーの再請求を促してから実施する。
 
 - 起票タスクのrole指定は必要が無い限り固定しない(省略で誰でも可)。feat-monitor-chartスレッドでリーダー/スポーン元専用のimpl起票がメンバーのボードに現れず、スポーンした追加ワーカー(impl-2/6/7/8)もrole不一致で請求できず退場が連発した。また請求が自動解放(プロセス再起動)でopenへ戻った場合、実装コミットがworktreeにあれば再請求者が即finishできる — 実装は先行コミットしておき、finishタイミングは解放後に合わせるのが有効(2026-09)。
+- イシュー#20(fix-lead-priority・2026-10)の設計決定: (1)リーダー起床注入文は「ユーザー入力を最優先、直近のワーカー投稿には触れなくてよい」へ固定(chat-input-priority.test.js) (2)mem-*.jsonはラウンド境界でpruneMemoriesにより刈り取り、上限はchat.memMaxMessages/memMaxBytes(config化・0=無効化) (3)文字化け入力は検知時のみ mojibakeWarning を注入文へ連結し、本文はボードへ必ず記録(欠落させない)。同時実装だった提案1〜3は最終的に1契約へ統一(say()の1箇所連結+4検知関数)。詳細契約は constraints.md「fix-lead-priorityラウンドの知見」へ。
