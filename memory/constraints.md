@@ -123,3 +123,4 @@
 - **スレッドが閉じられた後の発見器起票は稼働中スレッドのメンバーが消化する**: 閉じたスレッドのメンバーは請求できない(ガンマ観測)。スレッド終了時は未消化の発見器タスク(fix-*/verify-*)が残っていないか確認してから閉じるのが安全。
 
 - **mojibake系テストの未完不整合(2026-10 main 0aec183時点)**: test/mojibake.test.js が chat.js の旧export名 containsReplacementChar をimportしてロード失敗(実装は detectBrokenInput に統一済み)。mojibake-detection.test.js の say()警告配線2件も未接続。fix-mojibake-detection(fix-lead-priority)で契約統一が必要。テストが2系統で別契約になった状態のマージは、実装側の1関数へ集約してから緑化する。
+- **mojibake系の契約統一は完了(fix-lead-priority・2026-10)**: 上記未完不整合は解消済み。最終契約は detectBrokenInput(統合検知)/containsReplacementChar(U+FFFD)/looksDoubleEncoded(二重エンコード)/mojibakeWarning(警告文=null許容)の4関数。say()は mojibakeWarning(text) の返値を注入文へ連結し、検知時も本文はボードへ記録(欠落させない)。テストは test/mojibake.test.js(6件)+test/mojibake-detection.test.js(7件)。
