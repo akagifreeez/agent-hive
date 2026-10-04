@@ -155,7 +155,11 @@ export async function runAgentLoop({
     const fresh = board.since(seen).filter((p) => p.from !== agent.id);
     if (fresh.length) {
       seen = fresh[fresh.length - 1].id;
-      const text = fresh.map((p) => `${p.from}: ${p.text}`).join("\n---\n");
+      // メモリに残る参照は番号単独だと再起動後(/clearで再採番)に衝突するため、
+      // ラベル+日時付きで保存する(イシュー#20)。投稿者名の後に #id と日時(分まで)を添える。
+      const text = fresh.map((p) => `${p.from} [#${p.id}${p.at ? " " + String(p.at).slice(0, 16).replace("T", " ") : ""}]: ${p.text}`).join("\n---\n");
+---
+");
       messages.push({ role: "user", content: `[ボード新着]\n${text.slice(0, 6000)}` });
     }
     // ラウンド実行中に入ったユーザー入力をターン境界で割込ませる(steering: ZCode command-queue流)
