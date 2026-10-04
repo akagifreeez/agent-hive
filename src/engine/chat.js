@@ -22,6 +22,7 @@ export class ChatHost {
     memoryFn = null, // () => 永続記憶の注入文脈。ラウンド開始ごとに読み直す(distill反映のため)
     project = null, // スレッドスコープ(自動継続の「まだ仕事があるか」判定に使う)
     autoContinueRounds = 3, // ターン上限でも仕事が残っていれば自動で次ラウンドへ(0=従来どおり停止)
+    memMaxMessages = 200, // 会話メモリ(mem-*.json)の上限メッセージ数。超えたらsystem+冒頭を残して古い分を刈り取り(イシュー#20)
     hooks = null, // Hooksインスタンス(roundEndフック)
   }) {
     this.mains = mains;
@@ -41,6 +42,7 @@ export class ChatHost {
     this.memoryFn = memoryFn;
     this.project = project;
     this.autoContinueRounds = autoContinueRounds;
+    this.memMaxMessages = Number(memMaxMessages) > 10 ? Number(memMaxMessages) : 200;
     this.hooks = hooks;
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
     this.paused = false; // 一時停止中は新しい起床を潰す(実行中ラウンドはターン境界で自然終了)
@@ -123,9 +125,22 @@ export class ChatHost {
     if (!p || !this.memories.has(main.id)) return;
     try {
       mkdirSync(join(this.mainWorkspace, "state"), { recursive: true });
+      // 上限刈り取り(イシュー#20): messagesがmemMaxMessagesを超えたら、system+冒頭の seeds
+      // 2件と直近(上限-余白)だけを残し、間の古い分を捨てる。刈り取った件数はイベントで告知。
+      const all = this.memories.get(main.id) ?? [];
+      let messages = all;
+      if (this.memMaxMessages > 0 && all.length > this.memMaxMessages) {
+        const keepHead = all[0]?.role === "system" ? 1 : 0;
+        const head = all.slice(0, keepHead + 1); // system+冒頭1(seed)
+        const tailCount = this.memMaxMessages - head.length - 1;
+        const tail = all.slice(all.length - Math.max(tailCount, 1));
+        const rest = all.slice(head.length, all.length - tail.length); // 刈り取り対象(古い分)
+        messages = [...head, { role: "user", content: "[メモリ整理] 古い会話 " + rest.length + " 件を刈り取りました(上限 " + this.memMaxMessages + ")。経過はボード(memory/gather_context)から読めます。" }, ...tail];
+        this.bus?.emit("memory.pruned", { agent: main.id, before: all.length, after: messages.length });
+      }
       // 一時ファイル経由の原子書込(クラッシュ時の半端JSONで復元が壊れるのを防ぐ)
       const tmp = `${p}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ messages: this.memories.get(main.id) }));
+      writeFileSync(tmp, JSON.stringify({ messages }));
       renameSync(tmp, p);
     } catch {
       // 保存失敗でラウンドを壊さない
