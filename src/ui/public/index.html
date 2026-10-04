@@ -343,6 +343,11 @@
   .toast { background: var(--panel2); border: 1px solid var(--line-strong); border-left: 3px solid var(--accent); color: var(--label); border-radius: 6px; padding: 8px 12px; font-size: 12px; box-shadow: var(--shadow-overlay); max-width: 380px; word-break: break-word; cursor: pointer; }
   .toast.err { border-left-color: var(--err); }
   .toast.expanded { max-width: 600px; max-height: 50vh; overflow-y: auto; white-space: pre-wrap; }
+  .ctxbox { margin: 2px 0 8px; padding: 6px 8px; background: var(--recess); border: 1px solid var(--separator); border-radius: 4px; font-family: var(--font-mono); font-size: 11.5px; }
+  .ctxtext { color: var(--label-tertiary); }
+  .ctxbar { margin-top: 4px; height: 6px; background: var(--fill); border-radius: 3px; overflow: hidden; }
+  .ctx-fill { display: block; height: 100%; width: 0; background: var(--ok); border-radius: 3px; transition: width var(--duration) var(--ease); }
+  .ctx-fill.hot { background: var(--err); }
 </style>
 </head>
 <body>
@@ -492,7 +497,22 @@ function hfetch(url, opts = {}) {
   if ((opts.method ?? "GET") === "POST") {
     opts.headers = { ...(opts.headers ?? {}), "x-hive-token": window.HIVE_TOKEN ?? "" };
   }
-  return fetch(url, opts);
+  return fetch(url, opts).then(async (r) => {
+    // トークンはサーバー起動ごとに再生成されるため、開きっぱなしのタブは再起動後に全POSTが403になる。
+    // 同一オリジンの最新ページ(/)から実トークンを引き取り、1回だけ再試行する(続く403は従来どおり呼び出し側へ)
+    if (r.status !== 403 || (opts.method ?? "GET") !== "POST") return r;
+    try {
+      const page = await (await fetch("/", { cache: "no-store" })).text();
+      const m = /window\.HIVE_TOKEN = ("(?:[^"\\]|\\.)*")/.exec(page);
+      const fresh = m ? JSON.parse(m[1]) : null;
+      if (!fresh || fresh === window.HIVE_TOKEN) return r;
+      window.HIVE_TOKEN = fresh;
+      opts.headers = { ...(opts.headers ?? {}), "x-hive-token": fresh };
+      return fetch(url, opts);
+    } catch {
+      return r;
+    }
+  });
 }
 let selectedThread = "__main__";
 // スラッシュコマンドの定義(/helpはこの一覧から自動生成)
@@ -507,6 +527,7 @@ const COMMANDS = {
   thread: "スレッドを直接開く(/thread <名前> <目標>)",
   close: "スレッドを閉じる(/close <名前>)",
   clear: "このスレッドのチャット履歴をクリア(/clear・タスクとメモリは残る)",
+  notify: "デスクトップ通知のON/OFF(/notify・タスク完了とマージで届く)",
 };
 let customCommands = {};
 let uiEffort = null;
@@ -665,7 +686,7 @@ function renderRoomHead(state) {
     chip.className = "member" + (selectedAgent === id ? " sel" : "");
     chip.style.setProperty("--ah", agentHue(id));
     chip.innerHTML = `<span class="dot ${(a.status ?? "idle").replace(/\s/g, "")}"></span><span class="anm">${escapeHtml(a.displayName ?? NAMES[id] ?? id)}</span>`;
-    chip.title = `${statusJa(a.status)} · turn ${a.turn ?? 0} · クリックでログ`;
+    chip.title = `${statusJa(a.status)} · turn ${a.turn ?? 0}${a.tok?.avgTokPerSec != null ? ` · ${fmtTps(a.tok.avgTokPerSec)}tok/s` : ""} · クリックでログ`;
     chip.onclick = () => { selectedAgent = selectedAgent === id ? null : id; ctxTab = "agents"; renderAll(); };
     mem.appendChild(chip);
   }
@@ -908,7 +929,8 @@ async function renderUsageTrace(body) {
     note.textContent = "トレースはまだありません。";
     return;
   }
-  note.textContent = data.total.turns + "ターン / 合計" + data.total.totalTokens.toLocaleString() + "トークン";
+  note.textContent = data.total.turns + "ターン / 合計" + data.total.totalTokens.toLocaleString() + "トークン" +
+    (data.total.tokPerSec != null ? " / 生成速度 平均 " + fmtTps(data.total.tokPerSec) + " tok/s" : "");
   const view = document.createElement("div");
   view.className = "usage-trace-view";
   view.appendChild(renderTraceChart(data));
@@ -916,7 +938,7 @@ async function renderUsageTrace(body) {
   const tbl = document.createElement("table");
   tbl.className = "usage-tbl";
   tbl.style.cssText = "margin-top:6px;";
-  tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th></tr></thead>";
+  tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th><th>tok/s</th></tr></thead>";
   const tb = document.createElement("tbody");
   for (const s of data.series) {
     const tr = document.createElement("tr");
@@ -927,7 +949,10 @@ async function renderUsageTrace(body) {
     nm.appendChild(document.createTextNode(s.agent));
     const tn = document.createElement("td"); tn.textContent = String(s.points.length);
     const tt = document.createElement("td"); tt.textContent = s.totalTokens.toLocaleString();
-    tr.append(nm, tn, tt);
+    const tp = document.createElement("td");
+    tp.textContent = fmtTps(s.tokPerSec);
+    tp.title = "直近 " + fmtTps(s.lastTokPerSec) + " tok/s";
+    tr.append(nm, tn, tt, tp);
     tb.appendChild(tr);
   }
   tbl.appendChild(tb);
@@ -1123,7 +1148,7 @@ function renderAgentsTab(body, state) {
     card.style.setProperty("--ah", agentHue(id));
     const label = a.displayName ?? NAMES[id] ?? id;
     card.innerHTML = `<span class="nm">${escapeHtml(label)}</span><span class="st ${(a.status ?? "idle").replace(/\s/g, "")}">${escapeHtml(statusJa(a.status))}</span>` +
-      `<div class="meta">turn ${a.turn ?? 0}${a.lastTool ? ` / ${escapeHtml(a.lastTool)}` : ""}${a.tokens ? ` / ${a.tokens.toLocaleString()}tok / $${(a.costUsd ?? 0).toFixed(4)}` : ""}</div>`;
+      `<div class="meta">turn ${a.turn ?? 0}${a.lastTool ? ` / ${escapeHtml(a.lastTool)}` : ""}${a.tokens ? ` / ${a.tokens.toLocaleString()}tok / $${(a.costUsd ?? 0).toFixed(4)}` : ""}${a.tok?.avgTokPerSec != null ? ` / ${fmtTps(a.tok.avgTokPerSec)}tok/s` : ""}</div>`;
     const wdb = document.createElement("button");
     wdb.className = "wtdiff-btn";
     wdb.textContent = "差分";
@@ -1194,6 +1219,11 @@ function showWtdiff(id, r) {
   dlg.onclose = () => dlg.remove();
 }
 
+// tok/sの表示整形(未計測は「—」。usage.traceのmsが載る行からのみ集計される)
+function fmtTps(v) {
+  return v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(1);
+}
+
 function renderAgentLog(a) {
   const wrap = document.createElement("div");
   wrap.className = "alog";
@@ -1216,6 +1246,13 @@ function renderAgentLog(a) {
     if (ratio >= 0.9) cfill.classList.add("hot"); // 90%超は警告色(autocompactしきい値と同じ)
     cbar.appendChild(cfill);
     cbox.appendChild(cbar);
+    // 生成速度(トークン/秒): server.jsがusage.trace(ms付き)から出した直近/平均を実測値として出す
+    if (a.tok && (a.tok.lastTokPerSec != null || a.tok.avgTokPerSec != null)) {
+      const ttext = document.createElement("div");
+      ttext.className = "ctxtext";
+      ttext.textContent = "生成速度 " + fmtTps(a.tok.lastTokPerSec) + " tok/s(直近) / 平均 " + fmtTps(a.tok.avgTokPerSec) + " tok/s";
+      cbox.appendChild(ttext);
+    }
     wrap.appendChild(cbox);
   }
   if (a.live && (a.live.think || a.live.say)) {
@@ -1373,7 +1410,7 @@ function renderStatusTab(body) {
   } else {
     const tbl = document.createElement("table");
     tbl.className = "usage-tbl";
-    tbl.innerHTML = "<thead><tr><th>エージェント</th><th>状態</th><th>turn</th><th>tokens</th><th>cost</th></tr></thead>";
+    tbl.innerHTML = "<thead><tr><th>エージェント</th><th>状態</th><th>turn</th><th>tokens</th><th>tok/s</th><th>cost</th></tr></thead>";
     const tb = document.createElement("tbody");
     let totTok = 0, totUsd = 0;
     for (const [id, a] of agents) {
@@ -1382,12 +1419,14 @@ function renderStatusTab(body) {
       const tr = document.createElement("tr");
       tr.innerHTML = `<td>${escapeHtml(a.displayName ?? NAMES[id] ?? id)}</td>` +
         `<td class="st ${(a.status ?? "idle").replace(/\s/g, "")}">${escapeHtml(statusJa(a.status))}</td>` +
-        `<td>${a.turn ?? 0}</td><td>${(a.tokens ?? 0).toLocaleString()}</td><td>$${(a.costUsd ?? 0).toFixed(4)}</td>`;
+        `<td>${a.turn ?? 0}</td><td>${(a.tokens ?? 0).toLocaleString()}</td>` +
+        `<td title="平均(直近 ${fmtTps(a.tok?.lastTokPerSec)}tok/s)">${fmtTps(a.tok?.avgTokPerSec)}</td>` +
+        `<td>$${(a.costUsd ?? 0).toFixed(4)}</td>`;
       tb.appendChild(tr);
     }
     const tr = document.createElement("tr");
     tr.className = "total";
-    tr.innerHTML = `<td>合計</td><td></td><td></td><td>${totTok.toLocaleString()}</td><td>${totUsd.toFixed(4)}</td>`;
+    tr.innerHTML = `<td>合計</td><td></td><td></td><td>${totTok.toLocaleString()}</td><td></td><td>${totUsd.toFixed(4)}</td>`;
     tb.appendChild(tr);
     tbl.appendChild(tb);
     body.appendChild(tbl);
@@ -1714,7 +1753,7 @@ async function handleCommand(text) {
   } else if (cmd === "usage") {
     if (!lastState) return post("まだ状態を取得していません");
     const rows = Object.entries(lastState.live.agents).map(([id, a]) =>
-      `${a.displayName ?? id}: ${statusJa(a.status)} / ${a.tokens?.toLocaleString() ?? 0}tok / $${(a.costUsd ?? 0).toFixed(4)}`);
+      `${a.displayName ?? id}: ${statusJa(a.status)} / ${a.tokens?.toLocaleString() ?? 0}tok${a.tok?.avgTokPerSec != null ? ` / ${fmtTps(a.tok.avgTokPerSec)}tok/s` : ""} / $${(a.costUsd ?? 0).toFixed(4)}`);
     post(rows.length ? rows.join("\n") : "usageはまだありません");
   } else if (cmd === "threads") {
     const ts = lastState?.live.threads ?? [];
@@ -1792,6 +1831,23 @@ async function handleCommand(text) {
   } else if (customCommands[cmd]) {
     // configで定義したカスタムプロンプトコマンド → リーダーへ送信
     sendSayText(customCommands[cmd].replace(/\$ARGS/g, text.slice(cmd.length + 2).trim()));
+  } else if (cmd === "notify") {
+    if (typeof Notification === "undefined") { post("このブラウザは通知に対応していません"); return; }
+    if (notifyOn) {
+      notifyOn = false;
+      localStorage.setItem("hive-notify", "off");
+      post("デスクトップ通知をOFFにしました");
+    } else {
+      Notification.requestPermission().then((p) => {
+        if (p === "granted") {
+          notifyOn = true;
+          localStorage.setItem("hive-notify", "on");
+          post("デスクトップ通知をONにしました(タスク完了/マージで届きます)");
+        } else {
+          post("通知の許可が得られませんでした(ブラウザの設定を確認してください)");
+        }
+      });
+    }
   } else {
     post(`不明なコマンド: ${cmd}(/help で一覧)`);
   }
@@ -1806,6 +1862,13 @@ function toast(msg, kind = "err") {
   t.onclick = () => t.classList.toggle("expanded");
   $("toasts").appendChild(t);
   setTimeout(() => { if (!t.classList.contains("expanded")) t.remove(); }, 5000);
+}
+
+// デスクトップ通知(/notifyでON。許可要求はスラッシュコマンド=ユーザー操作のタイミングで行う)
+let notifyOn = localStorage.getItem("hive-notify") === "on";
+function desktopNotify(title, body) {
+  if (!notifyOn || typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try { new Notification(title, { body }); } catch { /* 通知失敗は無視 */ }
 }
 
 // ブラウザ標準のpromptの代替。テキスト入力つきダイアログ。キャンセル/Escはnull
@@ -1846,8 +1909,15 @@ function renderAll() {
   // usage予算アラート: /api/stateのlive.budget(exceeded/costUsd)をステータスライン(左下)へ出す
   const b = lastState.live.budget;
   const budgetTxt = b?.exceeded ? `予算超過: 累積${Number(b.costUsd ?? 0).toFixed(2)}` : null;
-  const bits = [mdl, effTxt, permTxt, budgetTxt, lastState.live.scenario ? `[${lastState.live.scenario.phase}]` : null].filter(Boolean);
+  // 作業中エージェント数を常時表示+タブタイトルへ(終わった/動いてるが一目で分かるように)
+  const agentsLive = lastState.live.agents ?? {};
+  let workingN = 0;
+  for (const k in agentsLive) if (agentsLive[k]?.status === "working") workingN++;
+  const workTxt = workingN ? `作業中${workingN}` : "アイドル";
+  const bits = [workTxt, mdl, effTxt, permTxt, budgetTxt, lastState.live.scenario ? `[${lastState.live.scenario.phase}]` : null].filter(Boolean);
   $("nav-foot").textContent = bits.join(" · ");
+  const pageTitle = (workingN ? `▶${workingN} ` : "✓ ") + "agent-hive";
+  if (document.title !== pageTitle) document.title = pageTitle;
 }
 
 
@@ -2359,6 +2429,14 @@ es.onmessage = (e) => {
     else if (lastState) renderNav(lastState.live.threads);
     return;
   }
+  // タスク完了/マージを見える化(トースト+/notifyがONならデスクトップ通知)。
+  // ここではreturnしない(下のrefreshSoon判定で通常の再描画も走る)
+  if (type === "task.finished" || type === "merge.completed") {
+    const label = type === "task.finished" ? "完了" : "マージ";
+    const msg = `${payload?.agent ?? "?"} が ${payload?.taskId ?? "?"} を${label}`;
+    toast("✓ " + msg, "ok");
+    desktopNotify("hive " + label, msg);
+  }
   if (["agent.turn", "agent.delta", "tool.call", "tool.result", "agent.status", "agent.spawned", "thread.opened", "merge.completed", "model.changed",
        "task.claimed", "task.finished", "task.created", "task.released", "task.cancelled", "task.autoResolved",
        "scenario.started", "scenario.finished"].includes(type)) {
@@ -2433,7 +2511,17 @@ const ALL_COMMANDS = () => ({
     body.appendChild(out);
   }
   $("saybtn").onclick = sendSay;
-$("saytext").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) sendSay(); });
+// Enterはdocumentレベルの委譲で受ける(saytextノードが何者かに張り替えられても結線が死なない。
+// 長寿命タブでkeydownだけ無効になる報告の対策。通常時の挙動は従来と同一)
+// preventDefaultは必須: これがないとFirefoxでshowModal直後にフォーカスがダイアログの
+// 先頭ボタン(=キャンセル)へ移り、同じEnter押下の既定の活性化でキャンセルが即クリックされる
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (t && t.id === "saytext" && e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    sendSay();
+  }
+});
 // 画像添付: 添付ボタン or 入力欄へのペースト。dataURL化してからサーバーへ保存させる
 let pendingImage = null;
 const attachFile = document.getElementById("attachfile");

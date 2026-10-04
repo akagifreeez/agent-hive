@@ -76,6 +76,42 @@ test("GET /api/usage-trace: ワーカー別・ターン別のseriesとサマリ�
   }
 });
 
+test("GET /api/usage-trace: ms付き行から生成速度tok/sを集計する(ms無し行は分母外)", async () => {
+  const ws = mktmp();
+  seedTrace(ws, [
+    // w1: 200tok/1000ms=200tok/s、300tok/2000ms=150tok/s → 平均(200+300)/(1+2秒)=166.67tok/s
+    { agent: "w1", turn: 1, prompt: 1000, completion: 200, reasoning: 0, ms: 1000, ts: "2026-09-14T01:00:00.000Z" },
+    { agent: "w1", turn: 2, prompt: 2000, completion: 300, reasoning: 0, ms: 2000, ts: "2026-09-14T01:01:00.000Z" },
+    // w2: 旧形式(ms無し)=tok/sは出ない(null)。0msも同様に除外
+    { agent: "w2", turn: 1, prompt: 500, completion: 40, reasoning: 0, ts: "2026-09-14T01:02:00.000Z" },
+    { agent: "w3", turn: 1, prompt: 500, completion: 60, reasoning: 0, ms: 0, ts: "2026-09-14T01:03:00.000Z" },
+  ]);
+  const config = mkConfig(ws);
+  const ui = await startUi({ config, modelFactory: () => ({}), bus: new Bus(), autoStart: false });
+  const base = `http://127.0.0.1:${config.ui.port}`;
+  try {
+    const r = await fetchJson(`${base}/api/usage-trace`);
+    assert.equal(r.status, 200);
+    const w1 = r.body.series.find((s) => s.agent === "w1");
+    // 1点ごとのtok/s(完了トークン/経過秒)
+    assert.ok(Math.abs(w1.points[0].tokPerSec - 200) < 1e-9);
+    assert.ok(Math.abs(w1.points[1].tokPerSec - 150) < 1e-9);
+    // 系列(ワーカー)平均と直近
+    assert.ok(Math.abs(w1.tokPerSec - (500 / 3)) < 1e-9);
+    assert.ok(Math.abs(w1.lastTokPerSec - 150) < 1e-9);
+    // ms無し(旧形式)・ms=0の行はtok/sを出さず、全体平均の分母にも入らない
+    const w2 = r.body.series.find((s) => s.agent === "w2");
+    assert.equal(w2.tokPerSec, null);
+    assert.equal(w2.points[0].tokPerSec, null);
+    const w3 = r.body.series.find((s) => s.agent === "w3");
+    assert.equal(w3.tokPerSec, null);
+    assert.ok(Math.abs(r.body.total.tokPerSec - (500 / 3)) < 1e-9);
+  } finally {
+    ui.close();
+    rmTree(ws);
+  }
+});
+
 test("GET /api/usage-trace: agentフィルタとturn範囲(fromTurn/toTurn)で絞れる", async () => {
   const ws = mktmp();
   seedTrace(ws, [
@@ -144,4 +180,7 @@ test("UI: usageタブにトレースセクションがあり、/api/usage-trace�
   // セクション見出しとフィルタ UI
   assert.match(html, /トレース/);
   assert.match(html, /usageTraceFilter|usage-trace-filter/);
+  // 生成速度(tok/s)の表記: サマリ行+凡例テーブル列
+  assert.match(html, /tok\/s/);
+  assert.match(html, /lastTokPerSec/);
 });

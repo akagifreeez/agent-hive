@@ -78,13 +78,20 @@
 - **usage等の時刻境界テストはUTC/ローカル混在でflakyになる**: new Date()から生成した日付期待値は実行時刻(TZ・日をまたぐ時刻帯)でズレる。テスト側はTZ環境変数を明示固定するか、期待値も実装と同一の関数(localDateKey等)から生成する(2026-09 issue-costで実害→解決済み)。
 - **browser-toolsの断片リンク契約は統一済み**: normalizeUrlが #断片に対しnullを返し、links/extractElements双方の遷移候補から除外する。browserSubmitレポートの接頭辞は「method: 」(テスト期待と一致、test/browser-tools*.test.js 13/13)(2026-09)。
 - **edit_fileでテンプレートリテラルを壊したときの最短修復**は `git show main:<file>` で原本を取り直して該当ブロックを復元する(node -eパッチ再試行より安全。2026-09 issue-browserラウンドでworktree.js修復に実証)。
+- **usage集計の蓄積契約はrunner.jsのemit形式と一致させる(2026-09 issue-throttle系列で実害)**: runner.jsは usage.summary として `{byAgent, totals}` をemitする。server.js側で旧契約 `p.usage` だけを読むと totals:null がusage.jsonへ蓄積され集計が静かに欠落する。修正は `totals: p.totals ?? p.usage ?? null`(旧契約互換維持)。集計テストの期待値は「加法的整合」(スレッド別合計の総和=全レコード合計)で検算し、matrixのassertキー(mainとスレッド名)の取り違えにも注意する。
+- **usage-trace系の書込先はボードJSONLの親ディレクトリ配下に寄せ、state/監査領域直下には書かない(2026-09確定)**: loop.jsのトレースは二重ブロック(CWD相対のstate固定+persistPath基準)になりやすい。1本化の契約: persistPath無し時はthrowしcatchで握りつぶす(=監査領域へ決して書かない)。書込先を改修するときは「1ターン=1行」「state/直下にusage-trace.jsonlを生成しない」を実行再現で証跡にする。
 - **ボード投稿は自身のスレッドへ投稿すると自分のボードに載らない**: to_thread指定時の注意。lead報告の取りこぼしがあったら他スレッドの投稿を見る(gather_context source=threads)。
+
+- usage-traceとモニタ可視化(イシュー#15〜#17): (1)loop.jsはmodel.chatごとに usage-trace/usage-trace.jsonl へ1ターン1行追記(prompt/completion/reasoning内訳+ctxChars)。書込先はボードJSONLと同じ親の usage-trace/(state/監査領域には書かない。persistPath無し時はスキップ) (2)/api/usage-trace がagent・fromTurn/toTurnでフィルタしたseries/pointsを返す(fromTurn等はurl.searchParams由来のstring|nullも受ける契約) (3)loop.jsがbusへusage.traceを流すとserver.jsがlive.agents[id].ctx へ 使用/上限/残り(ctxWindow無ければ200Kフォールバック)を保持し、/api/stateで配布。エージェント詳細パネルのバー表示(使用/上限/残り+.hot警告色)のデータ源。トークン換算は「文字数/3切上げ」でcompact.jsと統一 (4)モニタページにmonitor-chart.js(IIFE・依存ゼロ・window/globalThis公開)でSVGチャート。yMaxは全系列(agents と tasks総数=open+claimed+done)の最大。XSS対策は数値toFixed+既知色リテラルのみ。テストからは globalThis.monitorChart 経由で呼ぶ(2026-09)。
+- README自動更新(readme-auto.js): 差分ベースでREADMEを再生成する。未閉鎖のHTMLコメントマーカー保護ケースをテスト済み(test/readme-auto 11件)(2026-09)。
+- **テストがstartUi()したら必ずui.close()する**: closeしないとサーバーハンドルが開いたままnode --testがプロセス終了できず、ファイル単位のタイムアウト(約60秒)で"test failed"になる(ctx-window-ui.testで実害・最小再現スクリプトで確定)。個別テストは全部緑なのにファイルだけ落ちるときはハンドル残存を疑う。finally で ui.close()+rmTree が定型(2026-09)。
 
 # 2026-09 issue-modelselect系列ラウンドの知見(ベータdistill)
 
 - **リーダーによるタスク別モデル選択(イシュー#12)は実装済み**: create_task/spawn_agent にリーダー専用・任意の model引数(ModelRef)。権限判定は二重防御(tools層=threadOpener有無、spawn層=parent.depth!==0で拒否)。タスクメタ model: 行を tasks.js(create/assign/metaLines/readMeta/list/TaskInfo)が扱い、spawn走行時はブリーフタスクのメタから readTaskModel → modelFactory({…agent, model: taskModel ?? agent.model}) へ伝播(未指定はagent既定)。原則「基本は既定モデル・特例で代替」。テスト test/model-task-select.test.js 5件(2026-09)。
 - **モデル基盤の契約(2026-09 modelselectラウンド確定)**: プロバイダ(認証・baseUrl名前空間)と api(ワイヤ形式)は直交。api= openai-completions/anthropic-messages/openai-chatgpt-responses を src/model/factory.js のADAPTERSで選択。内蔵カタログ(builtin.js= models.dev静止スナップショット最小版)+設定 models.providers を catalog.js がマージし ModelRef("provider/model"またはベアID)を解決。旧 model セクションは config.js が"default"プロバイダへ読み替える互換橋(buildModelsCfg/legacyModelSection)で既存参照を無修正維持。apiKeyEnv === null は「envを見ない」明示(誤ってOPENAI_API_KEYを拾わないため)。modelStateInfoのauthHintは鍵末尾4文字のみ=生鍵非露出契約。
 - **検証者の役割は「承認まで通す」**: 承認待ちタスクはrole:reviewの検証者が居るうちに approve_task まで実行する。finish→退場→自動解放の掃除で承認待ちエントリが消えると、成果がmain反映済みでも帳簿がdoneにならずレジューム作業が発生する(modelselectラウンドで実害)。検証報告は「結論を最初の1行+通した確認リスト」の形式で投稿し、後日のレジューム時にも根拠として再利用できるようにする。
+- **放棄判断系respawnタスクは判断者以外の検証者でfinishする**: 放棄判断を自分でfinish_taskすると自動起票されるverify-*の検証者に自分が指名され「実装者のため承認不可」で循環する(2026-09 issue-throttleラウンドで実害・チェーンは他人が消化)。判断報告はボードへ根拠付きで投稿し、finishは別ロールに依頼するか、起票されたverifyを他人が消化する前提で待つ。verify-verifyの二重チェーンが陳腐化したらユーザーUI中止か一括クローズで整理する。
 - **マージ退行の定型パターンと検出**: 実装とテスト期待値が別コミット・別担当で交互に書き換わると退行を繰り返す(browser-tools断片リンク・submit報告書式で実害)。検出は「テスト失敗の責任分界」をコミット時系列で追う(git log --all -S '<期待値文字列>')。どちらが正かは最新の仕様決定コミット(e8f92ec等のコメント)と現mainのコードで判断し、中途の暫定版を採用しない。修正時は実装+テストを同じコミットで揃える。
 
 # 2026-09 issue-checkpoint系列ラウンドの追加知見(ベータdistill)
@@ -102,3 +109,33 @@
 - **古い分岐の放棄ブランチは原則マージしない(巻き戻しリスク)**: クラッシュ復旧(respawn-*)で請求したブランチが古い世代(stability-r3等)だと、マージ時に113ファイル/約-1万行の巻き戻し差分となり最新機能(スロットリング等)を破壊しうる。放棄判断の検定手順: (1)merge-baseとbranch先頭の日付/コミットで分岐世代を確認 (2)`git diff main <branch>` の二点間diffで「機能の独自追加」を列挙(mainとの三点間diffは新旧混合で見誤る) (3)各機能が現mainに改善形で存在するか確認(killDevserverTree等の強化版) (4)関連テストを現mainで実行して緑を証跡にする → 放棄判断はボードへ根拠付きで記録し、worktree/ブランチは掃除タスクへ委ねる。完了条件は「取り込み or 放棄判断の記録」なので、記録だけでfinishしてよい。
 - usage集計UI(イシュー#6)の最終形: /api/usage(aggregateUsageのbyDate/byThread/matrix)+ index.html statusタブの renderUsageAggregate()。並行実装由来の usageAggTable 等の重複は統一済み — 再発時は grep -c で関数名を数え、main側へ統一する(2026-09)。
 - **leadロール(進行・調整)はreviewタスクを請求できない**: 発見器が起票するverify-*はrole:review固定のため、leadはclaim不可(approveは実装者でなければ可)。verify滞留はrole:review持ちのワーカーへボードで依頼するか、リーダーがroleを緩める。claim空転が続くときは診断文の「未着手一覧」でrole不一致を確認してから打ち切る(claimMiss診断と併用)。
+
+# 2026-09 feat-monitor-chartラウンドの知見(アルファdistill)
+
+- **自動解放(プロセス再起動)で請求が戻ってもworktreeは保持される**: コミット済みの成果は失われない。再請求したら git status/log で現状確認→必要なテストだけ再実行→finish_task が定型。無為に再実装しない(2026-09)。
+- **依存ゼロ(外部URL無し)テストではSVG名前空間URI(http://www.w3.org/2000/svg)を例外にする**: 属性値として使い取得はしない。監視は否定先読み付き正規表現 /https?:\/\/(?!www\.w3\.org)/ で行う(誤検知実績: test/monitor-chart.test.js)(2026-09)。
+- **ブラウザ向け描画は純関数モジュール(public/配下・IIFE+globalThis公開)+HTMLはfetchと注入のみに分離**すると、描画ロジックも統合(API応答の実行時契約)もNodeテストで検証できる(markdown.jsパターンの適用。詳細は上のイシュー#15-17節)(2026-09)。
+# 2026-10 issue-cost系列ラウンドの知見(ベータdistill)
+
+- **リーダー起床注入文はユーザー入力最優先の文面に固定(イシュー#20)**: say()のwake注入文は「ユーザー入力が最優先の応答対象です。まずこの入力に答えてください。直近のワーカー投稿は触れなくてよい」(af3a444)。旧文面「直前のボード新着を確認して応答」だと、say直後にワーカー投稿が流れたとき後発投稿へ注視してユーザー質問が後回しになった(実害)。並発契約は test/chat-input-priority.test.js が担保。改修時はこの文面契約を壊さない。
+- **UIトークンは403時にhfetchが自己修復する**: サーバー起動ごとにCSRFトークンは再生成されるため、開きっぱなしのUIタブは再起動後に全POSTが403になる。hfetchは403時に同一オリジンの最新ページ(/)から実トークンを引き取り1回だけ再試行する(test/ui-token-selfheal.test.js)。UIのPOST契約を変えるときはこの自己修復経路を壊さない。
+- **検証タスクの「放棄判断で締める」は正規の完了形**: respawn系dirtyタスクが同一内容で再起票されたときも、実装とテストの現main契約(browser-open等)を確認して「取り込み不要」の根拠付き記録でfinishしてよい(2026-10 respawn-engine-r3-cleanup-alpha-dirtyを3回とも同一判断で締めた実績)。判断基準は「現mainの意図的な改善(open:true明示等)と競合する古い設計か」。
+- **スレッドが閉じられた後の発見器起票は稼働中スレッドのメンバーが消化する**: 閉じたスレッドのメンバーは請求できない(ガンマ観測)。スレッド終了時は未消化の発見器タスク(fix-*/verify-*)が残っていないか確認してから閉じるのが安全。
+
+- **mojibake系テストの未完不整合(2026-10 main 0aec183時点)**: test/mojibake.test.js が chat.js の旧export名 containsReplacementChar をimportしてロード失敗(実装は detectBrokenInput に統一済み)。mojibake-detection.test.js の say()警告配線2件も未接続。fix-mojibake-detection(fix-lead-priority)で契約統一が必要。テストが2系統で別契約になった状態のマージは、実装側の1関数へ集約してから緑化する。
+- **mojibake系の契約統一は完了(fix-lead-priority・2026-10)**: 上記未完不整合は解消済み。最終契約は detectBrokenInput(統合検知)/containsReplacementChar(U+FFFD)/looksDoubleEncoded(二重エンコード)/mojibakeWarning(警告文=null許容)の4関数。say()は mojibakeWarning(text) の返値を注入文へ連結し、検知時も本文はボードへ記録(欠落させない)。テストは test/mojibake.test.js(6件)+test/mojibake-detection.test.js(7件)。
+
+# 2026-10 fix-lead-priorityラウンドの知見(ベータdistill)
+
+- **mem-*.json肥大化対策の最終契約(イシュー#20-2)**: saveMemories()がラウンド境界ごとに pruneMemories(compact.js: maxMessages/maxBytes、system保護・keepRecent保護枠・刈り取りヘッダにISO日時)を適用し、in-memoryと永続化の両方へ反映。上限は config.chat.memMaxMessages/memMaxBytes で設定可、0/null=無効化契約。keepRecent保護枠はバイト上限で削らない(0ba160cの契約明確化)。テスト: mem-lead-growth/memory-prune/mem-growthの3系統。
+- **メモリ内のボード参照は「番号単独」を避ける**: 再起動後の投稿id再採番で衝突するため、番号+投稿者ラベル+日時+スレッド付きで記録する(loop.js注入形式「from #id (ISO時刻/スレッド): text」準拠)。要約時の旧参照補正は MEM_REF_RE + ラベル/日時追加(test/board-ref-label.test.js)。
+- **NULバイト混入でgitがバイナリ扱いになる実害**: edit_file/パッチ過程でchat.jsへU+0000が1バイト混入→「Binary files differ」でテキストdiff不能・node --check/import失敗。検査は NUL(0x00)/BOMの有無チェック+import実行。発生時はマージで原本へ戻してからやり直す(2026-10 fix-chat-nul-binary)。
+- **マージで一時消失した輸出がある場合の切り分け**: 複数ブランチの並行マージでは、片側の機能(export関数・文面契約)がマージ結果から落ちることがある(2026-10: trimMemories/MEM_REF_RE輸出欠落+say()注入文の「新着入力」文面退行)。切り分けは git show <commit>:<file> の版間比較(現main==親1/親2のどちらか、機能の有無)→ 欠落側をマージで復元。テストimport失敗で即検出できる。
+- **verify-*は同一内容で重複起票されることがある**: 「元タスク完了済みの可能性」表示付きで再請求したら finish_task を再実行してよい(冪等。2回目は承認のみで通る実績)。放棄ではなく冪等完了で帳簿を閉じる。
+- **並行負荷系フレーキーの判定基準(追加観測)**: checkpointテストがフル実行で1回落ち→単体再実行で緑・フル再実行で全緑、はフレーキーと判定してよい(2026-10 fix-lead-priority・ベータ観測)。persist系に限らずnode:test全体で同型の負荷競合がありうる。
+
+# 2026-10 finish-throttleラウンドの知見(ガンマdistill)
+
+- **テストで Promise.all に渡す async クロージャは即returnに注意**: (async () => { await a.chat(...); return a.chat(...) })() のように書くと直列になり同時性が消える。awaitする値は先に変数へ束縛し Promise.all([p1, p2]) に渡す。テストで意図せず同時実行が消えたらここを疑う。
+- **自己実装モジュールの修正は既存テストでの代替が基本・モックは最小限**: globalThis.fetch差し替え+setModelSleepでネットワークとsleepを抽象済みのため実時間ゼロで検証可能。実際のsleepを待つテストは書かない(遅く・フレーキー化する)。
+- **worktreeのサブディレクトリcdは現在位置に依存する**: bash毎にカレントがリセットされないが、相対cdの失敗原因は「すでにworktree内にいる」ことが多い。pwd確認→絶対パスcdが安全。退場ワーカーの残置作業は [保持] 告示のworktreeパスへ直接見に行き、git statusがクリーンでブランチ先頭がmainに未反映なら引き継ぎ候補(内容は git show --stat で判断)。

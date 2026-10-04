@@ -21,3 +21,10 @@
 - UI実装は先行実装(main取り込み済み・テスト有り)へ統一するのが既定。usage集計ビューは renderUsageAggregate(issue-respawn-alpha実装・test/usage-aggregate-ui.test.js)を正とし、並行実装(spawn-impl-2のusageAggTable+inline loader)は差分ゼロ化して廃止した(2026-09)。
 - 発見器タスク(review-changes/distill-learnings等)の繰り返し起票は「地点前進→新条件成立」の正規挙動。ロール不一致(impl/leadにrole:reviewは請求不可)で全員が拾えないときは、claim空転を打ち切ってボードで現状共有する(2026-09 discuss-mumdrr6iで確認)。
 - タスク別モデル選択(イシュー#12)の運用決定: create_task/spawn_agent の model引数はリーダー専用・任意(基本は既定モデル、相当な理由があるときだけ代替)。タスクメタの model: 行が検証者・引き継ぎ者へ「どのモデルで動くべきか」の一次情報になる。実装詳細は constraints.md「issue-modelselect系列ラウンドの知見」へ(2026-09)。
+- ラウンドcheckpoint/resume(イシュー#4)の設計決定: スナップショット対象はモデルAPI異常(model.chat失敗=endedBy:"error")のみ。ツール失敗打ち切り・予算停止は「モデルとは無関係の意図的終了」のため対象外。保存はツール実行済み地点でcheckpointFn経由(state/checkpoint-<id>.json・tmp+rename)、復元はエラー検知時にmemories差し替え→checkpointファイル削除(削除しないと復元→失敗の無限ループ)。実装詳細は constraints.md イシュー#4節へ(2026-09)。
+- 承認待ちタスクの孤立対策: verify-*(role:review)は実装者が自己承認できない。スレッドのreviewロールが退場すると承認待ちが無人になるが、リーダー(lead)もreviewタスクは請求不可。対処は lead が reviewロールのワーカーを spawn して検証→approve まで通す(issue-checkpointスレッドで実証)。spawnは同時エージェント数上限があるため、まず既存ワーカーの再請求を促してから実施する。
+
+- 起票タスクのrole指定は必要が無い限り固定しない(省略で誰でも可)。feat-monitor-chartスレッドでリーダー/スポーン元専用のimpl起票がメンバーのボードに現れず、スポーンした追加ワーカー(impl-2/6/7/8)もrole不一致で請求できず退場が連発した。また請求が自動解放(プロセス再起動)でopenへ戻った場合、実装コミットがworktreeにあれば再請求者が即finishできる — 実装は先行コミットしておき、finishタイミングは解放後に合わせるのが有効(2026-09)。
+- イシュー#20(fix-lead-priority・2026-10)の設計決定: (1)リーダー起床注入文は「ユーザー入力を最優先、直近のワーカー投稿には触れなくてよい」へ固定(chat-input-priority.test.js) (2)mem-*.jsonはラウンド境界でpruneMemoriesにより刈り取り、上限はchat.memMaxMessages/memMaxBytes(config化・0=無効化) (3)文字化け入力は検知時のみ mojibakeWarning を注入文へ連結し、本文はボードへ必ず記録(欠落させない)。同時実装だった提案1〜3は最終的に1契約へ統一(say()の1箇所連結+4検知関数)。詳細契約は constraints.md「fix-lead-priorityラウンドの知見」へ。
+
+- プロバイダ横断スロットリング(イシュー#1)の完成判定(finish-throttleスレッド・ガンマ2026-10): 既存テストで受け入れ基準を担保済みと結論し実装追加なし。test/throttle.test.js 3件目が「2つのモデル実体が同時chat→429応答は全体で1回だけ・ゲート待ち発生」を検証済み。 接線不要の根拠: builtin.js=静止カタログ定義のみ(fetch呼び出しなし)、factory.js=openai-auth.jsを介した認証用途のみ、openai-auth.jsのfetchはtokenエンドポイント(429は本来のレート制限対象外)でアダプタchatとは別経路のため。FallbackModelは委譲先モデル内でthrottle適用済み。クローズ可と判定し、gh issue close はリーダーが実施(ワーカーは実施しない運用)。

@@ -272,7 +272,25 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       // 上限はconfig.model.contextWindow(無ければ200K。推定系の既定と同じ)
       const ctxWindow = Number(config.model?.contextWindow ?? 200000) || 200000;
       const remainTokens = Math.max(0, ctxWindow - usedTokens);
-      live.agents[id] = { ...(live.agents[id] ?? {}), ctx: { ctxChars, usedTokens, ctxWindow, remainTokens, at: Date.now() } };
+      // 生成速度(tok/s): 1呼出の完了トークン/経過秒。直近値と累積平均を保持する
+      // (旧データ・ms無しイベントでは更新せず前値を維持)
+      const prev = live.agents[id] ?? {};
+      const patch = { ctx: { ctxChars, usedTokens, ctxWindow, remainTokens, at: Date.now() } };
+      const ms = Number(p.ms ?? 0);
+      if (ms > 0) {
+        const completion = Math.max(0, Number(p.completion ?? 0));
+        const t = prev.tok ?? { msSum: 0, completionSum: 0 };
+        const msSum = t.msSum + ms;
+        const completionSum = t.completionSum + completion;
+        patch.tok = {
+          msSum,
+          completionSum,
+          lastTokPerSec: completion / (ms / 1000),
+          avgTokPerSec: msSum > 0 ? completionSum / (msSum / 1000) : 0,
+          at: Date.now(),
+        };
+      }
+      live.agents[id] = { ...prev, ...patch };
     },
     "board": (p) => {
       live.board.push(p);
@@ -1020,6 +1038,9 @@ export function buildMonitorSnapshot({ config, live, tasks, startedAt }) {
     lastTool: a.lastTool ?? "",
     tokens: a.tokens ?? 0,
     costUsd: a.costUsd ?? 0,
+    // 生成速度(tok/s): 直近1呼出と起動後累積の平均。usage.trace(ms付き)の実測値
+    tokPerSec: a.tok?.lastTokPerSec ?? null,
+    tokPerSecAvg: a.tok?.avgTokPerSec ?? null,
   }));
   const agentsWorking = agents.filter((a) => a.status === "working").length;
   const lastAt = live.board.reduce((m, p) => Math.max(m, p.at ?? 0), 0);
@@ -1074,16 +1095,29 @@ async function startMonitor({ config, live, tasks, startedAt }) {
   .ok{color:#86efac}.warn{color:#fbbf24}.err{color:#fca5a5}.dim{color:#a3a3a8}
   .board div{padding:3px 0;border-bottom:1px solid #1d1d1f;color:#a3a3a8;white-space:pre-wrap;word-break:break-word}
   .board b{color:#eaeaea;font-weight:600}
+  .chart{display:block;background:#1d1d1f;border:1px solid #2c2c31;border-radius:6px;margin:4px 0 8px}
+  .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:860px){.charts{grid-template-columns:1fr}}
 </style></head><body>
 <header><h1>agent-hive <span class="accent">monitor</span></h1><span id="phase" class="ph"></span><span class="sub" id="meta">読み込み中...</span><span class="sub">読み取り専用・3秒ごとに更新</span></header>
 <main id="body"></main>
+<script src="/monitor-chart.js"></script>
 <script>
 const esc=(s)=>String(s??"").replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const rows=(a,f)=>a.map(f).join("");
 const hue=(s)=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))%360;return h;};
+const hist=[];
+function renderCharts(d){
+  try{
+    monitorChart.pushSample(hist,d);
+    let el=document.getElementById("charts");
+    if(!el){el=document.createElement("div");el.id="charts";el.className="charts";const b=document.getElementById("body");b.parentNode.insertBefore(el,b);}
+    el.innerHTML="<div><h2>エージェント数・タスク進捗の推移</h2>"+monitorChart.renderChartSvg(hist)+"</div><div><h2>トークン消費の推移</h2>"+monitorChart.renderTokenBarsSvg(hist)+"</div>";
+  }catch(e){}
+}
 async function tick(){
   try{
     const d=await (await fetch("/api/monitor")).json();
+    renderCharts(d);
     const ph={working:["作業中","#fbbf24"],done:["完了","#86efac"],idle:["待機","#6e6e73"]}[d.phase]||["?","#6e6e73"];
     const remain=d.tasks.open.length+d.tasks.claimed.length;
     const pe=document.getElementById("phase");
@@ -1097,7 +1131,7 @@ async function tick(){
       rows(d.tasks.claimed,(t)=>"<tr><td class='warn'>作業中</td><td class='mono'>"+esc(t.id)+"</td><td class='mono'>"+esc(t.agent)+"</td><td class='dim'>"+esc(t.summary)+"</td></tr>")+
       rows(d.tasks.open,(t)=>"<tr><td class='dim'>未着手</td><td class='mono'>"+esc(t.id)+"</td><td></td><td class='dim'>"+esc(t.summary)+"</td></tr>")+"</table>"+
       "<h2>エージェント</h2><table><tr><th>名前</th><th>状態</th><th>turn</th><th>直近ツール</th><th>消費</th><th>スレッド</th></tr>"+
-      (rows(d.agents,(a)=>{const st={idle:["待機","#a3a3a8"],working:["作業中","#fbbf24"],done:["完了","#86efac"],error:["エラー","#fca5a5"],"budget-stop":["停止","#fca5a5"]}[a.status]||[esc(a.status),"#a3a3a8"];return "<tr><td style='color:hsl("+hue(a.id)+" 45% 72%)'>"+esc(a.displayName)+"</td><td style='color:"+st[1]+"'>"+st[0]+"</td><td class='mono'>"+a.turn+"</td><td class='mono'>"+esc(a.lastTool)+"</td><td class='mono'>"+a.tokens.toLocaleString()+"tok</td><td class='mono'>"+esc(a.thread)+"</td></tr>";})||"<tr><td colspan='6' class='dim'>稼働中のエージェントはいません</td></tr>")+"</table>"+
+      (rows(d.agents,(a)=>{const st={idle:["待機","#a3a3a8"],working:["作業中","#fbbf24"],done:["完了","#86efac"],error:["エラー","#fca5a5"],"budget-stop":["停止","#fca5a5"]}[a.status]||[esc(a.status),"#a3a3a8"];return "<tr><td style='color:hsl("+hue(a.id)+" 45% 72%)'>"+esc(a.displayName)+"</td><td style='color:"+st[1]+"'>"+st[0]+"</td><td class='mono'>"+a.turn+"</td><td class='mono'>"+esc(a.lastTool)+"</td><td class='mono'>"+a.tokens.toLocaleString()+"tok"+(a.tokPerSecAvg!=null?" / "+a.tokPerSecAvg.toFixed(1)+"tok/s":"")+"</td><td class='mono'>"+esc(a.thread)+"</td></tr>";})||"<tr><td colspan='6' class='dim'>稼働中のエージェントはいません</td></tr>")+"</table>"+
       "<h2>通知(承認待ち/マージ/長時間タスク)</h2><div class='board'>"+(rows(d.pendingRequests??[],(r)=>"<div class='warn'><b>🔐 承認待ち #"+esc(r.id)+"</b> <span class='mono'>"+esc(r.command)+"</span></div>")||"")+((rows(d.notifications??[],(n)=>"<div>"+(n.kind==="permission.request"?"<b class='warn'>🔐 "+esc(n.title)+"</b>":(n.kind==="merge.completed"?"<b class='ok'>🔀 "+esc(n.title)+"</b>":"<b>⏱ "+esc(n.title)+"</b>"))+" <span>"+esc(n.body)+"</span> <span class='dim mono'>"+esc(String(n.at).replace("T"," ").slice(0,19))+"</span></div>"))||"<div class='dim'>まだありません</div>")+"</div>"+
       "<h2>直近のマージ</h2><div class='board'>"+(rows(d.merges,(m)=>"<div><b class='mono'>"+esc(m.taskId)+"</b> <span class='accent'>"+esc(m.summary)+"</span> <span class='dim'>by "+esc(m.agent)+"</span></div>")||"<div class='dim'>まだありません</div>")+"</div>"+
       "<h2>ボードの新着(全スレッド・直近30件)</h2><div class='board'>"+rows(d.recent.slice().reverse(),(p)=>"<div><b style='color:hsl("+hue(p.from)+" 45% 72%)'>"+esc(p.from)+"</b> <span class='mono dim'>@"+esc(p.thread)+"</span> "+esc(p.text)+"</div>")+"</div>";
@@ -1109,6 +1143,10 @@ tick();setInterval(tick,3000);
     try {
       const url = new URL(req.url ?? "/", "http://monitor");
       if (url.pathname === "/api/monitor") return json(res, buildMonitorSnapshot({ config, live, tasks, startedAt }));
+      if (url.pathname === "/monitor-chart.js") {
+        res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+        return res.end(readFileSync(join(PUBLIC, "monitor-chart.js")));
+      }
       if (req.method === "GET") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         return res.end(html);
@@ -1272,11 +1310,13 @@ function persistUsage(workspace, entry) {
 
 // /api/usage-trace: state/usage-trace/usage-trace.jsonl(loop.jsがchat()ごとに追記)を
 // 解析し、ワーカー別・ターン別のトークン消費推移を返す(GitHubイシュー#15)。
+// 呼出時間(ms)が載っている行(旧形式は載っていない)から生成速度tok/sも集計する:
+// seriesに平均/直近、totalに全体平均。msが無い行はtok/sの分母に入れず無視する。
 // traceFileはテスト差し替え用(省略時は通常の場所)。壊れた行は監査APIと同じく無視する。
 /**
  * @param {string} workspace
- * @param {{agent?: string|null, fromTurn?: string|number|null, toTurn?: string|number|null, file?: string|null}} [opts]
- * @returns {{series: Array<{agent: string, points: Array<{ts: string, turn: number, prompt: number, completion: number, reasoning: number, totalTokens: number}>, totalTokens: number}>, total: {turns: number, totalTokens: number, byAgent: Record<string, number>}, lastTs: string|null}}
+ * @param {{agent?: string|null, fromTurn?: number|string|null, toTurn?: number|string|null, file?: string|null}} [opts] fromTurn/toTurnは文字列(URLクエリ)での指定も受け付ける(内部でNumber化)
+ * @returns {{series: Array<{agent: string, points: Array<{ts: string, turn: number, prompt: number, completion: number, reasoning: number, totalTokens: number, tokPerSec: number|null}>, totalTokens: number, tokPerSec: number|null, lastTokPerSec: number|null}>, total: {turns: number, totalTokens: number, byAgent: Record<string, number>, tokPerSec: number|null}, lastTs: string|null}}
  */
 export function analyzeUsageTrace(workspace, opts = {}) {
   const file = opts.file ?? join(workspace, "state", "usage-trace", "usage-trace.jsonl");
@@ -1304,30 +1344,46 @@ export function analyzeUsageTrace(workspace, opts = {}) {
         prompt: Number(r.prompt) || 0,
         completion: Number(r.completion) || 0,
         reasoning: Number(r.reasoning) || 0,
+        ms: Number(r.ms) || 0,
       });
     }
   } catch { /* ファイル未作成など。空応答で返す */ }
-  // ワーカー別に束ねる(pointsはターン順)。同ターンの複数行(リトライ等)はそのまま両方描く
+  // ワーカー別に束ねる(pointsはターン順)。同ターンの複数行(リトライ等)はそのまま両方描く。
+  // tok/s集計用にms/完了トークンの累積を並行して取り、最後に公開形へ写す(JSDoc契約は返り値の形)
   const byAgent = new Map();
   for (const r of rows) {
     let s = byAgent.get(r.agent);
-    if (!s) { s = { agent: r.agent, points: [], totalTokens: 0 }; byAgent.set(r.agent, s); }
+    if (!s) { s = { agent: r.agent, points: [], totalTokens: 0, msSum: 0, completionSum: 0, lastTokPerSec: null }; byAgent.set(r.agent, s); }
     const totalTokens = r.prompt + r.completion + r.reasoning;
-    s.points.push({ ts: r.ts, turn: r.turn, prompt: r.prompt, completion: r.completion, reasoning: r.reasoning, totalTokens });
+    s.points.push({
+      ts: r.ts, turn: r.turn, prompt: r.prompt, completion: r.completion, reasoning: r.reasoning, totalTokens,
+      tokPerSec: r.ms > 0 && r.completion >= 0 ? r.completion / (r.ms / 1000) : null,
+    });
     s.totalTokens += totalTokens;
+    if (r.ms > 0) {
+      s.msSum += r.ms;
+      s.completionSum += r.completion;
+      s.lastTokPerSec = r.completion / (r.ms / 1000);
+    }
   }
-  const series = [...byAgent.values()];
-  for (const s of series) s.points.sort((a, b) => a.turn - b.turn || String(a.ts).localeCompare(String(b.ts)));
+  const series = [...byAgent.values()].map((s) => ({
+    agent: s.agent,
+    points: s.points.sort((a, b) => a.turn - b.turn || String(a.ts).localeCompare(String(b.ts))),
+    totalTokens: s.totalTokens,
+    tokPerSec: s.msSum > 0 ? s.completionSum / (s.msSum / 1000) : null,
+    lastTokPerSec: s.lastTokPerSec,
+  }));
   series.sort((a, b) => b.totalTokens - a.totalTokens); // 消費の大きい順
   const byAgentTotal = {};
-  let turns = 0, totalTokens = 0, lastTs = null;
+  let turns = 0, totalTokens = 0, msSum = 0, completionSum = 0, lastTs = null;
   for (const r of rows) {
     turns += 1;
     totalTokens += r.prompt + r.completion + r.reasoning;
     byAgentTotal[r.agent] = (byAgentTotal[r.agent] ?? 0) + r.prompt + r.completion + r.reasoning;
+    if (r.ms > 0) { msSum += r.ms; completionSum += r.completion; }
     if (!lastTs || r.ts > lastTs) lastTs = r.ts;
   }
-  return { series, total: { turns, totalTokens, byAgent: byAgentTotal }, lastTs };
+  return { series, total: { turns, totalTokens, byAgent: byAgentTotal, tokPerSec: msSum > 0 ? completionSum / (msSum / 1000) : null }, lastTs };
 }
 
 // /api/audit: state/audit.jsonl(+1世代前 audit-1.jsonl)の末尾limit件を新着順で返す。

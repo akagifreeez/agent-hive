@@ -48,10 +48,46 @@ test("loop.jsはusage-trace記録時にusage.traceイベントを発行する", 
   assert.match(src, /bus\.emit\("usage\.trace"/);
   // ctxChars(コンテキスト概算文字数)をイベントへ載せる
   assert.match(src, /ctxChars/);
+  // 生成速度(tok/s)計測: 呼出経過時間msをトレースへ残し、イベントにも載せる
+  assert.match(src, /chatStartedAt/);
+  assert.match(src, /ms: chatMs/);
+  // トレース行には計算済みtokPerSecも書く(ログ単体で生成速度が読めるように)
+  assert.match(src, /tokPerSec: chatMs > 0/);
+});
+
+test("server: usage.trace(ms付き)からagent.tokに直近/平均tok/sが入る", async () => {
+  const { bus, ui, getState, ws } = await setup();
+  try {
+    // 1呼出目: 200tok/1000ms=200tok/s
+    bus.emit("usage.trace", { agent: "tps-a", turn: 1, ctxChars: 3000, ms: 1000, completion: 200 });
+    let st = await getState();
+    let tok = st.live.agents["tps-a"].tok;
+    assert.ok(Math.abs(tok.lastTokPerSec - 200) < 1e-9);
+    assert.ok(Math.abs(tok.avgTokPerSec - 200) < 1e-9);
+    // 2呼出目: 300tok/2000ms → 直近150tok/s、平均(200+300)/(1+2秒)=166.67tok/s
+    bus.emit("usage.trace", { agent: "tps-a", turn: 2, ctxChars: 6000, ms: 2000, completion: 300 });
+    st = await getState();
+    tok = st.live.agents["tps-a"].tok;
+    assert.ok(Math.abs(tok.lastTokPerSec - 150) < 1e-9);
+    assert.ok(Math.abs(tok.avgTokPerSec - 500 / 3) < 1e-9);
+  } finally { ui.close(); rmTree(ws); }
+});
+
+test("server: ms無しイベントではtok/sを更新しない(旧形式・直前値を維持)", async () => {
+  const { bus, ui, getState, ws } = await setup();
+  try {
+    bus.emit("usage.trace", { agent: "tps-b", turn: 1, ctxChars: 3000, ms: 1000, completion: 200 });
+    // 旧形式(ms無し。ctxだけ更新)ではtok側は触らない
+    bus.emit("usage.trace", { agent: "tps-b", turn: 2, ctxChars: 6000 });
+    const st = await getState();
+    const a = st.live.agents["tps-b"];
+    assert.ok(Math.abs(a.tok.lastTokPerSec - 200) < 1e-9);
+    assert.equal(a.ctx.usedTokens, 2000); // ctxは更新されている
+  } finally { ui.close(); rmTree(ws); }
 });
 
 test("server: usage.traceを受けると/api/stateのagent.ctxに使用/上限/残りが入る", async () => {
-  const { bus, getState, ws } = await setup();
+  const { bus, ui, getState, ws } = await setup();
   try {
     // 未登録エージェントでも usage.trace で出現する(表示が消えない)
     bus.emit("usage.trace", { agent: "worker-a", turn: 1, ctxChars: 3000 });
@@ -63,7 +99,7 @@ test("server: usage.traceを受けると/api/stateのagent.ctxに使用/上限/�
     assert.equal(ctx.usedTokens, 1000);
     assert.equal(ctx.ctxWindow, 200000);
     assert.equal(ctx.remainTokens, 199000);
-  } finally { rmTree(ws); }
+  } finally { ui.close(); rmTree(ws); }
 });
 
 test("server: 換算は切り上げ・ctxWindow未設定時は200Kフォールバック・ゼロ除算安全", async () => {
@@ -85,11 +121,11 @@ test("server: 換算は切り上げ・ctxWindow未設定時は200Kフォール�
     assert.equal(ctx.usedTokens, Math.ceil(7 / 3)); // 3
     assert.equal(ctx.ctxWindow, 200000);
     assert.equal(ctx.remainTokens, 200000 - 3);
-  } finally { rmTree(ws); }
+  } finally { ui.close(); rmTree(ws); }
 });
 
 test("server: 上限超過時は残り0・usage.trace更新で上書きされる(リアルタイム)", async () => {
-  const { bus, getState, ws } = await setup();
+  const { bus, ui, getState, ws } = await setup();
   try {
     bus.emit("usage.trace", { agent: "w3", turn: 1, ctxChars: 700000 });
     let st = await getState();
@@ -98,7 +134,7 @@ test("server: 上限超過時は残り0・usage.trace更新で上書きされる
     st = await getState();
     assert.equal(st.live.agents["w3"].ctx.usedTokens, 3000);
     assert.equal(st.live.agents["w3"].ctx.remainTokens, 197000);
-  } finally { rmTree(ws); }
+  } finally { ui.close(); rmTree(ws); }
 });
 
 test("UI: 詳細パネルにコンテキスト使用量(使用/上限/残り+バー)の描画がある", () => {
@@ -111,4 +147,13 @@ test("UI: 詳細パネルにコンテキスト使用量(使用/上限/残り+バ
   assert.match(html, /remainTokens/);
   // バー描画(fill幅を占有率で設定)
   assert.match(html, /ctx-fill/);
+  // バーおよび警告色(.hot)のCSSが定義済み(視覚的に機能するバーであること)
+  assert.match(html, /\.ctxbar\s*\{[^}]*height\s*:/);
+  assert.match(html, /\.ctx-fill\s*\{[^}]*width\s*:/);
+  assert.match(html, /\.ctx-fill\.hot/);
+  // 生成速度(トークン/秒)の表示: 直近/平均を実測値として出す
+  assert.match(html, /生成速度/);
+  assert.match(html, /fmtTps/);
+  assert.match(html, /lastTokPerSec/);
+  assert.match(html, /avgTokPerSec/);
 });
