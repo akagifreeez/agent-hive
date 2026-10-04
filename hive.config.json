@@ -64,10 +64,10 @@
       },
       {
         "id": "beta",
-        "displayName": "ベータ(検証・ノーマルGLM)",
+        "displayName": "ベータ(検証・Flash)",
         "role": "review",
         "persona": "agents/beta.md",
-        "model": "zai/glm-5.3"
+        "model": "zai/glm-5.3-flash"
       },
       {
         "id": "gamma",
