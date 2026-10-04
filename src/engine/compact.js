@@ -115,3 +115,48 @@ export function applyCompaction(messages, summaryText, keepRecent = 4) {
   ];
   return compacted;
 }
+
+// ===== 会話メモリ(mem-<id>.json)の刈り取り(イシュー#20 提案2) =====
+// ラウンド間で永続化されるmemories配列が無制限に育つとstate/mem-*.jsonが肥大し、
+// 復元・保存コストも増える。LLMを呼ばない軽量ポリシーで刈り取りする:
+//  - 先頭のsystemメッセージは常に保護(人格・ルールの源なので削らない)
+//  - 直近keepRecent件は保護(作業の続きが分かる最小限)
+//  - それより古い分は「要点ヘッダ1件」へ置換する(全削除ではなく輪郭を残す)
+//    置換ヘッダには元メッセージ数・役割内訳・日時を入れ、記憶が飛んだことが
+//    モデル自身から見て分かるようにする(黙って欠落させない)。
+// 戻り値: {messages(新配列), changed, removed}
+export const MEM_KEEP_RECENT = 12;
+export const MEM_HEADER = "[記憶の刈り取り] この会話の古い部分は省略されています。";
+
+/**
+ * @param {Array<{role: string, content: any}>} messages
+ * @param {{keepRecent?: number, maxMessages?: number, maxBytes?: number}} opts
+ *   maxMessages: 総件数の上限(この件数を超えたら刈り取り)
+ *   maxBytes: 本文の合計バイト数上限(JSON.stringify長で近似。超えたら刈り取り)
+ */
+export function pruneMemories(messages, { keepRecent = MEM_KEEP_RECENT, maxMessages = 200, maxBytes = 512 * 1024 } = {}) {
+  const arr = Array.isArray(messages) ? messages : [];
+  // system(先頭)は常に残す。保護枠は system + keepRecent
+  const head = arr.length && arr[0].role === "system" ? [arr[0]] : [];
+  const body = head.length ? arr.slice(1) : arr;
+  const bytes = (m) => Buffer.byteLength(typeof m.content === "string" ? m.content : JSON.stringify(m.content), "utf8");
+  const total = arr.reduce((s, m) => s + bytes(m), 0);
+  // 上限内なら何もしない(新配列を返すが非破壊)
+  if (arr.length <= maxMessages && total <= maxBytes) {
+    return { messages: [...arr], changed: false, removed: 0 };
+  }
+  // 保護枠がmaxMessagesを食い潰す場合は縮める(system+ヘッダ+最低2件の tail を残す)
+  const keep = Math.max(2, Math.min(keepRecent, maxMessages - head.length - 1));
+  const tail = body.slice(-keep);
+  const dropped = body.slice(0, Math.max(0, body.length - keep));
+  if (!dropped.length) {
+    return { messages: [...arr], changed: false, removed: 0 };
+  }
+  const roles = dropped.reduce((m, x) => ((m[x.role] = (m[x.role] ?? 0) + 1), m), {});
+  const roleText = Object.entries(roles).map(([k, v]) => `${k}:${v}`).join("/");
+  const header = {
+    role: "user",
+    content: `${MEM_HEADER} ${dropped.length}件(${roleText})を省略。${new Date().toISOString()}`,
+  };
+  return { messages: [...head, header, ...tail], changed: true, removed: dropped.length };
+}
