@@ -491,7 +491,22 @@ function hfetch(url, opts = {}) {
   if ((opts.method ?? "GET") === "POST") {
     opts.headers = { ...(opts.headers ?? {}), "x-hive-token": window.HIVE_TOKEN ?? "" };
   }
-  return fetch(url, opts);
+  return fetch(url, opts).then(async (r) => {
+    // トークンはサーバー起動ごとに再生成されるため、開きっぱなしのタブは再起動後に全POSTが403になる。
+    // 同一オリジンの最新ページ(/)から実トークンを引き取り、1回だけ再試行する(続く403は従来どおり呼び出し側へ)
+    if (r.status !== 403 || (opts.method ?? "GET") !== "POST") return r;
+    try {
+      const page = await (await fetch("/", { cache: "no-store" })).text();
+      const m = /window\.HIVE_TOKEN = ("(?:[^"\\]|\\.)*")/.exec(page);
+      const fresh = m ? JSON.parse(m[1]) : null;
+      if (!fresh || fresh === window.HIVE_TOKEN) return r;
+      window.HIVE_TOKEN = fresh;
+      opts.headers = { ...(opts.headers ?? {}), "x-hive-token": fresh };
+      return fetch(url, opts);
+    } catch {
+      return r;
+    }
+  });
 }
 let selectedThread = "__main__";
 // スラッシュコマンドの定義(/helpはこの一覧から自動生成)
