@@ -23,7 +23,7 @@ test("defaultOpenCommand: プラットフォーム別コマンドを返す", () 
 
 test("openInBrowser: runnerを差し替えるとURLが渡る(実ブラウザを開かない)", async () => {
   const seen = [];
-  const ok = await openInBrowser("http://example.test/", (url) => { seen.push(url); return { cmd: "true", args: [] }; });
+  const ok = await openInBrowser("http://example.test/", (url) => { seen.push(url); return { cmd: process.execPath, args: ["-e", ""] }; });
   assert.equal(ok, true);
   assert.deepEqual(seen, ["http://example.test/"]);
 });
@@ -31,6 +31,12 @@ test("openInBrowser: runnerを差し替えるとURLが渡る(実ブラウザを�
 test("openInBrowser: 失敗時はfalse(UIは壊れない)", async () => {
   const ok = await openInBrowser("http://example.test/", () => { throw new Error("no browser"); });
   assert.equal(ok, false);
+});
+
+test("openInBrowser: コマンドが存在しなくても非同期エラーを処理してfalseを返す", async () => {
+  assert.equal(await openInBrowser("http://example.test/", () => ({
+    cmd: "hive-browser-command-that-does-not-exist", args: [],
+  })), false);
 });
 
 test("devserver起動時にブラウザオープンが呼ばれる(open:falseで抑止できる)", async () => {

@@ -292,7 +292,7 @@ export class ChatHost {
           } catch {}
         }
           // メインが自ら直接作業した場合の受け皿: ラウンド終了時にmainへ自動マージ
-          if (this.mainWorkspace) {
+          if (this.mainWorkspace && this.worktreePaths?.[main.id]) {
             const m = await mergeAgentWork({
               mainWorkspace: this.mainWorkspace,
               worktreePath: this.worktreePaths?.[main.id],
