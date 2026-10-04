@@ -169,7 +169,7 @@ export class ChatHost {
   say(text) {
     this.board.post("you", text);
     this.mains.forEach((m, i) => {
-      this.wake(m, "[チャット] ユーザーからの新着入力があります。直前のボード新着を確認して応答してください。", i * this.staggerMs);
+      this.wake(m, "[チャット] ユーザー入力が最優先の応答対象です。まずこの入力に答えてください。直近のワーカー投稿は触れなくてよい(必要なら後でまとめて)。", i * this.staggerMs);
     });
   }
 
@@ -230,6 +230,7 @@ export class ChatHost {
       return;
     }
     st.running = true;
+    st.lastKickoff = kickoffText; // 直近ラウンドの注入文(観測・テスト用)
     this.autoRounds.set(main.id, 0); // ユーザー/ボード起点のラウンドでは連続回数をリセット
     const run = async () => {
       if (delayMs) await new Promise((r) => setTimeout(r, delayMs));

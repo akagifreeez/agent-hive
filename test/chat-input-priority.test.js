@@ -54,13 +54,13 @@ test("並発シナリオ: ユーザー入力sayの直後にワーカー投稿が
   // 実際の発生順: say(ユーザー質問)→ 直後にワーカー投稿(イシュー#20の指摘)
   host.say("この数字の意味を教えて"); // → sayのwakeが即座に(遅延0)ラウンドを開始する
   assert.ok(await waitUntil(() => chats >= 1), "say直後のラウンド(stagger 0)が最初に走る");
-  const firstKickoff = host.roundState.get("cp-lead")?.kickoff ?? "";
+  const firstKickoff = host.roundState.get("cp-lead")?.lastKickoff ?? "";
   assert.ok(firstKickoff.includes("[チャット]"), "ユーザー起点の注入文でラウンドが開始している");
   assert.ok(firstKickoff.includes("最優先"), "注入文がユーザー入力最優先を指示している");
   // ユーザー起点ラウンド開始後にワーカー投稿→@呼び出しwakeはpendingへ積まれる(既存のroundState経路)
   bus.emit("board", { from: "cp-beta", thread: "cp", text: "先にうちのレビュー指摘を見てほしい @リーダー" });
   assert.ok(await waitUntil(() => chats >= 2), "ボード投稿起点の2ラウンド目が走る");
-  const secondKickoff = host.roundState.get("cp-lead")?.kickoff ?? "";
+  const secondKickoff = host.roundState.get("cp-lead")?.lastKickoff ?? "";
   assert.ok(secondKickoff.includes("[ボード]"), "2ラウンド目はボード起点の注入文");
   rmTree(ws);
 });
