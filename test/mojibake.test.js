@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bus } from "../src/engine/board.js";
+import { Board } from "../src/engine/board.js";
 import { TaskBlackboard } from "../src/engine/tasks.js";
 import { ChatHost } from "../src/engine/chat.js";
 import {
