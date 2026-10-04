@@ -171,7 +171,10 @@ export function pruneMemories(messages, { keepRecent = MEM_KEEP_RECENT, maxMessa
     while (keep > 1 && (body.length - keep < 1 || keptBytesFor(keep) > maxBytes)) keep--;
   }
   const tail = body.slice(-keep);
-  const dropped = body.slice(0, Math.max(0, body.length - keep));
+  // 警告メッセージは本文ではなくメタ情報: 刈り取り対象から除外する
+  // (除外でdroppedが空になった場合は警告挿入側のhasRecentWarnで冪等化される)
+  const dropped = body.slice(0, Math.max(0, body.length - keep))
+    .filter((m) => !(typeof m.content === "string" && m.content.startsWith(MEM_WARN_HEADER)));
   if (!dropped.length) {
     // 保護対象だけで上限を超える(刈れるbodyが無い)ケース: 黙殺せず明示的警告を1件だけ挿入する。
     // 直近(末尾側)に既に警告がある場合は再挿入しない(毎ラウンド増殖しない)。
