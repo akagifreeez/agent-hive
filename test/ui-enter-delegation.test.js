@@ -14,6 +14,11 @@ test("UI: saytextのEnterはdocument委譲で受ける(target判定+sendSay)", (
   assert.match(html, /document\.addEventListener\("keydown", \(e\) => \{[^}]*?t\.id === "saytext"[^}]*?sendSay\(\)/s);
 });
 
+test("UI: EnterでpreventDefaultする(Firefoxの既定活性化がダイアログのキャンセルを即クリックする対策)", () => {
+  // 委譲ハンドラ内でpreventDefaultがsendSayの前にあること
+  assert.match(html, /t\.id === "saytext" && e\.key === "Enter" && !e\.shiftKey && !e\.isComposing\) \{\s*\n\s*e\.preventDefault\(\);\s*\n\s*sendSay\(\);/);
+});
+
 test("UI: IME確定のEnter(isComposing)では送信しない", () => {
   assert.match(html, /!e\.isComposing/);
 });
