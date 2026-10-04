@@ -1903,8 +1903,15 @@ function renderAll() {
   // usage予算アラート: /api/stateのlive.budget(exceeded/costUsd)をステータスライン(左下)へ出す
   const b = lastState.live.budget;
   const budgetTxt = b?.exceeded ? `予算超過: 累積${Number(b.costUsd ?? 0).toFixed(2)}` : null;
-  const bits = [mdl, effTxt, permTxt, budgetTxt, lastState.live.scenario ? `[${lastState.live.scenario.phase}]` : null].filter(Boolean);
+  // 作業中エージェント数を常時表示+タブタイトルへ(終わった/動いてるが一目で分かるように)
+  const agentsLive = lastState.live.agents ?? {};
+  let workingN = 0;
+  for (const k in agentsLive) if (agentsLive[k]?.status === "working") workingN++;
+  const workTxt = workingN ? `作業中${workingN}` : "アイドル";
+  const bits = [workTxt, mdl, effTxt, permTxt, budgetTxt, lastState.live.scenario ? `[${lastState.live.scenario.phase}]` : null].filter(Boolean);
   $("nav-foot").textContent = bits.join(" · ");
+  const pageTitle = (workingN ? `▶${workingN} ` : "✓ ") + "agent-hive";
+  if (document.title !== pageTitle) document.title = pageTitle;
 }
 
 
