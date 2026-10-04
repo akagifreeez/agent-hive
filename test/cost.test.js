@@ -101,6 +101,27 @@ test("UsageLedger: エージェント別と合計を集計", () => {
   assert.ok(Math.abs(t.costUsd - 0.031) < 1e-9);
 });
 
+test("UsageLedger: ms付きaddで平均tok/sを累積する(ms無し呼出は分母外)", () => {
+  const l = new UsageLedger();
+  // 200tok/1000ms + 300tok/2000ms → 平均 500tok/3秒
+  l.add("alpha", { promptTokens: 100, completionTokens: 200, reasoningTokens: 0, costUsd: 0.01 }, { ms: 1000 });
+  l.add("alpha", { promptTokens: 100, completionTokens: 300, reasoningTokens: 0, costUsd: 0.01 }, { ms: 2000 });
+  const e = l.agent("alpha");
+  assert.equal(e.msSum, 3000);
+  assert.ok(Math.abs(e.avgTokPerSec - 500 / 3) < 1e-9);
+  // ms無しの呼出(旧形式・計測外)はトークンには乗るが速度集計の分母に入らない
+  l.add("alpha", { promptTokens: 10, completionTokens: 999, reasoningTokens: 0, costUsd: 0 });
+  assert.equal(e.calls, 3);
+  assert.equal(e.completionTokens, 1499);
+  assert.ok(Math.abs(e.avgTokPerSec - 500 / 3) < 1e-9);
+  const t = l.totals();
+  assert.equal(t.msSum, 3000);
+  assert.ok(Math.abs(t.avgTokPerSec - 500 / 3) < 1e-9);
+  // ms無しのみのエージェントはnull(UIでは「—」表示になる)
+  l.add("beta", { promptTokens: 10, completionTokens: 5, reasoningTokens: 0, costUsd: 0 });
+  assert.equal(l.agent("beta").avgTokPerSec, null);
+});
+
 // ループ統合: 連続3回の請求失敗でエンジンがidle終了する
 test("idle強制終了: claim失敗×3でendedBy=idle", async () => {
   const ws = mktmp();

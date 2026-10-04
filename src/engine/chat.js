@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { runAgentLoop, buildSystemPrompt } from "./loop.js";
 import { createTools } from "./tools.js";
 import { mergeAgentWork } from "./worktree.js";
+import { pruneMemories } from "./compact.js";
 
 export class ChatHost {
   constructor({
@@ -20,6 +21,7 @@ export class ChatHost {
     maxTurnsPerRound = 12, contextWindow = 200000, thresholdPercent,
     shellKind = "bash", staggerMs = 3000,
     memoryFn = null, // () => 永続記憶の注入文脈。ラウンド開始ごとに読み直す(distill反映のため)
+    config = null, // HiveConfig(会話メモリの上限設定chat.memMax*を読む)
     project = null, // スレッドスコープ(自動継続の「まだ仕事があるか」判定に使う)
     autoContinueRounds = 3, // ターン上限でも仕事が残っていれば自動で次ラウンドへ(0=従来どおり停止)
     hooks = null, // Hooksインスタンス(roundEndフック)
@@ -39,11 +41,16 @@ export class ChatHost {
     this.shellKind = shellKind;
     this.staggerMs = staggerMs;
     this.memoryFn = memoryFn;
+    this.config = config;
     this.project = project;
     this.autoContinueRounds = autoContinueRounds;
     this.hooks = hooks;
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
     this.paused = false; // 一時停止中は新しい起床を潰す(実行中ラウンドはターン境界で自然終了)
+    this.memPrune = { // 会話メモリの刈り取り設定(イシュー#20)。0/nullで無効化可
+      maxMessages: this.config?.chat?.memMaxMessages ?? 200,
+      maxBytes: this.config?.chat?.memMaxBytes ?? 512 * 1024,
+    };
     this.memories = new Map(); // id => messages配列(ラウンド間で保持)
     this.seen = new Map(); // id => ボード既読位置(ラウンド間で保持。配信はボード注入の1経路のみ)
     this.roundState = new Map(); // id => {running, pending[]}
@@ -123,6 +130,13 @@ export class ChatHost {
     if (!p || !this.memories.has(main.id)) return;
     try {
       mkdirSync(join(this.mainWorkspace, "state"), { recursive: true });
+      // ラウンドをまたぐ肥大止め(イシュー#20): 上限超過時は古い分を刈り取り、
+      // in-memoryと永続化の両方へ反映する(復元時に再肥大しない)
+      const pruned = pruneMemories(this.memories.get(main.id), this.memPrune);
+      if (pruned.changed) {
+        this.memories.set(main.id, pruned.messages);
+        this.bus.emit("memory.pruned", { agent: main.id, removed: pruned.removed, messages: pruned.messages.length });
+      }
       // 一時ファイル経由の原子書込(クラッシュ時の半端JSONで復元が壊れるのを防ぐ)
       const tmp = `${p}.tmp`;
       writeFileSync(tmp, JSON.stringify({ messages: this.memories.get(main.id) }));
@@ -167,9 +181,14 @@ export class ChatHost {
   // ユーザー入力: 全メインを時間差で起こす(同時だと議論にならないため)。
   // 本文はボード経由で1回だけ届く(seen管理)。キックオフは中身を持たない汎用文。
   say(text) {
+    // 破損入力(U+FFFD等)の検知(イシュー#20 提案3): 化けた入力をそのまま渡すと
+    // リーダーが断片から主題を推測して答えてしまうため、注入文へ明示的に警告を載せる。
+    const broken = detectBrokenInput(text)
+      ? "\n[警告] この入力は文字化け(エンコード破損)していて読めません。断片からの推測で応答せず、ユーザーに文面の再送を求めてください。"
+      : "";
     this.board.post("you", text);
     this.mains.forEach((m, i) => {
-      this.wake(m, "[チャット] ユーザーからの新着入力があります。直前のボード新着を確認して応答してください。", i * this.staggerMs);
+      this.wake(m, "[チャット] ユーザー入力が最優先の応答対象です。まずこの入力に答えてください。直近のワーカー投稿は触れなくてよい(必要なら後でまとめて)。" + broken, i * this.staggerMs);
     });
   }
 
@@ -230,6 +249,7 @@ export class ChatHost {
       return;
     }
     st.running = true;
+    st.lastKickoff = kickoffText; // 直近ラウンドの注入文(観測・テスト用)
     this.autoRounds.set(main.id, 0); // ユーザー/ボード起点のラウンドでは連続回数をリセット
     const run = async () => {
       if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
@@ -352,4 +372,23 @@ export class ChatHost {
     } catch {}
     return false;
   }
+}
+
+// 破損入力検知(イシュー#20 提案3): エンコード破損でテキストがU+FFFD(置換文字)へ化けた入力を
+// 検知する。化けた入力をそのまま渡すとリーダーが断片から主題を推測してしまうため、
+// say()注入時に警告文を付けて「再送を求める」運用へ切り替える。
+// 加えて UTF-8→cp932 二重エンコードの典型兆候(日本語UTF-8先頭バイト由来のラテン文字塊)も検知。
+export function detectBrokenInput(text) {
+  if (!text || typeof text !== "string") return false;
+  if (text.includes("�")) return true; // 置換文字=確実な破損
+  // 二重エンコード兆候: UTF-8のマルチバイト先頭バイトが cp932 再解読で Ã/ã/å/æ/ç 系に化ける。
+  // その文字が高密度(全体の75%以上)で出現する=日本語文ではなく化けの塊とみなす。
+  // 対象は Latin-1補助(U+00C0-U+00FF)+ Latin-1領域の記号(U+00A0-U+00BF)。
+  // UTF-8バイト列をcp932/Latin-1で再解読するとこの帯に落ちるのが典型(テ→Ã¦Â¥Â¹等)。
+  // 通常の日本語・英語・絵文字テキストにはほぼ出現しない。
+  const m = text.match(/[ -ÿ]/g);
+  if (!m || m.length < 3) return false; // 散発1-2個は通常の欧文
+  // 密度: Ã/ã等の化け文字が文字種の過半を占める(日本語本文が混じると下がる)。
+  // ただし「化け塊+少量の記号」も捉えたいので、出現数が6個以上なら密度に関わらず検知。
+  return m.length >= 6 || m.length / text.length >= 0.5;
 }
