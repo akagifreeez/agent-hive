@@ -263,7 +263,7 @@ export class ChatHost {
   say(text) {
     this.board.post("you", text);
     this.mains.forEach((m, i) => {
-      let kick = "[チャット] ユーザー入力です。ユーザー入力を最優先で応答してください。直近のワーカー投稿には触れなくてよい(後でまとめて確認する)。";
+      let kick = "[チャット] ユーザーからの新着入力があります。ユーザー入力を最優先で応答してください。直近のワーカー投稿には触れなくてよい(後でまとめて確認する)。";
       const warn = mojibakeWarning(text);
       if (warn) kick = kick + " " + warn;
       this.wake(m, kick, i * this.staggerMs);
