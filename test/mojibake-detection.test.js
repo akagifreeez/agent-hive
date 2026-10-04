@@ -25,6 +25,7 @@ function mkHost(ws) {
   const agent = { id: "cp-lead", displayName: "リーダー", role: "lead", personaText: "# L" };
   const host = new ChatHost({
     mains: [agent], project: "cp", autoContinueRounds: 0, staggerMs: 0,
+    board, tasks, bus,
     modelFactory: () => ({ maxTokens: 10, async chat() { return { content: "ok", toolCalls: [], raw: { content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } }; } }),
     toolsFactory: () => createTools({ agent, workspace: ws, board, tasks, bus }),
     autoStart: false,
