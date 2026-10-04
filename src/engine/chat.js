@@ -378,6 +378,22 @@ export class ChatHost {
 // 検知する。化けた入力をそのまま渡すとリーダーが断片から主題を推測してしまうため、
 // say()注入時に警告文を付けて「再送を求める」運用へ切り替える。
 // 加えて UTF-8→cp932 二重エンコードの典型兆候(日本語UTF-8先頭バイト由来のラテン文字塊)も検知。
+// U+FFFD(置換文字)を含むか。エンコード壊れの決定打。
+export function containsReplacementChar(text) {
+  return typeof text === "string" && text.includes(String.fromCharCode(0xfffd));
+}
+
+// UTF-8→cp932二重エンコードの兆候(置換文字なしでも化け型を拾う)。
+export function looksDoubleEncoded(text) {
+  return detectBrokenInput(text) && !containsReplacementChar(text);
+}
+
+// say()注入文へ付ける警告。検知しなければnull。
+export function mojibakeWarning(text) {
+  if (!detectBrokenInput(text)) return null;
+  return "[警告] この入力は文字化けしている可能性があり、入力が壊れていて読めない。推測で応答せず、ユーザーに文面の再送を求めること。";
+}
+
 export function detectBrokenInput(text) {
   if (!text || typeof text !== "string") return false;
   if (text.includes("�")) return true; // 置換文字=確実な破損
