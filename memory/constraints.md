@@ -115,3 +115,11 @@
 - **自動解放(プロセス再起動)で請求が戻ってもworktreeは保持される**: コミット済みの成果は失われない。再請求したら git status/log で現状確認→必要なテストだけ再実行→finish_task が定型。無為に再実装しない(2026-09)。
 - **依存ゼロ(外部URL無し)テストではSVG名前空間URI(http://www.w3.org/2000/svg)を例外にする**: 属性値として使い取得はしない。監視は否定先読み付き正規表現 /https?:\/\/(?!www\.w3\.org)/ で行う(誤検知実績: test/monitor-chart.test.js)(2026-09)。
 - **ブラウザ向け描画は純関数モジュール(public/配下・IIFE+globalThis公開)+HTMLはfetchと注入のみに分離**すると、描画ロジックも統合(API応答の実行時契約)もNodeテストで検証できる(markdown.jsパターンの適用。詳細は上のイシュー#15-17節)(2026-09)。
+# 2026-10 issue-cost系列ラウンドの知見(ベータdistill)
+
+- **リーダー起床注入文はユーザー入力最優先の文面に固定(イシュー#20)**: say()のwake注入文は「ユーザー入力が最優先の応答対象です。まずこの入力に答えてください。直近のワーカー投稿は触れなくてよい」(af3a444)。旧文面「直前のボード新着を確認して応答」だと、say直後にワーカー投稿が流れたとき後発投稿へ注視してユーザー質問が後回しになった(実害)。並発契約は test/chat-input-priority.test.js が担保。改修時はこの文面契約を壊さない。
+- **UIトークンは403時にhfetchが自己修復する**: サーバー起動ごとにCSRFトークンは再生成されるため、開きっぱなしのUIタブは再起動後に全POSTが403になる。hfetchは403時に同一オリジンの最新ページ(/)から実トークンを引き取り1回だけ再試行する(test/ui-token-selfheal.test.js)。UIのPOST契約を変えるときはこの自己修復経路を壊さない。
+- **検証タスクの「放棄判断で締める」は正規の完了形**: respawn系dirtyタスクが同一内容で再起票されたときも、実装とテストの現main契約(browser-open等)を確認して「取り込み不要」の根拠付き記録でfinishしてよい(2026-10 respawn-engine-r3-cleanup-alpha-dirtyを3回とも同一判断で締めた実績)。判断基準は「現mainの意図的な改善(open:true明示等)と競合する古い設計か」。
+- **スレッドが閉じられた後の発見器起票は稼働中スレッドのメンバーが消化する**: 閉じたスレッドのメンバーは請求できない(ガンマ観測)。スレッド終了時は未消化の発見器タスク(fix-*/verify-*)が残っていないか確認してから閉じるのが安全。
+
+- **mojibake系テストの未完不整合(2026-10 main 0aec183時点)**: test/mojibake.test.js が chat.js の旧export名 containsReplacementChar をimportしてロード失敗(実装は detectBrokenInput に統一済み)。mojibake-detection.test.js の say()警告配線2件も未接続。fix-mojibake-detection(fix-lead-priority)で契約統一が必要。テストが2系統で別契約になった状態のマージは、実装側の1関数へ集約してから緑化する。
