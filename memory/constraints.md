@@ -124,3 +124,12 @@
 
 - **mojibake系テストの未完不整合(2026-10 main 0aec183時点)**: test/mojibake.test.js が chat.js の旧export名 containsReplacementChar をimportしてロード失敗(実装は detectBrokenInput に統一済み)。mojibake-detection.test.js の say()警告配線2件も未接続。fix-mojibake-detection(fix-lead-priority)で契約統一が必要。テストが2系統で別契約になった状態のマージは、実装側の1関数へ集約してから緑化する。
 - **mojibake系の契約統一は完了(fix-lead-priority・2026-10)**: 上記未完不整合は解消済み。最終契約は detectBrokenInput(統合検知)/containsReplacementChar(U+FFFD)/looksDoubleEncoded(二重エンコード)/mojibakeWarning(警告文=null許容)の4関数。say()は mojibakeWarning(text) の返値を注入文へ連結し、検知時も本文はボードへ記録(欠落させない)。テストは test/mojibake.test.js(6件)+test/mojibake-detection.test.js(7件)。
+
+# 2026-10 fix-lead-priorityラウンドの知見(ベータdistill)
+
+- **mem-*.json肥大化対策の最終契約(イシュー#20-2)**: saveMemories()がラウンド境界ごとに pruneMemories(compact.js: maxMessages/maxBytes、system保護・keepRecent保護枠・刈り取りヘッダにISO日時)を適用し、in-memoryと永続化の両方へ反映。上限は config.chat.memMaxMessages/memMaxBytes で設定可、0/null=無効化契約。keepRecent保護枠はバイト上限で削らない(0ba160cの契約明確化)。テスト: mem-lead-growth/memory-prune/mem-growthの3系統。
+- **メモリ内のボード参照は「番号単独」を避ける**: 再起動後の投稿id再採番で衝突するため、番号+投稿者ラベル+日時+スレッド付きで記録する(loop.js注入形式「from #id (ISO時刻/スレッド): text」準拠)。要約時の旧参照補正は MEM_REF_RE + ラベル/日時追加(test/board-ref-label.test.js)。
+- **NULバイト混入でgitがバイナリ扱いになる実害**: edit_file/パッチ過程でchat.jsへU+0000が1バイト混入→「Binary files differ」でテキストdiff不能・node --check/import失敗。検査は NUL(0x00)/BOMの有無チェック+import実行。発生時はマージで原本へ戻してからやり直す(2026-10 fix-chat-nul-binary)。
+- **マージで一時消失した輸出がある場合の切り分け**: 複数ブランチの並行マージでは、片側の機能(export関数・文面契約)がマージ結果から落ちることがある(2026-10: trimMemories/MEM_REF_RE輸出欠落+say()注入文の「新着入力」文面退行)。切り分けは git show <commit>:<file> の版間比較(現main==親1/親2のどちらか、機能の有無)→ 欠落側をマージで復元。テストimport失敗で即検出できる。
+- **verify-*は同一内容で重複起票されることがある**: 「元タスク完了済みの可能性」表示付きで再請求したら finish_task を再実行してよい(冪等。2回目は承認のみで通る実績)。放棄ではなく冪等完了で帳簿を閉じる。
+- **並行負荷系フレーキーの判定基準(追加観測)**: checkpointテストがフル実行で1回落ち→単体再実行で緑・フル再実行で全緑、はフレーキーと判定してよい(2026-10 fix-lead-priority・ベータ観測)。persist系に限らずnode:test全体で同型の負荷競合がありうる。
