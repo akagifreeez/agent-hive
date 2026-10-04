@@ -123,7 +123,7 @@ test("ChatHost: ラウンド終了時、mem-<id>.jsonが上限を超えない(co
   assert.ok(existsSync(memFile), "memファイルが保存されている");
   const mem = JSON.parse(readFileSync(memFile, "utf8"));
   assert.ok(mem.messages.length <= 6, `上限以下に刈り取られている(実際: ${mem.messages.length})`);
-  assert.equal(mem.messages[0].content, "# M", "systemプロンプトは保持される");
+  assert.ok(mem.messages[0].role === "system" && mem.messages[0].content.startsWith("# M"), "systemプロンプト(ペルソナ)は先頭に保持される");
   rmTree(ws);
 });
 
