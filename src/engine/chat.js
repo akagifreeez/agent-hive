@@ -46,10 +46,10 @@ return MOJIBAKE_PATTERNS.some((re) => re.test(text));
  */
 export function mojibakeWarning(text) {
 if (containsReplacementChar(text)) {
-  return "[警告] ユーザー入力に置換文字(U+FFFD)が含まれています。入力が壊れていて読めません。推測で応答せず、ユーザーに文面の再送を求めてください。";
+  return "[警告] ユーザー入力に置換文字(U+FFFD)が含まれています。入力が壊れていて読めない。推測で応答せず、ユーザーに文面の再送を求めてください。";
 }
 if (looksDoubleEncoded(text)) {
-  return "[警告] ユーザー入力が文字化けしている可能性が高い(UTF-8→cp932二重エンコードの兆候)。入力が壊れていて読めません。推測で応答せず、ユーザーに文面の再送を求めてください。";
+  return "[警告] ユーザー入力が文字化けしている可能性が高い(UTF-8→cp932二重エンコードの兆候)。入力が壊れていて読めない。推測で応答せず、ユーザーに文面の再送を求めてください。";
 }
 return null;
 }
