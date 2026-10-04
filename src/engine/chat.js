@@ -183,7 +183,7 @@ export class ChatHost {
   }
   // ユーザー入力: 全メインを時間差で起こす(同時だと議論にならないため)。
   // イシュー#21: ボード側はslice(0,6000)打ち切り+seen進行を持ち、巨大worker投稿の影で
-  // 「you」投稿が配信されず既読になる経路が実在した。質問本文はキックオフにも複載して打ち切りに影響されない独立経路で必ず届ける。
+  // 質問本文は実行中ならsteering([入力])で、未実行ならkickoffへ載せて届ける(二重配信しない)。
   say(text) {
     // 破損入力(U+FFFD等)の検知(イシュー#20 提案3): 化けた入力をそのまま渡すと
     // リーダーが断片から主題を推測して答えてしまうため、注入文へ明示的に警告を載せる。
@@ -192,7 +192,8 @@ export class ChatHost {
       : "";
     this.board.post("you", text);
     this.mains.forEach((m, i) => {
-      this.wake(m, "[チャット] ユーザーからの新着入力があります。ユーザー入力を最優先で応答してください。直近のワーカー投稿は触れなくてよい(必要なら後でまとめて)。\n[入力] " + text + broken, i * this.staggerMs);
+      const bodyText = this.roundState.get(m.id)?.running ? "" : "\n[入力] " + text;
+      this.wake(m, "[チャット] ユーザーからの新着入力があります。ユーザー入力を最優先で応答してください。直近のワーカー投稿は触れなくてよい(必要なら後でまとめて)。" + bodyText + broken, i * this.staggerMs);
     });
   }
 
