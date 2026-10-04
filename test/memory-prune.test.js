@@ -53,15 +53,37 @@ test("pruneMemories: 件数超過で古い分がヘッダ1件に置換され、s
 
 test("pruneMemories: バイト超過でも刈り取りが働く", () => {
   const big = "x".repeat(1000);
+  // body3件・keep2 → 全体がバイト超過なら直近2件以外の1件が落ちる
   const msgs = [
     { role: "system", content: "sys" },
     { role: "user", content: big },
     { role: "assistant", content: big },
+    { role: "user", content: big },
   ];
   const r = pruneMemories(msgs, { keepRecent: 2, maxMessages: 100, maxBytes: 512 });
   assert.equal(r.changed, true);
-  assert.equal(r.messages.length, 1 + 1 + 2);
+  // keepRecent保護枠(2件)がバイト上限を食い潰す場合は保護枠が縮み、最低1件は刈り取り対象に残る
+  assert.equal(r.messages.length, 1 + 1 + 1); // system + ヘッダ + 最低保持1件
   assert.ok(r.messages[1].content.includes(MEM_HEADER));
+  // 全部が保護枠に収まる場合は刈り取りようが無いので変化しない(境界)
+  const all = [
+    { role: "system", content: "sys" },
+    { role: "user", content: big },
+    { role: "assistant", content: big },
+  ];
+  // 保護枠(2件)がバイト上限を食い潰すため、このケースでも縮小刈り取りが働く(最低1件は保持)
+  const r2 = pruneMemories(all, { keepRecent: 2, maxMessages: 100, maxBytes: 512 });
+  assert.equal(r2.changed, true);
+  assert.equal(r2.messages.length, 1 + 1 + 1);
+  // 全部が保護枠に収まり、かつバイト上限内なら変化しない(本来の境界)
+  const small = "x".repeat(50);
+  const allSmall = [
+    { role: "system", content: "sys" },
+    { role: "user", content: small },
+    { role: "assistant", content: small },
+  ];
+  const r3 = pruneMemories(allSmall, { keepRecent: 2, maxMessages: 100, maxBytes: 512 });
+  assert.equal(r3.changed, false);
 });
 
 test("pruneMemories: system無しの配列でも刈り取りできる", () => {
@@ -100,10 +122,11 @@ test("ChatHost.saveMemories: 上限超過メモリは刈り取りされてから
     for (let i = 0; i < 30; i++) mem.push({ role: i % 2 ? "assistant" : "user", content: `round${i}` });
     host.memories.set("t1", mem);
     host.saveMemories(host.mains[0]);
-    // in-memoryも刈り取り反映(system + ヘッダ + keepRecent=12)
+    // in-memoryも刈り取り反映。上限5件が最優先なのでkeepRecent(12)は3に縮められる
+    // keep = max(2, min(12, 5 - head(1) - 1)) = 3 → system + ヘッダ + 3件
     const now = host.memories.get("t1");
     assert.ok(now.length < mem.length, "in-memoryも縮む");
-    assert.equal(now.length, 1 + 1 + 12);
+    assert.equal(now.length, 5);
     assert.ok(now[1].content.includes(MEM_HEADER));
     // 永続化ファイルも同様に縮んでいる
     const saved = JSON.parse(readFileSync(join(ws, "state", "mem-t1.json"), "utf8"));
