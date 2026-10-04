@@ -142,6 +142,8 @@ export function pruneMemories(messages, { keepRecent = MEM_KEEP_RECENT, maxMessa
   const bytes = (m) => Buffer.byteLength(typeof m.content === "string" ? m.content : JSON.stringify(m.content), "utf8");
   const total = arr.reduce((s, m) => s + bytes(m), 0);
   // 上限内なら何もしない(新配列を返すが非破壊)
+  // 0指定は刈り取り無効(config化の契約。memMaxMessages=0/memMaxBytes=0で使う)
+  if (!maxMessages || !maxBytes) return { messages: [...arr], changed: false, removed: 0 };
   if (arr.length <= maxMessages && total <= maxBytes) {
     return { messages: [...arr], changed: false, removed: 0 };
   }
