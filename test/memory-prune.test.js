@@ -62,7 +62,8 @@ test("pruneMemories: バイト超過でも刈り取りが働く", () => {
   ];
   const r = pruneMemories(msgs, { keepRecent: 2, maxMessages: 100, maxBytes: 512 });
   assert.equal(r.changed, true);
-  assert.equal(r.messages.length, 1 + 1 + 2);
+  // keepRecent保護枠(2件)がバイト上限を食い潰す場合は保護枠が縮み、最低1件は刈り取り対象に残る
+  assert.equal(r.messages.length, 1 + 1 + 1); // system + ヘッダ + 最低保持1件
   assert.ok(r.messages[1].content.includes(MEM_HEADER));
   // 全部が保護枠に収まる場合は刈り取りようが無いので変化しない(境界)
   const all = [
@@ -70,8 +71,19 @@ test("pruneMemories: バイト超過でも刈り取りが働く", () => {
     { role: "user", content: big },
     { role: "assistant", content: big },
   ];
+  // 保護枠(2件)がバイト上限を食い潰すため、このケースでも縮小刈り取りが働く(最低1件は保持)
   const r2 = pruneMemories(all, { keepRecent: 2, maxMessages: 100, maxBytes: 512 });
-  assert.equal(r2.changed, false);
+  assert.equal(r2.changed, true);
+  assert.equal(r2.messages.length, 1 + 1 + 1);
+  // 全部が保護枠に収まり、かつバイト上限内なら変化しない(本来の境界)
+  const small = "x".repeat(50);
+  const allSmall = [
+    { role: "system", content: "sys" },
+    { role: "user", content: small },
+    { role: "assistant", content: small },
+  ];
+  const r3 = pruneMemories(allSmall, { keepRecent: 2, maxMessages: 100, maxBytes: 512 });
+  assert.equal(r3.changed, false);
 });
 
 test("pruneMemories: system無しの配列でも刈り取りできる", () => {
