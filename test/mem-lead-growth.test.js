@@ -66,7 +66,7 @@ test("pruneMemories: maxMessages/maxBytes超過で古い分が刈られ、system
 test("mem-*.jsonはラウンドをまたいで上限を超えない(刈り取りがin-memoryと永続の両方へ反映)", () => {
   const ws = mkdtempSync(join(tmpdir(), "hive-memprune-"));
   try {
-    const { ctl, mains, board } = makeController(ws, { memMaxMessages: 12, memMaxBytes: 512 * 1024 });
+    const { ctl, mains } = makeController(ws, { memMaxMessages: 12, memMaxBytes: 512 * 1024 });
     const main = mains[0];
     // 初期化
     ctl.memory(main);
@@ -75,8 +75,8 @@ test("mem-*.jsonはラウンドをまたいで上限を超えない(刈り取り
     const mem = ctl.memory(main);
     const fmtAt = (t) => new Date(t).toISOString().replace("T", " ").slice(0, 16);
     for (let i = 0; i < 40; i++) {
-      const pid = board.lastId() + 1;
-      board.post("colleague", `ダミー投稿 ${i} ` + "x".repeat(200));
+      // board.postを使わない(呼ぶと非同期wakeでラウンドが走り得る)。loop.jsと同じ注入形式だけを再現
+      const pid = i + 1;
       mem.push({ role: "user", content: `[ボード新着]
 colleague #${pid} (${fmtAt(Date.now())}/__main__): ダミー投稿 ${i} ` + "x".repeat(200) });
       mem.push({ role: "assistant", content: `応答 ${i}` });
@@ -90,7 +90,7 @@ colleague #${pid} (${fmtAt(Date.now())}/__main__): ダミー投稿 ${i} ` + "x".
     assert.equal(ctl.memory(main).length, saved.messages.length);
     // 保存済みボード参照は「番号+投稿者ラベル+日時+スレッド」付きで記録される
     // (イシュー#20: 番号単独だと再起動後のid再採番で衝突するため)
-    const boardRef = saved.messages.find((m) => typeof m.content === "string" && m.content.includes("[ボード新着]"));
+    const boardRef = saved.messages.find((m) => typeof m.content === "string" && m.content.includes("ダミー投稿"));
     assert.ok(boardRef, "ボード参照メッセージが残る");
     assert.match(boardRef.content, /colleague #\d+ \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}\/__main__\): ダミー投稿 \d+/, "番号+ラベル+日時+スレッド付きで保存される");
   } finally {
@@ -105,7 +105,6 @@ test("memMaxMessages=0で刈り取り無効(config化の契約)", () => {
     assert.equal(ctl.memPrune.maxMessages, 0);
     assert.equal(ctl.memPrune.maxBytes, 0);
     const main = mains[0];
-    ctl.memory(main);
     const mem = ctl.memory(main);
     for (let i = 0; i < 30; i++) mem.push({ role: "user", content: `d${i}` });
     ctl.saveMemories(main);
