@@ -163,7 +163,7 @@ export function pruneMemories(messages, { keepRecent = MEM_KEEP_RECENT, maxMessa
     // バイト合計は下がるため「何も起きない不正状態」を先に解消する。)
 
     const droppedFor = (k) => body.length - k;
-    while (keep > 1 && droppedFor(keep) < 1) keep--;
+    while (keep > 1 && droppedFor(keep) < 1 && keepRecent > body.length) keep--;
   }
   const tail = body.slice(-keep);
   const dropped = body.slice(0, Math.max(0, body.length - keep));
