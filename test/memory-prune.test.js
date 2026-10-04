@@ -62,7 +62,8 @@ test("pruneMemories: バイト超過でも刈り取りが働く", () => {
   ];
   const r = pruneMemories(msgs, { keepRecent: 2, maxMessages: 100, maxBytes: 512 });
   assert.equal(r.changed, true);
-  assert.equal(r.messages.length, 1 + 1 + 2);
+  // keepRecent保護枠(2件)がバイト上限を食い潰す場合は保護枠が縮み、最低1件は刈り取り対象に残る
+  assert.equal(r.messages.length, 1 + 1 + 1); // system + ヘッダ + 最低保持1件
   assert.ok(r.messages[1].content.includes(MEM_HEADER));
   // 全部が保護枠に収まる場合は刈り取りようが無いので変化しない(境界)
   const all = [
