@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { runAgentLoop, buildSystemPrompt } from "./loop.js";
 import { createTools } from "./tools.js";
 import { mergeAgentWork } from "./worktree.js";
-import { pruneMemories, estimateMessagesTokens } from "./compact.js";
+import { pruneMemories } from "./compact.js";
 
 export class ChatHost {
   constructor({
@@ -130,13 +130,6 @@ export class ChatHost {
     if (!p || !this.memories.has(main.id)) return;
     try {
       mkdirSync(join(this.mainWorkspace, "state"), { recursive: true });
-      // ラウンドをまたぐ肥大止め(イシュー#20): 上限超過時は古い分を刈り取り、
-      // in-memoryと永続化の両方へ反映する(復元時に再肥大しない)
-      const pruned = pruneMemories(this.memories.get(main.id), this.memPrune);
-      if (pruned.changed) {
-        this.memories.set(main.id, pruned.messages);
-        this.bus.emit("memory.pruned", { agent: main.id, removed: pruned.removed, messages: pruned.messages.length });
-      }
       // ラウンドをまたぐ肥大止め(イシュー#20): 上限超過時は古い分を刈り取り、
       // in-memoryと永続化の両方へ反映する(復元時に再肥大しない)
       const pruned = pruneMemories(this.memories.get(main.id), this.memPrune);
