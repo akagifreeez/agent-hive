@@ -78,7 +78,7 @@ test("say(): U+FFFD入力時に注入文へ『入力が壊れている/推測禁
     const captured = captureKickoff(host);
     host.say("UIのスラッシュコマンドが\uFFFD効かない");
     await waitRunning(host, "cp-lead");
-    assert.equal(captured.length, 1);
+        assert.equal(captured.length, 1);
     const t = captured[0];
     assert.ok(t.includes("壊れて"), "入力が壊れている旨を明示");
     assert.ok(t.includes("推測"), "推測で応答しないよう指示");
@@ -105,7 +105,7 @@ test("say(): 破損検知時も本文はボードへ記録される(欠落させ
     const { host, board } = mkHost(ws);
     host.say("\uFFFDな入力");
     await waitRunning(host, "cp-lead");
-    const posts = board.list().filter((p) => p.from === "you");
+    const posts = board.posts.filter((p) => p.from === "you");
     assert.ok(posts.some((p) => p.text.includes("\uFFFD")), "ユーザー入力の記録は残る");
   } finally { rmTree(ws); }
 });
