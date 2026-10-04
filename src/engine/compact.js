@@ -164,7 +164,9 @@ export function pruneMemories(messages, { keepRecent = MEM_KEEP_RECENT, maxMessa
     // 1件以上刈れるならkeepを維持(上限に収まらない単価のメッセージでも、刈り取り自体で
     // バイト合計は下がるため「何も起きない不正状態」を先に解消する。)
 
-    const droppedFor = (k) => body.length - k;
+    const keptBytesFor = (k) => head.reduce((acc, m) => acc + bytes(m), 0)
+      + body.slice(-k).reduce((acc, m) => acc + bytes(m), 0);
+    while (keep > 1 && (body.length - keep < 1 || keptBytesFor(keep) > maxBytes)) keep--;
     while (keep > 1 && droppedFor(keep) < 1 && keepRecent > body.length) keep--;
   }
   const tail = body.slice(-keep);
