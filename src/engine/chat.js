@@ -386,7 +386,7 @@ export function detectBrokenInput(text) {
   // 対象は Latin-1補助(U+00C0-U+00FF)+ Latin-1領域の記号(U+00A0-U+00BF)。
   // UTF-8バイト列をcp932/Latin-1で再解読するとこの帯に落ちるのが典型(テ→Ã¦Â¥Â¹等)。
   // 通常の日本語・英語・絵文字テキストにはほぼ出現しない。
-  const m = text.match(/[ -ÿ]/g);
+  const m = text.match(/[\u00a0-\u00ff]/g);
   if (!m || m.length < 3) return false; // 散発1-2個は通常の欧文
   // 密度: Ã/ã等の化け文字が文字種の過半を占める(日本語本文が混じると下がる)。
   // ただし「化け塊+少量の記号」も捉えたいので、出現数が6個以上なら密度に関わらず検知。
