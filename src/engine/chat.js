@@ -85,7 +85,7 @@ export function detectBrokenInput(text) {
 // say()注入文へ付ける警告。検知しなければnull
 export function mojibakeWarning(text) {
   if (!detectBrokenInput(text)) return null;
-  return "[警告] この入力は文字化けしていて読めない。推測で応答せず、ユーザーに文面の再送を求めること。";
+  return "[警告] この入力は文字化けしている可能性があり、入力が壊れていて読めない。推測で応答せず、ユーザーに文面の再送を求めること。";
 }
 
 export class ChatHost {
