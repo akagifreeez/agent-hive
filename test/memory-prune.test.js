@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pruneMemories, MEM_HEADER } from "../src/engine/compact.js";
-import { ChatHost } from "../src/engine/chat.js";
+import { ChatHost, DEFAULT_MEM_MAX_MESSAGES } from "../src/engine/chat.js";
 import { Board, Bus } from "../src/engine/board.js";
 import { TaskBlackboard } from "../src/engine/tasks.js";
 
@@ -164,7 +164,7 @@ test("ChatHost.saveMemories: 上限内なら刈り取りされない(memory.prun
   }
 });
 
-test("ChatHost: config省略時は既定上限(200件/512KB)が効く", () => {
+test("ChatHost: config省略時は既定上限が効く(DEFAULT_MEM_MAX_MESSAGESと一致)", () => {
   const ws = mktmp();
   try {
     const bus = new Bus();
@@ -177,7 +177,8 @@ test("ChatHost: config省略時は既定上限(200件/512KB)が効く", () => {
       toolsFactory: () => null,
       board, tasks, bus,
     });
-    assert.deepEqual(host.memPrune, { maxMessages: 200, maxBytes: 512 * 1024 });
+    // 既定上限は輸出定数(DEFAULT_MEM_MAX_MESSAGES=120)と一致する契約。数値を2重管理しない
+    assert.deepEqual(host.memPrune, { maxMessages: DEFAULT_MEM_MAX_MESSAGES, maxBytes: 512 * 1024 });
   } finally {
     cleanup(ws);
   }
