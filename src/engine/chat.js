@@ -20,8 +20,8 @@ import { mergeAgentWork } from "./worktree.js";
  * @returns {boolean}
  */
 export function containsReplacementChar(text) {
-return typeof text === "string" && text.includes(String.fromCharCode(0xfffd));
-}
+  return typeof text === "string" && text.includes(String.fromCharCode(0xfffd));
+  }
 
 // UTF-8→cp932(等のレガシー文字コード)二重エンコードの兆候。
 // 置換文字が現れない化け(「ã\u0081\u0093…」型や「ÆüËÜ…」型)も内容として信用できない。
@@ -35,9 +35,9 @@ const MOJIBAKE_PATTERNS = [
  * @returns {boolean}
  */
 export function looksDoubleEncoded(text) {
-if (typeof text !== "string" || text.length === 0) return false;
-return MOJIBAKE_PATTERNS.some((re) => re.test(text));
-}
+  if (typeof text !== "string" || text.length === 0) return false;
+  return MOJIBAKE_PATTERNS.some((re) => re.test(text));
+  }
 
 /**
  * 化け入力を検知したときにリーダーへ注入する警告文。型(UTF-8→cp932の兆候)も伝える。
@@ -45,14 +45,14 @@ return MOJIBAKE_PATTERNS.some((re) => re.test(text));
  * @returns {string|null} 警告文。正常入力ならnull
  */
 export function mojibakeWarning(text) {
-if (containsReplacementChar(text)) {
+  if (containsReplacementChar(text)) {
   return "[警告] ユーザー入力に置換文字(U+FFFD)が含まれています。入力が壊れていて読めない。推測で応答せず、ユーザーに文面の再送を求めてください。";
-}
-if (looksDoubleEncoded(text)) {
+  }
+  if (looksDoubleEncoded(text)) {
   return "[警告] ユーザー入力が文字化けしている可能性が高い(UTF-8→cp932二重エンコードの兆候)。入力が壊れていて読めない。推測で応答せず、ユーザーに文面の再送を求めてください。";
-}
-return null;
-}
+  }
+  return null;
+  }
 
 export class ChatHost {
   constructor({
