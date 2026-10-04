@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { runAgentLoop, buildSystemPrompt } from "./loop.js";
 import { createTools } from "./tools.js";
 import { mergeAgentWork } from "./worktree.js";
+import { pruneMemories, estimateMessagesTokens } from "./compact.js";
 
 export class ChatHost {
   constructor({
@@ -20,6 +21,7 @@ export class ChatHost {
     maxTurnsPerRound = 12, contextWindow = 200000, thresholdPercent,
     shellKind = "bash", staggerMs = 3000,
     memoryFn = null, // () => 永続記憶の注入文脈。ラウンド開始ごとに読み直す(distill反映のため)
+    config = null, // HiveConfig(会話メモリの上限設定chat.memMax*を読む)
     project = null, // スレッドスコープ(自動継続の「まだ仕事があるか」判定に使う)
     autoContinueRounds = 3, // ターン上限でも仕事が残っていれば自動で次ラウンドへ(0=従来どおり停止)
     hooks = null, // Hooksインスタンス(roundEndフック)
@@ -39,11 +41,16 @@ export class ChatHost {
     this.shellKind = shellKind;
     this.staggerMs = staggerMs;
     this.memoryFn = memoryFn;
+    this.config = config;
     this.project = project;
     this.autoContinueRounds = autoContinueRounds;
     this.hooks = hooks;
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
     this.paused = false; // 一時停止中は新しい起床を潰す(実行中ラウンドはターン境界で自然終了)
+    this.memPrune = { // 会話メモリの刈り取り設定(イシュー#20)。0/nullで無効化可
+      maxMessages: this.config?.chat?.memMaxMessages ?? 200,
+      maxBytes: this.config?.chat?.memMaxBytes ?? 512 * 1024,
+    };
     this.memories = new Map(); // id => messages配列(ラウンド間で保持)
     this.seen = new Map(); // id => ボード既読位置(ラウンド間で保持。配信はボード注入の1経路のみ)
     this.roundState = new Map(); // id => {running, pending[]}
@@ -123,6 +130,20 @@ export class ChatHost {
     if (!p || !this.memories.has(main.id)) return;
     try {
       mkdirSync(join(this.mainWorkspace, "state"), { recursive: true });
+      // ラウンドをまたぐ肥大止め(イシュー#20): 上限超過時は古い分を刈り取り、
+      // in-memoryと永続化の両方へ反映する(復元時に再肥大しない)
+      const pruned = pruneMemories(this.memories.get(main.id), this.memPrune);
+      if (pruned.changed) {
+        this.memories.set(main.id, pruned.messages);
+        this.bus.emit("memory.pruned", { agent: main.id, removed: pruned.removed, messages: pruned.messages.length });
+      }
+      // ラウンドをまたぐ肥大止め(イシュー#20): 上限超過時は古い分を刈り取り、
+      // in-memoryと永続化の両方へ反映する(復元時に再肥大しない)
+      const pruned = pruneMemories(this.memories.get(main.id), this.memPrune);
+      if (pruned.changed) {
+        this.memories.set(main.id, pruned.messages);
+        this.bus.emit("memory.pruned", { agent: main.id, removed: pruned.removed, messages: pruned.messages.length });
+      }
       // 一時ファイル経由の原子書込(クラッシュ時の半端JSONで復元が壊れるのを防ぐ)
       const tmp = `${p}.tmp`;
       writeFileSync(tmp, JSON.stringify({ messages: this.memories.get(main.id) }));
