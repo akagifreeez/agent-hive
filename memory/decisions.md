@@ -26,3 +26,5 @@
 
 - 起票タスクのrole指定は必要が無い限り固定しない(省略で誰でも可)。feat-monitor-chartスレッドでリーダー/スポーン元専用のimpl起票がメンバーのボードに現れず、スポーンした追加ワーカー(impl-2/6/7/8)もrole不一致で請求できず退場が連発した。また請求が自動解放(プロセス再起動)でopenへ戻った場合、実装コミットがworktreeにあれば再請求者が即finishできる — 実装は先行コミットしておき、finishタイミングは解放後に合わせるのが有効(2026-09)。
 - イシュー#20(fix-lead-priority・2026-10)の設計決定: (1)リーダー起床注入文は「ユーザー入力を最優先、直近のワーカー投稿には触れなくてよい」へ固定(chat-input-priority.test.js) (2)mem-*.jsonはラウンド境界でpruneMemoriesにより刈り取り、上限はchat.memMaxMessages/memMaxBytes(config化・0=無効化) (3)文字化け入力は検知時のみ mojibakeWarning を注入文へ連結し、本文はボードへ必ず記録(欠落させない)。同時実装だった提案1〜3は最終的に1契約へ統一(say()の1箇所連結+4検知関数)。詳細契約は constraints.md「fix-lead-priorityラウンドの知見」へ。
+
+- プロバイダ横断スロットリング(イシュー#1)の完成判定(finish-throttleスレッド・ガンマ2026-10): 既存テストで受け入れ基準を担保済みと結論し実装追加なし。test/throttle.test.js 3件目が「2つのモデル実体が同時chat→429応答は全体で1回だけ・ゲート待ち発生」を検証済み。 接線不要の根拠: builtin.js=静止カタログ定義のみ(fetch呼び出しなし)、factory.js=openai-auth.jsを介した認証用途のみ、openai-auth.jsのfetchはtokenエンドポイント(429は本来のレート制限対象外)でアダプタchatとは別経路のため。FallbackModelは委譲先モデル内でthrottle適用済み。クローズ可と判定し、gh issue close はリーダーが実施(ワーカーは実施しない運用)。
