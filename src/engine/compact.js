@@ -154,10 +154,14 @@ export function pruneMemories(messages, { keepRecent = MEM_KEEP_RECENT, maxMessa
   }
   // 保護枠がmaxMessagesを食い潰す場合は縮める(system+ヘッダ+最低2件の tail を残す)
   let keep = Math.max(2, Math.min(keepRecent, maxMessages - head.length - 1));
-  // keepRecent保護とバイト上限の優先順位: keepRecent(呼び出し側の明示契約)を優先する。
-  // body全体が保護枠に収まる(dropped=0)場合は変化なし(下の早期returnが処理)。
-  // バイト超過が残っても「1回の刈り取りで要素を保護枠から奪わない」が契約
-  // (大メッセージ1件が上限超でも、それを落とすかは次回以降の呼び出しに委ねる)。
+  // keepRecent保護がバイト上限を食い潰す場合: 保護枠を削ってでも最低1件は刈り取る
+  // (body全体が保護されて dropped=0 になると、バイト超過のまま何も起きない不正状態を残す)
+  const protectedBytes = () => head.reduce((s, m) => s + bytes(m), 0)
+    + body.slice(-keep).reduce((s, m) => s + bytes(m), 0)
+    + bytes({ content: MEM_HEADER + " " + new Date().toISOString() });
+  if (!disabled(maxBytes)) {
+    while (keep > 1 && protectedBytes() > maxBytes) keep--;
+  }
   const tail = body.slice(-keep);
   const dropped = body.slice(0, Math.max(0, body.length - keep));
   if (!dropped.length) {
