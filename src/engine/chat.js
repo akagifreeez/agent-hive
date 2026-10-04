@@ -137,13 +137,6 @@ export class ChatHost {
         this.memories.set(main.id, pruned.messages);
         this.bus.emit("memory.pruned", { agent: main.id, removed: pruned.removed, messages: pruned.messages.length });
       }
-      // ラウンドをまたぐ肥大止め(イシュー#20): 上限超過時は古い分を刈り取り、
-      // in-memoryと永続化の両方へ反映する(復元時に再肥大しない)
-      const pruned = pruneMemories(this.memories.get(main.id), this.memPrune);
-      if (pruned.changed) {
-        this.memories.set(main.id, pruned.messages);
-        this.bus.emit("memory.pruned", { agent: main.id, removed: pruned.removed, messages: pruned.messages.length });
-      }
       // 一時ファイル経由の原子書込(クラッシュ時の半端JSONで復元が壊れるのを防ぐ)
       const tmp = `${p}.tmp`;
       writeFileSync(tmp, JSON.stringify({ messages: this.memories.get(main.id) }));
