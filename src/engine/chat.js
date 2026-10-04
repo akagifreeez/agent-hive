@@ -327,6 +327,7 @@ export class ChatHost {
       return;
     }
     st.running = true;
+    st.lastKickoff = String(kickoffText); // 直近ラウンドの注入文(テスト・診断用)
     this.autoRounds.set(main.id, 0); // ユーザー/ボード起点のラウンドでは連続回数をリセット
     const run = async () => {
       if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
