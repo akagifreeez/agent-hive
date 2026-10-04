@@ -21,7 +21,8 @@ export class ChatHost {
     maxTurnsPerRound = 12, contextWindow = 200000, thresholdPercent,
     shellKind = "bash", staggerMs = 3000,
     memoryFn = null, // () => 永続記憶の注入文脈。ラウンド開始ごとに読み直す(distill反映のため)
-    config = null, // HiveConfig(会話メモリの上限設定chat.memMax*を読む)
+    config = null,
+    chatConfig = null, // 直接渡すchat設定(memMaxMessages等)。config.chatより優先 // HiveConfig(会話メモリの上限設定chat.memMax*を読む)
     project = null, // スレッドスコープ(自動継続の「まだ仕事があるか」判定に使う)
     autoContinueRounds = 3, // ターン上限でも仕事が残っていれば自動で次ラウンドへ(0=従来どおり停止)
     hooks = null, // Hooksインスタンス(roundEndフック)
@@ -42,14 +43,16 @@ export class ChatHost {
     this.staggerMs = staggerMs;
     this.memoryFn = memoryFn;
     this.config = config;
+    this.chatConfig = chatConfig;
     this.project = project;
     this.autoContinueRounds = autoContinueRounds;
     this.hooks = hooks;
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
     this.paused = false; // 一時停止中は新しい起床を潰す(実行中ラウンドはターン境界で自然終了)
+    const effChat = this.chatConfig ?? this.config?.chat ?? null; // chatConfig(直接)/config.chat の両対応
     this.memPrune = { // 会話メモリの刈り取り設定(イシュー#20)。0/nullで無効化可
-      maxMessages: this.config?.chat?.memMaxMessages ?? 200,
-      maxBytes: this.config?.chat?.memMaxBytes ?? 512 * 1024,
+      maxMessages: effChat?.memMaxMessages ?? 200,
+      maxBytes: effChat?.memMaxBytes ?? 512 * 1024,
     };
     this.memories = new Map(); // id => messages配列(ラウンド間で保持)
     this.seen = new Map(); // id => ボード既読位置(ラウンド間で保持。配信はボード注入の1経路のみ)
