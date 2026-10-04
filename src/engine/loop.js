@@ -154,11 +154,26 @@ export async function runAgentLoop({
     // ボード新着の注入(既読位置以降だけ。seenはホストが保持して二重配信を防ぐ)
     const fresh = board.since(seen).filter((p) => p.from !== agent.id);
     if (fresh.length) {
-      seen = fresh[fresh.length - 1].id;
       // 参照は「from #id (ISO時刻/スレッド)」形式(イシュー#20): ボードクリア後のid再採番で
       // 番号単独の参照が衝突するため、メモリに残る参照はラベル・日時付きで曖昧性をなくす。
       const fmtAt = (t) => new Date(t).toISOString().replace("T", " ").slice(0, 16);
-      const text = fresh.map((p) => `${p.from} #${p.id} (${fmtAt(p.at)}/${p.thread}): ${p.text}`).join("\n---\n");
+      // 予算内に収まる範囲で投稿単位に詰める(イシュー#21): 従来は連結後に一括打ち切りしていたため、
+      // 巨大投稿1件で後続の全投稿が消え、さらにseenが最後まで進んで欠落が確定していた。
+      // 投稿単位で仮採算し、収まらなくなった投稿以降は未読のまま残す→次ターン以降で配信される。
+      // 1件だけで予算超過のときはその先頭部分だけ配信して既読へ進める(1投稿が6,000文字超は例外的で、
+      // 詰め続けると毎ターン同じ巨大投稿の先頭だけが注入され続けるため)。
+      const BOARD_BUDGET = 6000;
+      let text = "";
+      let delivered = 0; // 予算内に入った投稿数(=既読へ進める件数)
+      for (const p of fresh) {
+        const piece = `${p.from} #${p.id} (${fmtAt(p.at)}/${p.thread}): ${p.text}`;
+        const sep = delivered ? "\n---\n" : "";
+        if (delivered > 0 && text.length + sep.length + piece.length > BOARD_BUDGET) break;
+        text += sep + piece;
+        delivered++;
+        if (text.length >= BOARD_BUDGET) break; // 1件で超過した場合もここで打ち切り(先頭部分のみ配信)
+      }
+      seen = fresh[delivered - 1].id;
       messages.push({ role: "user", content: `[ボード新着]\n${text.slice(0, 6000)}` });
     }
     // ラウンド実行中に入ったユーザー入力をターン境界で割込ませる(steering: ZCode command-queue流)
