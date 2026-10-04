@@ -164,7 +164,47 @@ export class ChatHost {
     if (!p) return;
     try { rmSync(p, { force: true }); } catch {}
   }
-  // ユーザー入力: 全メインを時間差で起こす(同時だと議論にならないため)。
+  // ---- 文字化け入力の検知(イシュー#20 提案3) ----
+// U+FFFD(置換文字)を含む入力=デコード失敗の証拠。内容を信用できない。
+/**
+ * 入力にU+FFFD(replacement character)が含まれるか。
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function containsReplacementChar(text) {
+  return typeof text === "string" && text.includes(String.fromCharCode(0xfffd));
+}
+
+// UTF-8→cp932(等のレガシー文字コード)二重エンコードの兆候。
+// 置換文字が現れない化け(「ã\u0081\u0093…」型や「ÆüËÜ…」型)も内容として信用できない。
+const MOJIBAKE_PATTERNS = [
+  /[\u00c0-\u00ff][\u0080-\u00ff]{2}/, // ラテン拡張+制御域の連続(UTF-8バイト列がlatin1再解読された型)
+  /[\u0080-\u009f]{2,}/, // 制御領域(C1)の連続=バイト列の再解読痕
+];
+/**
+ * 二重エンコードの兆候(化け型)か。日本語・英語の正常文では誤検知しない範囲で保守的に。
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function looksDoubleEncoded(text) {
+  if (typeof text !== "string" || text.length === 0) return false;
+  return MOJIBAKE_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * 化け入力を検知したときにリーダーへ注入する警告文。型(UTF-8→cp932の兆候)も伝える。
+ * @param {string} text ユーザー入力(そのまま)
+ * @returns {string|null} 警告文。正常入力ならnull
+ */
+export function mojibakeWarning(text) {
+  if (containsReplacementChar(text)) {
+    return "[警告] ユーザー入力に置換文字(U+FFFD)が含まれています。入力が壊れていて読めません。推測で応答せず、ユーザーに文面の再送を求めてください。";
+  }
+  if (looksDoubleEncoded(text)) {
+    return "[警告] ユーザー入力が文字化けしている可能性が高い(UTF-8→cp932二重エンコードの兆候)。入力が壊れていて読めません。推測で応答せず、ユーザーに文面の再送を求めてください。";
+  }
+  return null;
+}// ユーザー入力: 全メインを時間差で起こす(同時だと議論にならないため)。
   // 本文はボード経由で1回だけ届く(seen管理)。キックオフは中身を持たない汎用文。
   say(text) {
     this.board.post("you", text);
