@@ -1825,6 +1825,23 @@ async function handleCommand(text) {
   } else if (customCommands[cmd]) {
     // configで定義したカスタムプロンプトコマンド → リーダーへ送信
     sendSayText(customCommands[cmd].replace(/\$ARGS/g, text.slice(cmd.length + 2).trim()));
+  } else if (cmd === "notify") {
+    if (typeof Notification === "undefined") { post("このブラウザは通知に対応していません"); return; }
+    if (notifyOn) {
+      notifyOn = false;
+      localStorage.setItem("hive-notify", "off");
+      post("デスクトップ通知をOFFにしました");
+    } else {
+      Notification.requestPermission().then((p) => {
+        if (p === "granted") {
+          notifyOn = true;
+          localStorage.setItem("hive-notify", "on");
+          post("デスクトップ通知をONにしました(タスク完了/マージで届きます)");
+        } else {
+          post("通知の許可が得られませんでした(ブラウザの設定を確認してください)");
+        }
+      });
+    }
   } else {
     post(`不明なコマンド: ${cmd}(/help で一覧)`);
   }
@@ -1839,6 +1856,13 @@ function toast(msg, kind = "err") {
   t.onclick = () => t.classList.toggle("expanded");
   $("toasts").appendChild(t);
   setTimeout(() => { if (!t.classList.contains("expanded")) t.remove(); }, 5000);
+}
+
+// デスクトップ通知(/notifyでON。許可要求はスラッシュコマンド=ユーザー操作のタイミングで行う)
+let notifyOn = localStorage.getItem("hive-notify") === "on";
+function desktopNotify(title, body) {
+  if (!notifyOn || typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try { new Notification(title, { body }); } catch { /* 通知失敗は無視 */ }
 }
 
 // ブラウザ標準のpromptの代替。テキスト入力つきダイアログ。キャンセル/Escはnull
@@ -2391,6 +2415,14 @@ es.onmessage = (e) => {
     if (th === selectedThread) renderAll();
     else if (lastState) renderNav(lastState.live.threads);
     return;
+  }
+  // タスク完了/マージを見える化(トースト+/notifyがONならデスクトップ通知)。
+  // ここではreturnしない(下のrefreshSoon判定で通常の再描画も走る)
+  if (type === "task.finished" || type === "merge.completed") {
+    const label = type === "task.finished" ? "完了" : "マージ";
+    const msg = `${payload?.agent ?? "?"} が ${payload?.taskId ?? "?"} を${label}`;
+    toast("✓ " + msg, "ok");
+    desktopNotify("hive " + label, msg);
   }
   if (["agent.turn", "agent.delta", "tool.call", "tool.result", "agent.status", "agent.spawned", "thread.opened", "merge.completed", "model.changed",
        "task.claimed", "task.finished", "task.created", "task.released", "task.cancelled", "task.autoResolved",
