@@ -42,13 +42,13 @@ test("pruneMemories: 件数超過で古い分がヘッダ1件に置換され、s
   // system + ヘッダ + keepRecent
   assert.equal(r.messages.length, 1 + 1 + 5);
   assert.equal(r.messages[0].role, "system");
-  assert.match(r.messages[1].content, new RegExp(MEM_HEADER));
-  assert.match(r.messages[1].content, /46件/); // 50件中46件が刈り取り
+  assert.ok(r.messages[1].content.includes(MEM_HEADER));
+  assert.match(r.messages[1].content, /45件/); // 50件中45件が刈り取り(直近5件を保護)
   assert.match(r.messages[1].content, /\d{4}-\d{2}-\d{2}T/); // 日時付き
   // 直近5件は原形のまま残る
   assert.equal(r.messages[2].content, "msg45");
   assert.equal(r.messages[6].content, "msg49");
-  assert.equal(r.removed, 46);
+  assert.equal(r.removed, 45);
 });
 
 test("pruneMemories: バイト超過でも刈り取りが働く", () => {
@@ -61,7 +61,7 @@ test("pruneMemories: バイト超過でも刈り取りが働く", () => {
   const r = pruneMemories(msgs, { keepRecent: 2, maxMessages: 100, maxBytes: 512 });
   assert.equal(r.changed, true);
   assert.equal(r.messages.length, 1 + 1 + 2);
-  assert.match(r.messages[1].content, new RegExp(MEM_HEADER));
+  assert.ok(r.messages[1].content.includes(MEM_HEADER));
 });
 
 test("pruneMemories: system無しの配列でも刈り取りできる", () => {
@@ -70,7 +70,7 @@ test("pruneMemories: system無しの配列でも刈り取りできる", () => {
   const r = pruneMemories(msgs, { keepRecent: 2, maxMessages: 5, maxBytes: 1024 * 1024 });
   assert.equal(r.changed, true);
   assert.equal(r.messages.length, 1 + 2); // ヘッダ + 直近2件
-  assert.match(r.messages[0].content, new RegExp(MEM_HEADER));
+  assert.ok(r.messages[0].content.includes(MEM_HEADER));
 });
 
 test("pruneMemories: keepRecentが上限を食い潰す場合は保護枠を縮める", () => {
@@ -104,11 +104,11 @@ test("ChatHost.saveMemories: 上限超過メモリは刈り取りされてから
     const now = host.memories.get("t1");
     assert.ok(now.length < mem.length, "in-memoryも縮む");
     assert.equal(now.length, 1 + 1 + 12);
-    assert.match(now[1].content, new RegExp(MEM_HEADER));
+    assert.ok(now[1].content.includes(MEM_HEADER));
     // 永続化ファイルも同様に縮んでいる
     const saved = JSON.parse(readFileSync(join(ws, "state", "mem-t1.json"), "utf8"));
     assert.equal(saved.messages.length, now.length);
-    assert.match(saved.messages[1].content, new RegExp(MEM_HEADER));
+    assert.ok(saved.messages[1].content.includes(MEM_HEADER));
     // 再起動を想定した復元でも肥大が戻らない(loadMemoriesはそのまま読む)
     const host2 = new ChatHost({
       mains: [{ id: "t1", displayName: "T1", role: "impl", personaText: "p" }],
