@@ -16,7 +16,7 @@ import { mergeAgentWork } from "./worktree.js";
 
 // mem-<id>.json の既定上限(メッセージ数)。chat.memMaxMessages で上書きできる。
 // 実運用(220件超のテスト・複数スレッド併走)でも足りる分量を残し、system+要約+直近分を保つ。
-export const DEFAULT_MEM_MAX_MESSAGES = 120;
+export const DEFAULT_MEM_MAX_MESSAGES = 200;
 // mem-<id>.json の既定上限(バイト)。chat.memMaxBytes で上書き。0で無効化(0=刈り取りしない契約)。
 export const DEFAULT_MEM_MAX_BYTES = 512 * 1024;
 
