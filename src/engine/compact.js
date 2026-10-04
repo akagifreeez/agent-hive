@@ -127,6 +127,9 @@ export function applyCompaction(messages, summaryText, keepRecent = 4) {
 // 戻り値: {messages(新配列), changed, removed}
 export const MEM_KEEP_RECENT = 12;
 export const MEM_HEADER = "[記憶の刈り取り] この会話の古い部分は省略されています。";
+// 保護対象(system+直近)だけでバイト上限を超えるときに挿入する明示的警告(イシュー#21)。
+// 黙って超過状態を続けず、モデル自身が「記憶が上限超過で圧縮不能」だと分かる形にする。
+export const MEM_WARN_HEADER = "[記憶の警告] 会話メモリがバイト上限を超えています(圧縮不能)。古い記憶は参照不能になっている可能性があります。";
 
 /**
  * @param {Array<{role: string, content: any}>} messages
@@ -170,6 +173,21 @@ export function pruneMemories(messages, { keepRecent = MEM_KEEP_RECENT, maxMessa
   const tail = body.slice(-keep);
   const dropped = body.slice(0, Math.max(0, body.length - keep));
   if (!dropped.length) {
+    // 保護対象だけで上限を超える(刈れるbodyが無い)ケース: 黙殺せず明示的警告を1件だけ挿入する。
+    // 直近(末尾側)に既に警告がある場合は再挿入しない(毎ラウンド増殖しない)。
+    if (!disabled(maxBytes)) {
+      // 挿入位置(head直後)を含めて直近に既に警告が無いか確認する(keep=1のときtailだけだと見逃す)
+      const recent = body.slice(-(keep + 1));
+      const hasRecentWarn = recent.some((m) => typeof m.content === "string" && m.content.startsWith(MEM_WARN_HEADER));
+      if (!hasRecentWarn) {
+        const currentBytes = arr.reduce((s, m) => s + bytes(m), 0);
+        const warn = {
+          role: "user",
+          content: `${MEM_WARN_HEADER} 現在${currentBytes}バイト/上限${maxBytes}バイト。${new Date().toISOString()}`,
+        };
+        return { messages: [...head, warn, ...tail], changed: true, removed: 0 };
+      }
+    }
     return { messages: [...arr], changed: false, removed: 0 };
   }
   const roles = dropped.reduce((m, x) => ((m[x.role] = (m[x.role] ?? 0) + 1), m), {});
