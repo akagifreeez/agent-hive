@@ -104,7 +104,7 @@ test("say(): 破損検知時も本文はボードへ記録される(欠落させ
     const { host, board } = mkHost(ws);
     host.say("\uFFFDな入力");
     await waitRunning(host, "cp-lead");
-    const posts = board.list().filter((p) => p.from === "you");
+    const posts = board.posts.filter((p) => p.from === "you");
     assert.ok(posts.some((p) => p.text.includes("\uFFFD")), "ユーザー入力の記録は残る");
   } finally { rmTree(ws); }
 });
