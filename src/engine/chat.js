@@ -11,6 +11,50 @@ import { runAgentLoop, buildSystemPrompt } from "./loop.js";
 import { createTools } from "./tools.js";
 import { mergeAgentWork } from "./worktree.js";
 
+// ===== 会話メモリの刈り取り(イシュー#20-2: mem-*.json 肥大化対策)=====
+
+// mem-<id>.json の既定上限(メッセージ数)。chat.memMaxMessages で上書きできる。
+// 実運用(220件超のテスト・複数スレッド併走)でも足りる分量を残し、system+要約+直近分を保つ。
+export const DEFAULT_MEM_MAX_MESSAGES = 120;
+
+// ボード投稿参照(番号単独)の検出。ラベル/日時なしの参照は再起動後に別ボードの同番号と衝突するため、
+// 刈り取り時にmain・日時付きへ補正する。
+export const MEM_REF_RE = /(?:ボード|board)?#(\d{1,4})(?!\d)(?!\s*\()/g;
+
+// メッセージ配列のテキストを1行ずつ要約する(要約は手軽さ優先でLLMを使わない)。
+function summarizeForPrune(messages, boardName) {
+  const lines = [];
+  for (const m of messages) {
+    const text = String(m.content ?? "").replace(/s+/g, " ").trim();
+    if (!text) continue;
+    const labeled = text.replace(MEM_REF_RE, (all, num) => {
+      return all + "(" + (boardName ?? "main") + "・日時不明)";
+    });
+    lines.push((m.role === "user" ? "- 入力: " : "- 応答: ") + labeled.slice(0, 160));
+  }
+  return lines.join("\n");
+}
+
+// ラウンド境界の記憶刈り取り。上限超過時は「system + 要約 + 直近分」へ縮める。
+// @param {{memMaxMessages?: number, boardName?: string}} opts
+// @returns {Array|null} messages(非配列はnull)。上限以内なら同一配列をそのまま返す。
+export function trimMemories(messages, opts = {}) {
+  if (!Array.isArray(messages)) return null;
+  const max = Math.max(4, Number(opts.memMaxMessages ?? DEFAULT_MEM_MAX_MESSAGES));
+  if (messages.length <= max) return messages;
+  const system = messages.find((m) => m.role === "system");
+  const rest = messages.filter((m) => m !== system);
+  const pruned = rest.slice(0, Math.max(1, rest.length - (max - (system ? 1 : 0) - 2)));
+  const kept = rest.slice(-Math.max(0, max - (system ? 1 : 0) - 2));
+  const summary = summarizeForPrune(pruned, opts.boardName);
+  const note = { role: "user", content: "[Memory pruned] 古い会話を要約しました(参照はボード名・日時付き)。\n" + summary };
+  return [
+    ...(system ? [system] : []),
+    note,
+    ...kept,
+  ];
+}
+
 export class ChatHost {
   constructor({
     mains, // [{id, displayName, role, depth:0, personaPath}]
@@ -23,6 +67,7 @@ export class ChatHost {
     project = null, // スレッドスコープ(自動継続の「まだ仕事があるか」判定に使う)
     autoContinueRounds = 3, // ターン上限でも仕事が残っていれば自動で次ラウンドへ(0=従来どおり停止)
     hooks = null, // Hooksインスタンス(roundEndフック)
+    chatConfig = null, // chat設定(chat.memMaxMessages など記憶運用の上書き)
   }) {
     this.mains = mains;
     this.mainWorkspace = mainWorkspace;
@@ -42,6 +87,7 @@ export class ChatHost {
     this.project = project;
     this.autoContinueRounds = autoContinueRounds;
     this.hooks = hooks;
+    this.chatConfig = chatConfig;
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
     this.paused = false; // 一時停止中は新しい起床を潰す(実行中ラウンドはターン境界で自然終了)
     this.memories = new Map(); // id => messages配列(ラウンド間で保持)
@@ -91,16 +137,24 @@ export class ChatHost {
   memory(main) {
     if (!this.memories.has(main.id)) {
       const restored = this.loadMemories(main.id);
-      if (restored) {
-        this.memories.set(main.id, restored);
-      } else {
-        this.memories.set(main.id, [
-          { role: "system", content: buildSystemPrompt(main, this.shellKind) },
-          { role: "user", content: "あなたはメインチャットに常駐するエージェントとして活動を始めます。ユーザーや同僚の入力を待って応答・行動してください。" },
-        ]);
-      }
+      this.memories.set(main.id, restored ?? [
+        { role: "system", content: buildSystemPrompt(main, this.shellKind) },
+        { role: "user", content: "あなたはメインチャットに常駐するエージェントとして活動を始めます。ユーザーや同僚の入力を待って応答・行動してください。" },
+      ]);
     }
     return this.memories.get(main.id);
+  }
+
+  // ラウンド終了時の記憶刈り取り(上限超過分を要約へ)。上限はchat.memMaxMessagesで設定可。
+  applyMemoryLimit(main) {
+    const max = Number(this.chatConfig?.memMaxMessages ?? DEFAULT_MEM_MAX_MESSAGES);
+    const cur = this.memories.get(main.id);
+    if (!Array.isArray(cur)) return;
+    const trimmed = trimMemories(cur, { memMaxMessages: max, boardName: this.board?.name });
+    if (trimmed !== cur) {
+      this.memories.set(main.id, trimmed);
+      this.bus.emit("memory.pruned", { agent: main.id, before: cur.length, after: trimmed.length });
+    }
   }
 
   // 会話メモリの保存/復元(workspace/state/mem-<id>.json)
@@ -119,6 +173,7 @@ export class ChatHost {
   }
 
   saveMemories(main) {
+    this.applyMemoryLimit(main); // 保存時に上限を適用(肥大化防止)
     const p = this.memPath(main.id);
     if (!p || !this.memories.has(main.id)) return;
     try {
