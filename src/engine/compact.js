@@ -136,6 +136,11 @@ export const MEM_HEADER = "[記憶の刈り取り] この会話の古い部分�
  */
 export function pruneMemories(messages, { keepRecent = MEM_KEEP_RECENT, maxMessages = 200, maxBytes = 512 * 1024 } = {}) {
   const arr = Array.isArray(messages) ? messages : [];
+  // 0/nullは無効化(config化の契約): 上限を設けない
+  const disabled = (v) => v == null || v === 0;
+  if (disabled(maxMessages) && disabled(maxBytes)) {
+    return { messages: [...arr], changed: false, removed: 0 };
+  }
   // system(先頭)は常に残す。保護枠は system + keepRecent
   const head = arr.length && arr[0].role === "system" ? [arr[0]] : [];
   const body = head.length ? arr.slice(1) : arr;
@@ -148,7 +153,15 @@ export function pruneMemories(messages, { keepRecent = MEM_KEEP_RECENT, maxMessa
     return { messages: [...arr], changed: false, removed: 0 };
   }
   // 保護枠がmaxMessagesを食い潰す場合は縮める(system+ヘッダ+最低2件の tail を残す)
-  const keep = Math.max(2, Math.min(keepRecent, maxMessages - head.length - 1));
+  let keep = Math.max(2, Math.min(keepRecent, maxMessages - head.length - 1));
+  // keepRecent保護がバイト上限を食い潰す場合: 保護枠を削ってでも最低1件は刈り取る
+  // (body全体が保護されて dropped=0 になると、バイト超過のまま何も起きない不正状態を残す)
+  const protectedBytes = () => head.reduce((s, m) => s + bytes(m), 0)
+    + body.slice(-keep).reduce((s, m) => s + bytes(m), 0)
+    + bytes({ content: MEM_HEADER + " " + new Date().toISOString() });
+  if (!disabled(maxBytes)) {
+    while (keep > 1 && protectedBytes() > maxBytes) keep--;
+  }
   const tail = body.slice(-keep);
   const dropped = body.slice(0, Math.max(0, body.length - keep));
   if (!dropped.length) {
