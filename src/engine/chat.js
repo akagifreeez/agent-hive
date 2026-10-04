@@ -55,6 +55,35 @@ export function trimMemories(messages, opts = {}) {
   ];
 }
 
+// ===== 文字化け入力の検知(イシュー#20 提案3)=====
+
+// U+FFFD(置換文字)を含むか(U+FFFDはエンコード壊れの決定打)
+export function containsReplacementChar(text) {
+  return typeof text === "string" && text.includes(String.fromCharCode(0xfffd));
+}
+
+// UTF-8→cp932二重エンコードの兆候(置換文字が無くても化け型を拾う)
+export function looksDoubleEncoded(text) {
+  if (typeof text !== "string" || text.length < 4) return false;
+  const latinBlocks = (text.match(/[ãâåæçèé]+/g) ?? []).join("");
+  const symbols = (text.match(/[Â¢Â¤Â§Â±Â½Â¿]/g) ?? []).length;
+  if (latinBlocks.length >= 4 && symbols + (text.match(/[^ -~]/g) ?? []).length >= 2) return true;
+  if (symbols >= 3 && /[A-Z]/.test(text)) return true;
+  return false;
+}
+
+// 統合検知。警告文(問題なければnull)
+export function detectBrokenInput(text) {
+  if (containsReplacementChar(text)) return true;
+  return looksDoubleEncoded(text);
+}
+
+// say()注入文へ付ける警告。検知しなければnull
+export function mojibakeWarning(text) {
+  if (!detectBrokenInput(text)) return null;
+  return "[警告] この入力は文字化けしている可能性があり、内容が壊れていて読めない。推測で応答せず、ユーザーに文面の再送を求めること。";
+}
+
 export class ChatHost {
   constructor({
     mains, // [{id, displayName, role, depth:0, personaPath}]
@@ -224,7 +253,10 @@ export class ChatHost {
   say(text) {
     this.board.post("you", text);
     this.mains.forEach((m, i) => {
-      this.wake(m, "[チャット] ユーザーからの新着入力があります。直前のボード新着を確認して応答してください。", i * this.staggerMs);
+      let kick = "[チャット] ユーザー入力です。ユーザー入力を最優先で応答してください。直近のワーカー投稿には触れなくてよい(後でまとめて確認する)。";
+      const warn = mojibakeWarning(text);
+      if (warn) kick = kick + " " + warn;
+      this.wake(m, kick, i * this.staggerMs);
     });
   }
 
