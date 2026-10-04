@@ -171,7 +171,12 @@ export class ChatHost {
     if (!p) return null;
     try {
       const d = JSON.parse(readFileSync(p, "utf8"));
-      if (Array.isArray(d.messages) && d.messages.length > 1) return d.messages;
+      if (Array.isArray(d.messages) && d.messages.length > 1) {
+        // 復元でもsaveMemoriesと同じ上限を適用する(イシュー#21): 上限超過のスナップショットを
+        // そのまま積むと、復元を起点に再肥大する。超過分はここで刈っておく。
+        const pruned = pruneMemories(d.messages, this.memPrune);
+        return pruned.messages;
+      }
     } catch {}
     return null;
   }
