@@ -16,7 +16,7 @@ import { mergeAgentWork } from "./worktree.js";
 
 // mem-<id>.json の既定上限(メッセージ数)。chat.memMaxMessages で上書きできる。
 // 実運用(220件超のテスト・複数スレッド併走)でも足りる分量を残し、system+要約+直近分を保つ。
-export const DEFAULT_MEM_MAX_MESSAGES = 120;
+export const DEFAULT_MEM_MAX_MESSAGES = 200;
 // mem-<id>.json の既定上限(バイト)。chat.memMaxBytes で上書き。0で無効化(0=刈り取りしない契約)。
 export const DEFAULT_MEM_MAX_BYTES = 512 * 1024;
 
@@ -263,7 +263,7 @@ export class ChatHost {
   say(text) {
     this.board.post("you", text);
     this.mains.forEach((m, i) => {
-      let kick = "[チャット] ユーザー入力です。ユーザー入力を最優先で応答してください。直近のワーカー投稿には触れなくてよい(後でまとめて確認する)。";
+      let kick = "[チャット] ユーザーからの新着入力があります。ユーザー入力を最優先で応答してください。直近のワーカー投稿には触れなくてよい(後でまとめて確認する)。";
       const warn = mojibakeWarning(text);
       if (warn) kick = kick + " " + warn;
       this.wake(m, kick, i * this.staggerMs);
@@ -327,6 +327,7 @@ export class ChatHost {
       return;
     }
     st.running = true;
+    st.lastKickoff = String(kickoffText); // 直近ラウンドの注入文(テスト・診断用)
     this.autoRounds.set(main.id, 0); // ユーザー/ボード起点のラウンドでは連続回数をリセット
     const run = async () => {
       if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
