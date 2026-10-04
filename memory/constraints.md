@@ -121,3 +121,5 @@
 - **UIトークンは403時にhfetchが自己修復する**: サーバー起動ごとにCSRFトークンは再生成されるため、開きっぱなしのUIタブは再起動後に全POSTが403になる。hfetchは403時に同一オリジンの最新ページ(/)から実トークンを引き取り1回だけ再試行する(test/ui-token-selfheal.test.js)。UIのPOST契約を変えるときはこの自己修復経路を壊さない。
 - **検証タスクの「放棄判断で締める」は正規の完了形**: respawn系dirtyタスクが同一内容で再起票されたときも、実装とテストの現main契約(browser-open等)を確認して「取り込み不要」の根拠付き記録でfinishしてよい(2026-10 respawn-engine-r3-cleanup-alpha-dirtyを3回とも同一判断で締めた実績)。判断基準は「現mainの意図的な改善(open:true明示等)と競合する古い設計か」。
 - **スレッドが閉じられた後の発見器起票は稼働中スレッドのメンバーが消化する**: 閉じたスレッドのメンバーは請求できない(ガンマ観測)。スレッド終了時は未消化の発見器タスク(fix-*/verify-*)が残っていないか確認してから閉じるのが安全。
+
+- **mojibake系テストの未完不整合(2026-10 main 0aec183時点)**: test/mojibake.test.js が chat.js の旧export名 containsReplacementChar をimportしてロード失敗(実装は detectBrokenInput に統一済み)。mojibake-detection.test.js の say()警告配線2件も未接続。fix-mojibake-detection(fix-lead-priority)で契約統一が必要。テストが2系統で別契約になった状態のマージは、実装側の1関数へ集約してから緑化する。
