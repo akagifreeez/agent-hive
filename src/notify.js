@@ -17,8 +17,7 @@ const ANSI = { yellow: "\x1b[33m", bold: "\x1b[1m", reset: "\x1b[0m" };
 export function printNotifyLine(n) {
   const c = /** @type {{yellow: string, bold: string, reset: string}} */ (process.env.NO_COLOR ? "" : ANSI);
   const line = `🔔 [通知] ${n.title}: ${n.body}`;
-  const colored = c ? `${c.bold}${c.yellow}${line}${c.reset}` : line;
-  stderr.write(`${colored}\n`);
+  stderr.write(`${c.bold}${c.yellow}${line}${c.reset}\n`);
 }
 
 /**

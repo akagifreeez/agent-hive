@@ -18,3 +18,10 @@
 - マージの競合マーカーガード(main側+ブランチ側の二段階)を導入: main破損の連鎖(r7でmcp.jsにマーカーが入ったまま複数マージが重なり全テスト構文エラー)を受け、マージ直前に両側を検査してmarker:true拒否→作業者へ返送する方式に決定(2026-09 merge-queue-r6)。回避策ではなく仕組みでの解決。
 - compact英語化やテスト期待値の日本語文字列に依存するテストは、プロンプト文言変更と同時に直す。マージ直後の「暫定状態」で発見器が失敗を拾うことがあるため、fix着手時はまず現mainでの再現確認(連続2回実行してpass数を揃える)を証跡にする(2026-09 merge-queue-r6)。
 - weather-ai改善調査(2026-09)の結論(スレッド最終・ボード#32確定版): 推奨順は **[1]GSI標高タイル地形特徴量(TPI等・無償・PoC 2〜3日・盆地バイアスに直撃)→[3]ECMWF AIFS(.index+Range取得・CC-BY-4.0・遡及2023-01〜)→[5]Open-Meteo MSM historical-forecast(無償API・PoC 1〜2日と最短・定量効果は未確認)→[4]GEFS spread(可・ただしgespread配信なし=メンバー31自前計算・268MB/サイクル)→[2]WIS2(データ実体なしで不採用寄り)**。[6]data/nc実査は資産確認として完了(17,641ファイル=1,470サイクル)。全報告はbetaの独立再現(数値一致)で検証済み。次ラウンドは[1]からのPoC着手とRMSE 1.20℃からの定量効果測定が残課題。外部データソースの技術詳細は constraints.md「気象データソース実テスト結果」へ。
+- UI実装は先行実装(main取り込み済み・テスト有り)へ統一するのが既定。usage集計ビューは renderUsageAggregate(issue-respawn-alpha実装・test/usage-aggregate-ui.test.js)を正とし、並行実装(spawn-impl-2のusageAggTable+inline loader)は差分ゼロ化して廃止した(2026-09)。
+- 発見器タスク(review-changes/distill-learnings等)の繰り返し起票は「地点前進→新条件成立」の正規挙動。ロール不一致(impl/leadにrole:reviewは請求不可)で全員が拾えないときは、claim空転を打ち切ってボードで現状共有する(2026-09 discuss-mumdrr6iで確認)。
+- タスク別モデル選択(イシュー#12)の運用決定: create_task/spawn_agent の model引数はリーダー専用・任意(基本は既定モデル、相当な理由があるときだけ代替)。タスクメタの model: 行が検証者・引き継ぎ者へ「どのモデルで動くべきか」の一次情報になる。実装詳細は constraints.md「issue-modelselect系列ラウンドの知見」へ(2026-09)。
+- ラウンドcheckpoint/resume(イシュー#4)の設計決定: スナップショット対象はモデルAPI異常(model.chat失敗=endedBy:"error")のみ。ツール失敗打ち切り・予算停止は「モデルとは無関係の意図的終了」のため対象外。保存はツール実行済み地点でcheckpointFn経由(state/checkpoint-<id>.json・tmp+rename)、復元はエラー検知時にmemories差し替え→checkpointファイル削除(削除しないと復元→失敗の無限ループ)。実装詳細は constraints.md イシュー#4節へ(2026-09)。
+- 承認待ちタスクの孤立対策: verify-*(role:review)は実装者が自己承認できない。スレッドのreviewロールが退場すると承認待ちが無人になるが、リーダー(lead)もreviewタスクは請求不可。対処は lead が reviewロールのワーカーを spawn して検証→approve まで通す(issue-checkpointスレッドで実証)。spawnは同時エージェント数上限があるため、まず既存ワーカーの再請求を促してから実施する。
+
+- 起票タスクのrole指定は必要が無い限り固定しない(省略で誰でも可)。feat-monitor-chartスレッドでリーダー/スポーン元専用のimpl起票がメンバーのボードに現れず、スポーンした追加ワーカー(impl-2/6/7/8)もrole不一致で請求できず退場が連発した。また請求が自動解放(プロセス再起動)でopenへ戻った場合、実装コミットがworktreeにあれば再請求者が即finishできる — 実装は先行コミットしておき、finishタイミングは解放後に合わせるのが有効(2026-09)。

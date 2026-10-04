@@ -79,7 +79,7 @@ test("parsePage: タイトルと見出し・アンカーが取れ、script/style
   assert.deepEqual(page.headings, ["見出しH1", "見出しH2"]);
   assert.equal(page.links.find((l) => l.text === "ガイド").href, "http://127.0.0.1:9/docs/guide.html");
   assert.equal(page.links.find((l) => l.text === "外部リンク").href, "https://example.com/ext");
-  assert.ok(!page.links.some((l) => l.href === null)); // javascript:/断片は除外
+  assert.ok(!page.links.some((l) => l.href !== null && !/^https?:/.test(l.href))); // hrefは絶対URLかnull(断片・javascript:はnull保持)
   assert.ok(!page.text.includes("script_secret"));
 });
 
@@ -106,7 +106,7 @@ test("extractElements: 種別フィルタとジャンプ先(index)が返る", as
   assert.equal(headings[0].level, 1);
 
   const links = extractElements(page, { type: "link" });
-  assert.equal(links.length, 2); // 断片(#sec-1)はnormalizeUrlで除外
+  assert.equal(links.length, 2); // 断片(#sec-1)はnormalizeUrlでnull→除外(実装契約: 断片は遷移候補から外す)
   assert.ok(links.every((l) => l.index >= 1));
 
   const all = extractElements(page, {});
@@ -197,7 +197,7 @@ test("browserSubmit: POSTでフォーム送信でき、303はlocation追従し�
     values: { user: "alice", pass: "s3cret" },
   });
   assert.equal(r.ok, true);
-  assert.match(r.text, /^送信: POST/m); // 送信: POST <url>
+  assert.match(r.text, /^method: POST /m); // method: POST <url>(browser-net.jsの出力契約)
   assert.match(r.text, /user=alice/);
   assert.match(r.text, /alice/); // 応答ページの抽出にも反映されている
   server.close();

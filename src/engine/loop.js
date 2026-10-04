@@ -2,7 +2,8 @@
 // 仕事の発見と請求(claim)はAI自身が claim_next_task ツールで行う。
 // コンテキスト管理はZCode compact/準拠: microcompact(全ターン)→autocompact(閾値超過時)。
 // 予算(トークン)超過と idle(連続請求失敗)はエンジンが強制終了する。
-import { readFileSync } from "node:fs";
+import { readFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 import {
   microcompact,
   shouldAutocompact,
@@ -154,7 +155,10 @@ export async function runAgentLoop({
     const fresh = board.since(seen).filter((p) => p.from !== agent.id);
     if (fresh.length) {
       seen = fresh[fresh.length - 1].id;
-      const text = fresh.map((p) => `${p.from}: ${p.text}`).join("\n---\n");
+      // 参照は「from #id (ISO時刻/スレッド)」形式(イシュー#20): ボードクリア後のid再採番で
+      // 番号単独の参照が衝突するため、メモリに残る参照はラベル・日時付きで曖昧性をなくす。
+      const fmtAt = (t) => new Date(t).toISOString().replace("T", " ").slice(0, 16);
+      const text = fresh.map((p) => `${p.from} #${p.id} (${fmtAt(p.at)}/${p.thread}): ${p.text}`).join("\n---\n");
       messages.push({ role: "user", content: `[ボード新着]\n${text.slice(0, 6000)}` });
     }
     // ラウンド実行中に入ったユーザー入力をターン境界で割込ませる(steering: ZCode command-queue流)
@@ -181,6 +185,8 @@ export async function runAgentLoop({
     if (mc.changed) bus.emit("compact.micro", { agent: agent.id, savingsTokens: mc.savingsTokens });
 
     let res;
+    // 生成速度(tok/s)計測用: 1呼出の実経過時間。トレースへ残してUIの「トークン/秒」表示に使う
+    const chatStartedAt = Date.now();
     try {
       // ストリーミング: 断片をbusへ流してUIのライブ表示に使う
       res = await model.chat({ messages, tools: tools.specs, onDelta: (d) => bus.emit("agent.delta", { agent: agent.id, ...d }) });
@@ -190,12 +196,36 @@ export async function runAgentLoop({
       bus.emit("agent.error", { agent: agent.id, turn, error: err.message });
       return { ok: false, endedBy: "error", error: err.message, seenBoard: seen };
     }
+    const chatMs = Date.now() - chatStartedAt;
     if (ledger) {
-      ledger.add(agent.id, res.usage);
+      ledger.add(agent.id, res.usage, { ms: chatMs });
       bus.emit("usage", { agent: agent.id, usage: res.usage });
     }
     runTokens += (res.usage?.promptTokens ?? 0) + (res.usage?.completionTokens ?? 0);
     lastPromptTokens = res.usage?.promptTokens ?? 0;
+    // トークン内訳のトレース記録(消費分析用)。ボードJSONLと同じ親の usage-trace/ 配下へ1ターン1行追記する
+    // (監査領域 state/ 直下は避ける)。prompt/completion/reasoningの内訳+呼出時間(ms)+コンテキスト概算サイズを記録。
+    try {
+      // 書込先は監査領域(state/)を避ける: 監査台帳と同じディレクトリへのエンジン書込は運用と衝突する。
+      // board.persistPathがあればその親の下 usage-trace/ へ、無ければスキップ(監査領域へは書かない)
+      const baseDir = board.persistPath ? dirname(board.persistPath) : null;
+      if (!baseDir) throw new Error("usage-trace: persistPath無し(state/監査領域を避けるため書かない)");
+      const traceDir = join(baseDir, "usage-trace");
+      mkdirSync(traceDir, { recursive: true });
+      const ctxChars = messages.reduce((n, m) => n + String(m.content ?? "").length, 0);
+      appendFileSync(join(traceDir, "usage-trace.jsonl"), JSON.stringify({
+        ts: new Date().toISOString(), agent: agent.id, turn,
+        prompt: res.usage?.promptTokens ?? 0,
+        completion: res.usage?.completionTokens ?? 0,
+        reasoning: res.usage?.reasoningTokens ?? 0,
+        ms: chatMs,
+        tokPerSec: chatMs > 0 ? (res.usage?.completionTokens ?? 0) / (chatMs / 1000) : null,
+        ctxChars, msgCount: messages.length,
+      }) + "\n");
+      // UIのリアルタイム表示用(イシュー#17): トレースと同じ値をbusへ流す。
+      // server.jsが受けて live.agents[id].ctx へ使用/上限/残りを、tok へ直近/平均のtok/sを計算して保持する
+      bus.emit("usage.trace", { agent: agent.id, turn, ctxChars, ms: chatMs, completion: res.usage?.completionTokens ?? 0 });
+    } catch { /* トレースの失敗でループを止めない */ }
     // サーバー側web_searchが走ったら活動ログへ(ZCodeの検索表示相当)
     if (res.searches?.length) {
       bus.emit("agent.search", {
@@ -282,8 +312,9 @@ export async function runAgentLoop({
     });
     if (ac.should && autocompactFailures < AUTOCOMPACT_FAILURE_LIMIT) {
       try {
+        const acStartedAt = Date.now();
         const summary = await model.chat({ messages: buildCompactRequest(messages, { taskContext: currentTaskContext(tasks, agent, messages), hasMemory: Boolean(memory) }) });
-        if (ledger) ledger.add(agent.id, summary.usage);
+        if (ledger) ledger.add(agent.id, summary.usage, { ms: Date.now() - acStartedAt });
         runTokens += (summary.usage?.promptTokens ?? 0) + (summary.usage?.completionTokens ?? 0);
         const text = (summary.content ?? "").trim();
         if (!text) throw new Error("要約が空でした");

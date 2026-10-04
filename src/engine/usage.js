@@ -1,33 +1,55 @@
 // トークン/コストの台帳。provider usage(OpenRouterのusage.costは実費)を集計する。
+// add()にopts.ms(呼出の実経過ミリ秒)を渡すと生成速度(tok/s)の累積も取り、
+// エントリにavgTokPerSec(完了トークン÷累積秒)を維持する。msを渡さない呼出(旧呼出・
+// 時間計測の無い統合先)は速度集計の分子・分母のどちらにも入らない(avgTokPerSecはnullのまま)。
 export class UsageLedger {
   constructor() {
     this.byAgent = new Map();
+    // 速度集計の実データ(agentId -> { ms, completion })。avgTokPerSecの算出元で、
+    // 未計測呼出のトークンを混ぜないためエントリのcompletionTokensとは別に持つ
+    this.tps = new Map();
   }
 
-  add(agentId, usage) {
-    const e = this.byAgent.get(agentId) ?? { calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+  add(agentId, usage, opts = {}) {
+    const e = this.byAgent.get(agentId) ?? { calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0, msSum: 0, avgTokPerSec: null };
     e.calls += 1;
     e.promptTokens += usage?.promptTokens ?? 0;
     e.completionTokens += usage?.completionTokens ?? 0;
     e.reasoningTokens += usage?.reasoningTokens ?? 0;
     e.costUsd += usage?.costUsd ?? 0;
+    const ms = Number(opts.ms ?? 0);
+    if (ms > 0) {
+      e.msSum += ms;
+      const a = this.tps.get(agentId) ?? { ms: 0, completion: 0 };
+      a.ms += ms;
+      a.completion += usage?.completionTokens ?? 0;
+      this.tps.set(agentId, a);
+      e.avgTokPerSec = a.completion / (a.ms / 1000);
+    }
     this.byAgent.set(agentId, e);
     return e;
   }
 
   agent(agentId) {
-    return this.byAgent.get(agentId) ?? { calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+    return this.byAgent.get(agentId) ?? { calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0, msSum: 0, avgTokPerSec: null };
   }
 
   totals() {
-    const t = { calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+    const t = { calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0, msSum: 0, avgTokPerSec: null };
+    let tpsMs = 0, tpsCompletion = 0;
     for (const e of this.byAgent.values()) {
       t.calls += e.calls;
       t.promptTokens += e.promptTokens;
       t.completionTokens += e.completionTokens;
       t.reasoningTokens += e.reasoningTokens;
       t.costUsd += e.costUsd;
+      t.msSum += e.msSum ?? 0;
     }
+    for (const a of this.tps.values()) {
+      tpsMs += a.ms;
+      tpsCompletion += a.completion;
+    }
+    if (tpsMs > 0) t.avgTokPerSec = tpsCompletion / (tpsMs / 1000);
     return t;
   }
 
@@ -57,7 +79,7 @@ export function aggregateUsage(history, opts = {}) {
     if (sinceMs != null && d.getTime() < sinceMs) continue; // 期間外は除外
     // usage.summary(シナリオ全体の合計サマリ)はusage.roundの積み上げと二重計上になるため集計対象外
     if (typeof h.agent !== "string" || !h.agent) continue;
-    const date = d.toISOString().slice(0, 10);
+    const date = localDateKey(d); // ローカル日付基準(ユーザー視点の「日別」。深夜帯の前日バケット落ちを防ぐ)
     const thread = resolveThread(h);
     const t = h.totals ?? {};
     const calls = Number(t.calls ?? 0);
@@ -100,3 +122,12 @@ function resolveThread(h) {
   if (agent && WORKER_SUFFIX_RE.test(agent)) return agent.replace(WORKER_SUFFIX_RE, "");
   return "__main__";
 }
+
+// ローカルタイムゾーンの年月日(YYYY-MM-DD)を返す。集計の「日」はユーザーの地元日付で括る。
+export function localDateKey(d) {
+  const dd = d instanceof Date ? d : new Date(d);
+  const y = dd.getFullYear();
+  const m = String(dd.getMonth() + 1).padStart(2, "0");
+  const day = String(dd.getDate()).padStart(2, "0");
+  return y + "-" + m + "-" + day;
+}

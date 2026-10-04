@@ -6,7 +6,8 @@ import { URL, URLSearchParams } from "node:url";
 export function normalizeUrl(href, baseUrl) {
   const h = String(href ?? "").trim();
   if (!h) return null;
-  if (/^#/i.test(h) || /^javascript:/i.test(h) || /^data:/i.test(h) || /^vbscript:/i.test(h)) return null;
+  if (/^javascript:/i.test(h) || /^data:/i.test(h) || /^vbscript:/i.test(h)) return null;
+  if (/^#/i.test(h)) return null; // 断片(#...)は遷移候補から除外(テスト仕様 e80e512)
   try {
     return new URL(h, baseUrl).toString();
   } catch {
@@ -105,7 +106,7 @@ export function parsePage(html, baseUrl) {
     const raw = am[1] ?? am[2] ?? am[3] ?? "";
     const text = btStripTags(am[4]);
     const href = normalizeUrl(raw, base);
-    if (href === null) continue; // javascript:/断片(#)等はリンク一覧から除外(テスト仕様: e80e512)
+    if (href === null) continue; // javascript:/断片(#)等は除外(テスト仕様 e80e512)
     if (!text) continue;
     links.push({ text, href });
   }
@@ -142,16 +143,8 @@ export function extractElements(page, filter = {}) {
   let index = 0;
   for (const type of want) {
     if (type === "link") {
-      // リンクはrawから直接列挙する(断片#...はhref=nullで残す。遷移候補の一覧性優先)。javascript:等は除外
-      const aRe = /<a\s[^>]*?href=(?:"([^"]*)"|'[^']*'|([^\s>]+))[^>]*>([\s\S]*?)<\/a\s*>/gi;
-      let am;
-      while ((am = aRe.exec(String(page.raw ?? ""))) && index < 100) {
-        const rawHref = am[1] ?? am[2] ?? am[3] ?? "";
-        const text = btStripTags(am[4]);
-        if (!text) continue;
-        if (/^(javascript|data|vbscript):/i.test(rawHref.trim())) continue;
-        out.push({ index: ++index, type, text, href: normalizeUrl(rawHref, page.url) });
-      }
+      // page.links(parsePage済み・断片/javascript除外済み)をそのまま列挙する
+      for (const l of page.links ?? []) out.push({ index: ++index, type, text: l.text, href: l.href });
     } else if (type === "form") {
       for (const f of page.forms ?? []) out.push({ index: ++index, type, method: f.method, action: f.action, fields: f.fields.length });
     } else if (type === "heading") {
