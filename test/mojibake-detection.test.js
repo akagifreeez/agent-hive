@@ -27,6 +27,7 @@ function mkHost(ws) {
     mains: [agent], project: "cp", autoContinueRounds: 0, staggerMs: 0,
     modelFactory: () => ({ maxTokens: 10, async chat() { return { content: "ok", toolCalls: [], raw: { content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } }; } }),
     toolsFactory: () => createTools({ agent, workspace: ws, board, tasks, bus }),
+    board, tasks, bus,
     autoStart: false,
   });
   return { host, board, bus, tasks, agent };
