@@ -167,7 +167,6 @@ export function pruneMemories(messages, { keepRecent = MEM_KEEP_RECENT, maxMessa
     const keptBytesFor = (k) => head.reduce((acc, m) => acc + bytes(m), 0)
       + body.slice(-k).reduce((acc, m) => acc + bytes(m), 0);
     while (keep > 1 && (body.length - keep < 1 || keptBytesFor(keep) > maxBytes)) keep--;
-    while (keep > 1 && droppedFor(keep) < 1 && keepRecent > body.length) keep--;
   }
   const tail = body.slice(-keep);
   const dropped = body.slice(0, Math.max(0, body.length - keep));
