@@ -1,16 +1,23 @@
 // to_thread: post_to_board の別スレッド宛投稿(design-to-thread.md)
-import { test } from "node:test";
+// ワークスペースはtmpへ隔離する(process.cwd()を指すと監査台帳が本番state/audit.jsonlに混入する)
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Bus } from "../src/engine/board.js";
 import { Board } from "../src/engine/board.js";
 import { createTools } from "../src/engine/tools.js";
+
+const ws = mkdtempSync(join(tmpdir(), "hive-tothread-"));
+after(() => { try { rmSync(ws, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ } });
 
 function mkTools(board, resolveBoard) {
   const agent = { id: "a1", displayName: "エー", thread: "t1" };
   return createTools({
     agent,
-    workspace: process.cwd(),
-    mainWorkspace: process.cwd(),
+    workspace: ws,
+    mainWorkspace: ws,
     board,
     tasks: { snapshot: () => ({ open: [], claimed: [], done: [] }), list: () => [] },
     bus: new Bus(),

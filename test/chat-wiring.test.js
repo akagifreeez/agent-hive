@@ -6,8 +6,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bus } from "../src/engine/board.js";
-import { startUi } from "../src/ui/server.js";
+import { startUi as _startUi } from "../src/ui/server.js";
 import { chatUiHandlers } from "../src/ui/chat-wiring.js";
+import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
+tokenedFetchOn();
+
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-wire-"));
@@ -32,7 +35,7 @@ test("chatUiHandlers: 設定・スレッド・フォルダ・pause・feedbackの
     feedback: (req) => { calls.push(["fb", req.taskId]); return { ok: true, id: "fb-x", thread: "__main__" }; },
     setThreadPaused: (req) => { calls.push(["pause", req.project, req.paused]); return { ok: true, name: req.project, paused: req.paused }; },
   };
-  const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false, ...chatUiHandlers(controller) });
+  const ui = await startUiTokenized(_startUi, { config, modelFactory: () => ({}), bus, autoStart: false, ...chatUiHandlers(controller) });
   const base = `http://127.0.0.1:${config.ui.port}`;
   const post = async (path, body) => {
     const r = await fetch(base + path, { method: "POST", headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" }, body: JSON.stringify(body) });
@@ -68,6 +71,22 @@ test("chatUiHandlers: 設定・スレッド・フォルダ・pause・feedbackの
   assert.ok(calls.some((c) => c[0] === "fb" && c[1] === "t1"));
   assert.ok(calls.some((c) => c[0] === "wf" && c[1] === "demo"));
 
+  ui.close();
+  rmTree(ws);
+});
+
+test("chatUiHandlers: getter渡しでも後から入るcontrollerに届く(UI先立ち上げ順)", async () => {
+  const ws = mktmp();
+  const bus = new Bus();
+  const config = { workspace: ws, ui: { port: 0 }, model: { model: "base-model" }, agents: [] };
+  const calls = [];
+  let controller = null; // この後代入される(UI先・runChat後の順を模擬)
+  const ui = await startUiTokenized(_startUi, { config, modelFactory: () => ({}), bus, autoStart: false, ...chatUiHandlers(() => controller) });
+  controller = { say: (t) => calls.push(["say", t]) };
+  const base = `http://127.0.0.1:${config.ui.port}`;
+  const r = await fetch(base + "/api/say", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "遅延参照テスト" }) });
+  assert.equal(r.status, 200);
+  assert.deepEqual(calls, [["say", "遅延参照テスト"]]);
   ui.close();
   rmTree(ws);
 });

@@ -1,10 +1,11 @@
 import { loadConfig } from "./config.js";
-import { OpenAIModel } from "./model/openai.js";
+import { createModelFactory } from "./model/factory.js";
 import { runScenario, runChat } from "./runner.js";
 import { Bus } from "./engine/board.js";
 import { startUi } from "./ui/server.js";
 import { chatUiHandlers } from "./ui/chat-wiring.js";
 import { wireConsoleLog } from "./log.js";
+import { wireCliNotify } from "./notify.js";
 
 function usage() {
   console.log(`agent-hive — 複数エージェントが同一ワークスペースで同時作業するハーネス
@@ -23,11 +24,21 @@ async function main() {
   const bus = new Bus();
   wireConsoleLog(bus);
 
-  const modelFactory = () => new OpenAIModel(config.model);
+  const modelFactory = createModelFactory(config);
+
+  // CLI通知(#11): UIを立てない実行(--run/シナリオ直実行)はコンソール配信だけ。
+  // --chat/--serve はstartUi側で同じbusへ配線する(コンソール+監視/monitor配信)ので二重にやらない
+  if (!args.includes("--chat") && !args.includes("--serve")) {
+    wireCliNotify(bus, { longTaskSec: config.notify?.longTaskSec ?? 600 });
+  }
 
   if (args.includes("--chat")) {
-    const controller = await runChat({ config, bus });
-    await startUi({ config, bus, autoStart: false, ...chatUiHandlers(controller) });
+    // デスクトップ殻と同じ順(UIの待ち受けを先に立ててからrunChat)。
+    // 逆だとリーダーの登録イベント(thread.opened)がUI立ち上がり前に消える。
+    // controllerは後から入るのでgetterで渡す
+    let controller = null;
+    await startUi({ config, bus, autoStart: false, ...chatUiHandlers(() => controller) });
+    controller = await runChat({ config, bus });
     return;
   }
 

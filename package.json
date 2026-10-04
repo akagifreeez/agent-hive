@@ -1,6 +1,6 @@
 {
   "name": "agent-hive",
-  "version": "0.1.0",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "description": "複数エージェントが同一ワークスペースで同時に作業し、共有ボードで横につながるハーネス(デスクトップソフトへの成長を前提)。Gitリポジトリ=blackboard、タスクファイルのclaimで仕事を自律発見。",
@@ -19,8 +19,10 @@
     "desktop:smoke": "electron . --smoke",
     "desktop:pack": "electron-builder --dir",
     "desktop:dist": "electron-builder",
-    "test": "node --test \"test/*.test.js\"",
-    "doctor": "node scripts/doctor.js"
+    "test": "node --test --test-force-exit \"test/*.test.js\" --ignore \"test/heavy/*.test.js\"",
+    "doctor": "node scripts/doctor.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "test:heavy": "node --test --test-force-exit \"test/heavy/*.test.js\""
   },
   "build": {
     "appId": "io.github.agent-hive.desktop",
@@ -48,7 +50,9 @@
     }
   },
   "devDependencies": {
+    "@types/node": "^26.6.3",
     "electron": "^37.10.3",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2"
   }
 }

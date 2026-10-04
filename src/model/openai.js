@@ -1,11 +1,24 @@
-// OpenAI互換(chat/completions)アダプタ。GLM(Z.AI/OpenRouter)等を想定。
+// openai-completions ワイヤ形式のアダプタ(models.providers.<id>.api="openai-completions"で選択)。
+// OpenAI互換(chat/completions)。GLM(Z.AI/OpenRouter)等を想定。
 // 依存ゼロ(node内蔵fetch)。
 // usage(prompt/completion/reasoning/cost)を返し、コスト計測とコンテキスト管理の
 // 判定ソース(provider usage優先: ZCode compact/policy.tsと同方針)に使う。
 // リトライはZCode adapters/model/retry-policy.ts+runner-retry.ts+failure-classifier.tsの移植:
 // 指数バックオフ+ジッタで最大10回、Retry-Afterは5分まで優先、429/5xx/529は可・401/403/400/422は不可。
+// プロバイダ横断スロットリング(throttle.js)にも参加: 429/529を受けたら同プロバイダ(baseUrl)を
+// 叩く全エージェントへ共有クールダウンを記録し、リクエスト前にgateで待つ(イシュー#1)。
+import { gateProvider, noteProviderRateLimited, clearProviderRateLimit } from "./throttle.js";
+/**
+ * OpenAI互換エンドポイント(GLM等)への最小クライアント。
+ */
 export class OpenAIModel {
-  constructor({ baseUrl, apiKey, model, temperature = 0.7, maxTokens = 2000, timeoutMs = 120000, reasoningEffort = null }) {
+  /**
+   * @param {{baseUrl: string, apiKey: string, model?: string, temperature?: number, maxTokens?: number, timeoutMs?: number, reasoningEffort?: string|null, webSearch?: boolean|object|null, costRates?: {input?: number, output?: number}|null}} cfg
+   *   webSearch: サーバー側web_searchツール(Z.AI固有。functionツールと併存可)。
+   *   true=既定パラメータ(search-prime)、オブジェクト=web_search引数へそのまま展開、null/falsy=無効。
+   *   costRates: カタログ単価($/1Mトークン)。usage.costをプロバイダが返さない場合のフォールバック計算に使う。
+   */
+  constructor({ baseUrl, apiKey, model, temperature = 0.7, maxTokens = 2000, timeoutMs = 120000, reasoningEffort = null, webSearch = null, costRates = null }) {
     if (!apiKey) throw new Error("APIキーが未設定です(環境変数か apiKeyFile を設定してください)");
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
@@ -14,6 +27,8 @@ export class OpenAIModel {
     this.maxTokens = maxTokens;
     this.timeoutMs = timeoutMs;
     this.reasoningEffort = reasoningEffort;
+    this.webSearch = webSearch;
+    this.costRates = costRates;
   }
 
   async chat({ messages, tools, onDelta = null }) {
@@ -26,15 +41,29 @@ export class OpenAIModel {
     if (this.reasoningEffort) {
       body.reasoning = { effort: this.reasoningEffort };
     }
+    // サーバー側web_search(Z.AI): モデルが検索を判断し、結果がコンテキストへ注入される。
+    // 出典はレスポンス(非ストリーム=トップレベル、ストリーム=usageチャンク)の web_search に返る。
+    const bodyTools = [];
+    if (this.webSearch) {
+      bodyTools.push({
+        type: "web_search",
+        web_search: this.webSearch === true
+          ? { enable: true, search_engine: "search-prime", search_result: true }
+          : { enable: true, ...this.webSearch },
+      });
+    }
     if (tools?.length) {
-      body.tools = tools.map((t) => ({ type: "function", function: t }));
+      bodyTools.push(...tools.map((t) => ({ type: "function", function: t })));
       body.tool_choice = "auto";
     }
+    if (bodyTools.length) body.tools = bodyTools;
     // onDeltaが渡されたらストリーミングで受け、断片をその都度コールバックする(ライブ表示用)
     const useStream = typeof onDelta === "function";
     if (useStream) body.stream = true;
     let emptyRetries = 0;
     for (let attempt = 1; ; attempt++) {
+      // プロバイダ横断の共有クールダウン(他エージェントが429/529を見たら全員が待つ: イシュー#1)
+      await gateProvider(this.baseUrl);
       let res;
       try {
         res = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -62,12 +91,15 @@ export class OpenAIModel {
           } catch {}
         }
         if (isRetryableStatus(res.status) && attempt <= RETRY_MAX_RETRIES) {
+          if (res.status === 429 || res.status === 529) {
+            noteProviderRateLimited(this.baseUrl, parseRetryAfterMs(res));
+          }
           await modelSleep(computeRetryDelay(attempt, parseRetryAfterMs(res)));
           continue;
         }
         throw new Error(translateHttpError(res.status, bodyText));
       }
-      let msg, usage;
+      let msg, usage, searches = null;
       if (useStream) {
         let parsed;
         try {
@@ -82,12 +114,15 @@ export class OpenAIModel {
         }
         msg = { content: parsed.content || null, tool_calls: parsed.rawToolCalls, reasoning: parsed.reasoning ?? undefined };
         usage = parsed.usage;
+        searches = parsed.webSearch;
       } else {
         const data = await res.json().catch(() => null);
         msg = data?.choices?.[0]?.message;
         usage = data?.usage;
+        searches = data?.web_search ?? null;
         if (!msg) throw new Error(`応答の形式が不正です: ${JSON.stringify(data).slice(0, 300)}`);
       }
+      clearProviderRateLimit(this.baseUrl);
       // 空応答(テキストもツールもusageも無い)はZCodeと同様1回だけリトライ
       const empty = !msg.content && !(msg.tool_calls?.length) && !usage;
       if (empty && emptyRetries < EMPTY_COMPLETION_MAX_RETRIES) {
@@ -104,7 +139,8 @@ export class OpenAIModel {
           arguments: safeParseArgs(tc.function.arguments),
         })),
         raw: msg,
-        usage: extractUsage(usage),
+        usage: extractUsage(usage, this.costRates),
+        searches, // web_search実行結果の出典一覧([{title,link,refer,...}]、未実行時はnull)
       };
     }
   }
@@ -122,43 +158,50 @@ async function consumeStream(res, onDelta) {
   let content = "";
   let reasoning = "";
   let usage = null;
+  let webSearchResults = null;
   const toolAcc = new Map(); // index => {id, name, args}
-  for (;;) {
-    const { done, value } = await readChunkWithIdleTimeout(reader);
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (payload === "[DONE]") continue;
-      let chunk;
-      try {
-        chunk = JSON.parse(payload);
-      } catch {
-        continue;
-      }
-      if (chunk.usage) usage = chunk.usage;
-      const d = chunk.choices?.[0]?.delta ?? {};
-      if (d.reasoning) {
-        reasoning += d.reasoning;
-        onDelta?.({ kind: "think", text: d.reasoning });
-      }
-      if (d.content) {
-        content += d.content;
-        onDelta?.({ kind: "say", text: d.content });
-      }
-      for (const tc of d.tool_calls ?? []) {
-        const i = tc.index ?? 0;
-        const acc = toolAcc.get(i) ?? { id: tc.id ?? `call-${i}`, name: "", args: "" };
-        if (tc.id) acc.id = tc.id;
-        if (tc.function?.name) acc.name += tc.function.name;
-        if (tc.function?.arguments) acc.args += tc.function.arguments;
-        toolAcc.set(i, acc);
+  try {
+    for (;;) {
+      const { done, value } = await readChunkWithIdleTimeout(reader);
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (payload === "[DONE]") continue;
+        let chunk;
+        try {
+          chunk = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+        if (chunk.usage) usage = chunk.usage;
+        if (chunk.web_search) webSearchResults = chunk.web_search; // 最終usageチャンクに付いてくる(Z.AI)
+        const d = chunk.choices?.[0]?.delta ?? {};
+        if (d.reasoning) {
+          reasoning += d.reasoning;
+          onDelta?.({ kind: "think", text: d.reasoning });
+        }
+        if (d.content) {
+          content += d.content;
+          onDelta?.({ kind: "say", text: d.content });
+        }
+        for (const tc of d.tool_calls ?? []) {
+          const i = tc.index ?? 0;
+          const acc = toolAcc.get(i) ?? { id: tc.id ?? `call-${i}`, name: "", args: "" };
+          if (tc.id) acc.id = tc.id;
+          if (tc.function?.name) acc.name += tc.function.name;
+          if (tc.function?.arguments) acc.args += tc.function.arguments;
+          toolAcc.set(i, acc);
+        }
       }
     }
+  } finally {
+    // 中断(例外・リトライ)でも未読readerとサーバー接続を解放する
+    try { await reader.cancel(); } catch { /* 既に閉じている */ }
   }
   const toolCalls = [...toolAcc.entries()]
     .sort((a, b) => a[0] - b[0])
@@ -168,6 +211,7 @@ async function consumeStream(res, onDelta) {
     content,
     reasoning: reasoning || null,
     usage,
+    webSearch: webSearchResults,
     rawToolCalls: toolCalls.map((t) => ({ id: t.id, type: "function", function: { name: t.name, arguments: JSON.stringify(t.arguments) } })),
   };
 }
@@ -178,13 +222,10 @@ function readChunkWithIdleTimeout(reader) {
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`ストリームが${Math.round(idle / 1000)}秒間無出力です(stall)`)), idle);
   });
-  return Promise.race([
-    reader.read().then((v) => {
-      clearTimeout(timer);
-      return v;
-    }),
-    timeout,
-  ]);
+  const readP = reader.read();
+  // read側がrejectしてもタイマーを解放する(放置するとプロセスが終了しない)
+  readP.finally(() => clearTimeout(timer));
+  return Promise.race([readP, timeout]);
 }
 
 // 成功したモデルを記憶して固定するフェイルオーバー(ZCode model-selection流)。
@@ -243,7 +284,16 @@ export function computeRetryDelay(attempt, retryAfterMs = undefined, jitter = tr
   return Math.round(capped * (0.5 + Math.random() * 0.5));
 }
 
-function parseRetryAfterMs(res) {
+// テストで待ち時間を差し替えられるようにする(sleepはアダプタ間で共有)
+let sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms));
+export function setModelSleep(fn) {
+  sleepImpl = fn;
+}
+export function modelSleep(ms) {
+  return sleepImpl(ms);
+}
+
+export function parseRetryAfterMs(res) {
   const v = res.headers?.get?.("retry-after");
   if (!v) return undefined;
   const n = Number(v);
@@ -253,22 +303,20 @@ function parseRetryAfterMs(res) {
   return undefined;
 }
 
-// テストで待ち時間を差し替えられるようにする
-let sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms));
-export function setModelSleep(fn) {
-  sleepImpl = fn;
-}
-function modelSleep(ms) {
-  return sleepImpl(ms);
-}
-
-export function extractUsage(u) {
+export function extractUsage(u, costRates = null) {
   if (!u) return { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+  const promptTokens = u.prompt_tokens ?? 0;
+  const completionTokens = u.completion_tokens ?? 0;
+  let costUsd = u.cost ?? 0;
+  // プロバイダが実費を返さない場合のみカタログ単価で概算($/1Mトークン)
+  if (!costUsd && costRates?.input != null && costRates?.output != null) {
+    costUsd = (promptTokens * costRates.input + completionTokens * costRates.output) / 1_000_000;
+  }
   return {
-    promptTokens: u.prompt_tokens ?? 0,
-    completionTokens: u.completion_tokens ?? 0,
+    promptTokens,
+    completionTokens,
     reasoningTokens: u.completion_tokens_details?.reasoning_tokens ?? 0,
-    costUsd: u.cost ?? 0,
+    costUsd,
   };
 }
 

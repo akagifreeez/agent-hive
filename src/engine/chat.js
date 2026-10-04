@@ -5,7 +5,7 @@
 // ラウンド中にスポーンされたサブの進捗もボードに流れ、次のラウンドで読まれる。
 // v6.1: 各メインのmessagesはラウンド終了ごとに workspace/state/ へ保存し、
 // 再起動時に復元する(チャットの記憶がプロセスをまたいで続く)。
-import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { runAgentLoop, buildSystemPrompt } from "./loop.js";
 import { createTools } from "./tools.js";
@@ -54,14 +54,37 @@ export class ChatHost {
     // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
     // これがないと全員退出後の発見器起票タスクが誰にも消化されない。
     bus.on("task.created", (p) => this.handleTaskCreated(p));
+    // 解放(退場した担当者のタスクがopenへ戻る)でも同様に起こす。
+    bus.on("task.released", (p) => this.handleTaskReleased(p));
   }
 
   // 新タスク投入時の起床: 自分のprojectのタスク、または全スレッド共通の自動仕事(fix/review/distill)のみ
+  /**
+   * @param {{taskId: string, project: string}} p
+   */
   handleTaskCreated({ taskId, project }) {
     if (this.project && (project === this.project || /^(fix-|review-|distill-)/.test(taskId))) {
       for (const m of this.mains) {
         this.wake(m, `[システム] 新しいタスク ${taskId} が投入されました。claim_next_task で確認してください。`, 300);
       }
+    }
+  }
+
+  // 解放タスクでの起床: 退場した担当者のタスクがopenへ戻ったら同じスレッドのメンバーを起こす。
+  // task.createdだけだと「解放→誰にも起されず凍結」が起きる(r7で実際に発生)。
+  /**
+   * @param {{taskId: string}} p
+   */
+  handleTaskReleased({ taskId }) {
+    if (!this.project) return;
+    let t = null;
+    try {
+      t = this.tasks.list().open.find((x) => x.id === taskId);
+    } catch {}
+    if (!t && !/^(fix-|review-|distill-)/.test(taskId)) return;
+    if (t && (t.project || "") !== this.project) return;
+    for (const m of this.mains) {
+      this.wake(m, `[システム] タスク ${taskId} がopenへ戻りました。claim_next_task で請求を検討してください。`, 300);
     }
   }
 
@@ -109,6 +132,38 @@ export class ChatHost {
     }
   }
 
+  // ラウンドcheckpoint(イシュー#4): ツール実行済みmessagesのスナップショット。
+  // モデル異常で中断したラウンドをスナップショット地点から再開するためのもの。
+  checkpointPath(id) {
+    return join(this.mainWorkspace ?? ".", "state", `checkpoint-${id}.json`);
+  }
+
+  saveCheckpoint(main, messages) {
+    const p = this.checkpointPath(main.id);
+    if (!p) return;
+    try {
+      mkdirSync(join(p, ".."), { recursive: true });
+      const tmp = `${p}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ messages }));
+      renameSync(tmp, p);
+    } catch { /* 保存失敗でラウンドを壊さない */ }
+  }
+
+  loadCheckpoint(id) {
+    const p = this.checkpointPath(id);
+    if (!p) return null;
+    try {
+      const d = JSON.parse(readFileSync(p, "utf8"));
+      if (Array.isArray(d.messages) && d.messages.length > 1) return d.messages;
+    } catch {}
+    return null;
+  }
+
+  clearCheckpoint(id) {
+    const p = this.checkpointPath(id);
+    if (!p) return;
+    try { rmSync(p, { force: true }); } catch {}
+  }
   // ユーザー入力: 全メインを時間差で起こす(同時だと議論にならないため)。
   // 本文はボード経由で1回だけ届く(seen管理)。キックオフは中身を持たない汎用文。
   say(text) {
@@ -205,15 +260,35 @@ export class ChatHost {
           seenBoard: this.seen.get(main.id) ?? null,
           memory: this.memoryFn?.() ?? null, // 圧縮時の権威分離判定に使う
           drainInput: () => st.pending.splice(0), // ラウンド実行中の入力はターン境界で割込む(steering)
+          peekInput: () => st.pending.length > 0, // idle退場が入力を捨てないための覗き見
+          checkpointFn: (msgs) => this.saveCheckpoint(main, msgs), // ツール実行済み地点のスナップショット(イシュー#4)
         });
-          // 既読位置をラウンド間で保持(同じ入力の二重配信を防ぐ)
-        if (typeof r.seenBoard === "number") this.seen.set(main.id, r.seenBoard);
+          // 既読位置をラウンド間で保持(同じ入力の二重配信を防ぐ)。
+        // クランプ: /clearでボードが空になり投稿idが1から再採番されるため、走行中ラウンドが
+        // 旧値(例: 150)を持ち越すとsince(150)が空になり新着が一切注入されなくなる。
+        // board.lastId()へ下げるだけでよい(クリア後に蓄積した新着はlastId以降に含まれる)
+        // モデル異常で中断したラウンドはスナップショットから復元する(イシュー#4)。
+        // kickoff文を積み直す前のmemoriesをスナップショットで差し替えることで、
+        // 「ツール実行済み地点から再開」になりkickoffの二重積みも起きない。
+        // checkpointファイルは削除する(復元済み。残すと失敗が無限ループする)。
+        if (r?.endedBy === "error") {
+          const snap = this.loadCheckpoint(main.id);
+          if (snap) {
+            this.memories.set(main.id, snap);
+            this.clearCheckpoint(main.id);
+            this.bus.emit("checkpoint.restored", { agent: main.id, messages: snap.length });
+          }
+        } else {
+          // 正常系: スナップショットはもう要らない
+          this.clearCheckpoint(main.id);
+        }
+        if (typeof r.seenBoard === "number") this.seen.set(main.id, Math.min(r.seenBoard, this.board.lastId()));
         // 会話メモリを永続化(再起動後も続きから)
         this.saveMemories(main);
         // ラウンドごとの消費を運用データとして記録(state/usage.json)
         if (this.ledger) {
           try {
-            this.bus.emit("usage.round", { agent: main.id, endedBy: r?.endedBy ?? "ok", totals: this.ledger.agent(main.id) });
+            this.bus.emit("usage.round", { agent: main.id, thread: this.project ?? "__main__", endedBy: r?.endedBy ?? "ok", totals: this.ledger.agent(main.id) });
           } catch {}
         }
           // メインが自ら直接作業した場合の受け皿: ラウンド終了時にmainへ自動マージ
@@ -230,6 +305,11 @@ export class ChatHost {
           }
         } catch (err) {
           this.bus.emit("scenario.warn", { message: `ラウンド異常(${main.id}): ${err.message}` });
+          // 理由を会話内にも見せる(scenario.warnだけだとチャット画面に出ず「返事がない」に見える:
+          // モデル未接続の鍵エラー等はここで初めて利用者に届く)
+          try {
+            this.board.post("system", `[エラー] ${main.displayName}のラウンドが失敗しました: ${err.message}\n設定の「モデルと接続」から接続と鍵を確認してください。`);
+          } catch { /* ボード書き込みに失敗しても元の例外を優先 */ }
         }
         // 自動継続: ターン上限で止まっても、まだ仕事が残っていれば次ラウンドへ(上限回数まで)
         let again = false;

@@ -5,10 +5,10 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Board, Bus } from "../src/engine/board.js";
-import { TaskBlackboard } from "../src/engine/tasks.js";
-import { SpawnManager } from "../src/engine/spawn.js";
-import { ensureGitRepo } from "../src/engine/discover.js";
+import { Board, Bus } from "../../src/engine/board.js";
+import { TaskBlackboard } from "../../src/engine/tasks.js";
+import { SpawnManager } from "../../src/engine/spawn.js";
+import { ensureGitRepo } from "../../src/engine/discover.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 

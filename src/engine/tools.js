@@ -5,14 +5,24 @@ import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync, appendFi
 import { resolve, join, dirname, sep } from "node:path";
 import { runCommand, detectShell } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
-import { readMeta } from "./tasks.js";
+import { readMeta, detectTaskOverlap } from "./tasks.js";
 import { readSkill } from "./skills.js";
+import { browserFetch, browserExtract, browserSubmit } from "./browser.js";
 
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
 
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null }) {
+// ツール実行結果の契約。全ツールはこの形を返し、loopの失敗連続打ち切り(idle退場)はokを数える。
+// textはそのままLLMへの教師文面になる(何が失敗し、次の一手は何かを書く)。
+/**
+ * @typedef {Object} ToolResult
+ * @property {boolean} ok
+ * @property {string} text
+ * @property {boolean} [claimMiss] 請求ミスのときtrue(idle退場判定で連続回数を数える)
+ */
+
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null, approvals = null }) {
 
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
@@ -35,8 +45,13 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       parameters: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false },
     },
     {
+      name: "approve_task",
+      description: "検証したタスクを承認してmainへマージする。承認フロー(approvals)有効時、実装者以外のエージェントが検証後に実行する。自分が実装したタスクは承認できない。",
+      parameters: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false },
+    },
+    {
       name: "create_task",
-      description: "新しい仕事をタスクボードへ投入する。レビュー指摘の修正など後続の仕事を生んだときに使う。task_idは英小文字数字とハイフン。projectに文脈(取り組み名)を付けると、その取り組みのタスクとしてグルーピングされる。acceptanceに受け入れ基準(何ができたら完了とみなすか)を1文で書くと、ワーカーの完成判定がブレなくなる。",
+      description: "新しい仕事をタスクボードへ投入する。レビュー指摘の修正など後続の仕事を生んだときに使う。task_idは英小文字数字とハイフン。projectに文脈(取り組み名)を付けると、その取り組みのタスクとしてグルーピングされる。acceptanceに受け入れ基準(何ができたら完了とみなすか)を1文で書くと、ワーカーの完成判定がブレなくなる。depends_onに先行タスクidの配列を付けると、それらが全部完了するまでこのタスクは請求不可になる。",
       parameters: {
         type: "object",
         properties: {
@@ -45,6 +60,8 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           project: { type: "string", description: "文脈(プロジェクト)名。関連する取り組みに統一" },
           body: { type: "string", description: "具体的な指示(何を/どう確認するか/完了条件)" },
           acceptance: { type: "string", description: "受け入れ基準。完了とみなす客観的な条件を1文で(例: npm testが通り、境界の両側を検証している)" },
+          depends_on: { type: "array", items: { type: "string" }, description: "先行タスクidの配列。全てdoneになるまでこのタスクは請求できない" },
+          model: { type: "string", description: "[リーダー専用・任意] このタスクだけ代替モデルref(provider/modelまたはベアID)を使う。基本は既定モデルのまま(相当な理由があるときだけ)" },
         },
         required: ["task_id", "body"],
         additionalProperties: false,
@@ -60,6 +77,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           role: { type: "string", description: "ロール(impl/review/lead等)" },
           project: { type: "string", description: "文脈(プロジェクト)名。労働者が追加のタスクを請求するときの絞込に使われる" },
           brief: { type: "string", description: "初期ブリーフ。目標・完了条件・このタスク固有の指示のみ。共有素材は労働者が gather_context で読む" },
+          model: { type: "string", description: "この作業員のモデル指定(ModelRef)。リーダー専用・任意。未指定なら既定モデル" },
         },
         required: ["brief"],
         additionalProperties: false,
@@ -137,6 +155,47 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           project: { type: "string", description: "文脈(プロジェクト)名で絞込(done/openのみ有効)" },
         },
         required: ["source"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "browser_fetch",
+      description: "内蔵ブラウザでURLを取得し、ページ構造(タイトル/見出し/リンク/フォーム/本文)を返す。絶対URL必須。レンダリング不要のHTTPレベル取得。",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string", description: "取得するURL(http://またはhttps://の絶対URL)" } },
+        required: ["url"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "browser_extract",
+      description: "ページ取得(またはHTML直接)→セレクタ抽出を1呼び出しで行う。selectorはタグ名・#id・.classに対応(未指定は全文)。",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "取得するURL(html指定時は省略可)" },
+          html: { type: "string", description: "解析対象のHTML(指定時はurl取得を省略)" },
+          base_url: { type: "string", description: "html指定時の基準URL" },
+          selector: { type: "string", description: "抽出する要素(タグ名/#id/.class、省略で全文)" },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "browser_submit",
+      description: "フォームを組立てて送信する(取得→入力→送信のHTTPレベル操作)。html+base_urlからフォーム抽出し、valuesで埋めてPOST/GET。selectorで送信対象要素を検証(誤送信防止)。レンダリング必須の実操作はMCP(Playwright等)で拡張。",
+      parameters: {
+        type: "object",
+        properties: {
+          html: { type: "string", description: "フォームを含むページHTML(browser_fetchのraw等)" },
+          base_url: { type: "string", description: "そのページのURL(相対action解決の基準・絶対URL必須)" },
+          values: { type: "object", description: "入力する値 {フィールド名: 値}。未指定フィールドは現値維持" },
+          selector: { type: "string", description: "送信前に存在を検証する要素(タグ名またはフィールド名)。一致が無ければ送らない" },
+          form_index: { type: "number", description: "複数フォーム時の対象(1始まり・省略で最初)" },
+          follow_redirects: { type: "boolean", description: "リダイレクト追従(既定true)" },
+        },
+        required: ["html", "base_url"],
         additionalProperties: false,
       },
     },
@@ -295,12 +354,37 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           t = tasks.claim(agent, opts);
         }
         if (!t) {
+          // 診断: project一致の未着手タスクがあるのに請求できない=role不一致が濃厚。
+          // 「無い」としか返さないと実在するタスクを見失って空待ち・退場になる(r7で実際に発生)
+          let hint = "";
+          try {
+            const allOpen = tasks.list().open;
+            // 依存でブロック中のタスクは「実在するが依存未完了で請求不可」なので分けて教える(空待ち防止)
+            const blockedTasks = allOpen.filter((x) => Array.isArray(x.dependsOn) && x.dependsOn.length);
+            const depInfo = blockedTasks.length
+              ? blockedTasks.map((x) => {
+                  const parts = x.dependsOn.map((d) => `${d}(${tasks.isUnresolved(d) ? "未完了" : "完了済"})`);
+                  return `${x.id} ← ${parts.join(",")}`;
+                }).join(", ")
+              : "";
+            if (args.project) {
+              const open = allOpen.filter((x) => (x.project || "") === String(args.project));
+              if (open.length) {
+                hint = `\n[診断] project「${args.project}」の未着手タスクが${open.length}件あります: ${open.map((x) => `${x.id}${x.role ? `(role:${x.role})` : ""}`).join(", ")}。あなたのロールは${agent.role}です。roleが一致するタスクか、role指定の無いタスクだけを請求できます。`;
+              }
+            } else if (allOpen.length) {
+              // project無し(メインチャット)でも実在タスクを見失わせない。role不一致の空待ち・退場を防ぐ
+              const items = allOpen.map((x) => `${x.id}${x.role ? `(role:${x.role})` : ""}${x.project ? `/project:${x.project}` : ""}`);
+              hint = `\n[診断] 未着手タスクが${allOpen.length}件あります: ${items.join(", ")}。あなたのロールは${agent.role}です。roleが一致するタスクか、role指定の無いタスクだけを請求できます。`;
+            }
+            if (depInfo) hint += `\n[診断] 依存でブロック中: ${depInfo}。依存タスクの完了を待つか、自分で依存タスクを請求して先に消化してください。`;
+          } catch {}
           return {
             ok: true,
             claimMiss: true,
             text: args.project
-              ? `請求できるタスクはありません(project: ${args.project} のタスクは無いか、全て完了済み)。`
-              : "請求できるタスクはありません。",
+              ? `請求できるタスクはありません(project: ${args.project} のタスクは無いか、全て完了済み)。${hint}`
+              : `請求できるタスクはありません。${hint}`,
           };
         }
         // 受け入れ基準(acceptance:メタ行)があれば先頭で目立たせる(完成判定のブレ防止)
@@ -312,8 +396,55 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!tasks.claimedBy(agent.id).some((t) => t.id === taskId)) {
           return { ok: false, text: "そのタスクは請求していません(task_idを確認)。" };
         }
+        // 検証タスク(verify-*)の完了: これ以上の検証タスクを起票しない(無限連鎖防止)。
+        // 元タスクが保留中なら実装者≠検証者を確認してマージ+完了確定する。
+        if (mainWorkspace && taskId.startsWith("verify-")) {
+          const originalId = taskId.replace(/^verify-/, "");
+          const pending = approvals?.pending.get(originalId) ?? null;
+          if (pending && pending.agentId === agent.id) {
+            return { ok: false, text: `自分が実装したタスク ${originalId} の検証は、実装者以外が行う必要があります(検証タスクは保留のまま残ります)。` };
+          }
+          const verifyDone = tasks.finish(agent, taskId);
+          if (!pending) {
+            return { ok: true, text: verifyDone ? `検証タスク ${taskId} を完了にしました(元タスクの保留情報が無いためマージは行いません)。` : "完了確定に失敗しました。" };
+          }
+          const implementer = { id: pending.agentId, displayName: pending.agentId };
+          const m = await mergeAgentWork({ mainWorkspace, worktreePath: pending.worktreePath, agent: implementer, taskId: originalId });
+          if (m.conflict) {
+            return { ok: false, text: `マージが競合しています。実装者(${pending.agentId})に \`git merge main\` での解決を依頼してください。\n${m.text.slice(0, 600)}` };
+          }
+          if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
+          approvals.pending.delete(originalId);
+          const implDone = tasks.finish({ id: pending.agentId }, originalId);
+          bus.emit("merge.completed", { agent: pending.agentId, taskId: originalId, stat: m.stat ?? "", patch: m.patch ?? "", summary: m.summary ?? "" });
+          board.post("system", `[承認] ${agent.displayName}(${agent.id}) がタスク ${originalId}(${pending.agentId}実装)を検証し、main へマージしました。`);
+          return { ok: true, text: implDone
+            ? `検証完了。タスク ${originalId} を承認してマージしました。`
+            : `検証完了。タスク ${originalId} をマージしました(元タスクの完了確定は既に済みの可能性があります)。` };
+        }
         // worktree運用時はmainへ自動マージしてから完了確定
         if (mainWorkspace) {
+          // 実装者≠検証者の強制(approvals.require): マージを保留し、実装者以外の検証タスクを起票する。
+          // 元タスクはclaimedのまま保留(approve_taskで承認された時点でマージ+完了確定)
+          if (approvals?.require) {
+            const reviewer = approvals.pickReviewer(agent.id);
+            const verifyId = `verify-${taskId}`;
+            if (reviewer && reviewer.id !== agent.id) {
+              const claimedTask = tasks.claimedBy(agent.id).find((t) => t.id === taskId);
+              const created = tasks.create({
+                id: verifyId,
+                role: reviewer.role,
+                project: claimedTask?.project ?? "",
+                body: `検証: タスク ${taskId}(${agent.id} 実装)の差分をレビューしてください。\n動作確認(テスト実行など)を行い、問題なければ finish_task (task_id: "${verifyId}") で検証完了としてください。承認後、成果が main へマージされます。`,
+                createdBy: agent.id,
+              });
+              approvals.pending.set(taskId, { agentId: agent.id, worktreePath: workspace });
+              return { ok: true, text: created
+                ? `検証タスク ${verifyId}(${reviewer.id} 担当)を起票しました。承認後、成果が main へマージされます。`
+                : `検証タスク ${verifyId} は既に起票済みです(承認待ち)。` };
+            }
+            // 実装者以外が設定にいない場合は承認不可として通常フローへ
+          }
           const m = await mergeAgentWork({ mainWorkspace, worktreePath: workspace, agent, taskId });
           if (m.conflict) {
             bus.emit("merge.conflict", { agent: agent.id, taskId });
@@ -330,14 +461,62 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!done) return { ok: false, text: "タスクの完了確定に失敗しました。" };
         return { ok: true, text: `タスク ${taskId} を完了にしました。` };
       }
+      case "approve_task": {
+        // 実装者≠検証者の強制の承認側。検証者が実行すると保留タスクをmainへマージし完了確定する
+        if (!approvals) return { ok: false, text: "この環境では承認フローは有効ではありません。" };
+        const approveId = String(args.task_id ?? "");
+        const pending = approvals.pending.get(approveId);
+        if (!pending) {
+          const ids = [...approvals.pending.keys()].join(", ") || "なし";
+          return { ok: false, text: `承認待ちのタスクがありません(承認待ち: ${ids})。task_idを確認してください。` };
+        }
+        if (pending.agentId === agent.id) {
+          return { ok: false, text: "自分が実装したタスクは自分で承認できません(実装者≠検証者の強制)。" };
+        }
+        const implementer = { id: pending.agentId, displayName: pending.agentId };
+        const m = await mergeAgentWork({ mainWorkspace, worktreePath: pending.worktreePath, agent: implementer, taskId: approveId });
+        if (m.conflict) {
+          return { ok: false, text: `マージが競合しています。実装者(${pending.agentId})に \`git merge main\` での解決を依頼してください。\n${m.text.slice(0, 600)}` };
+        }
+        if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
+        approvals.pending.delete(approveId);
+        const doneOk = tasks.finish({ id: pending.agentId }, approveId);
+        bus.emit("merge.completed", { agent: pending.agentId, taskId: approveId, stat: m.stat ?? "", patch: m.patch ?? "", summary: m.summary ?? "" });
+        board.post("system", `[承認] ${agent.displayName}(${agent.id}) がタスク ${approveId}(${pending.agentId}実装)を検証し、main へマージしました。`);
+        return { ok: true, text: doneOk
+          ? `タスク ${approveId} を承認してマージしました。`
+          : `タスク ${approveId} をマージしました(完了確定に失敗: 実装者ファイルの状態を確認)` };
+      }
       case "create_task": {
         const id = String(args.task_id ?? "").trim();
         if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
           return { ok: false, text: "task_idは英小文字数字とハイフンで付けてください。" };
         }
-        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "", createdBy: agent.id });
+        const dependsOn = Array.isArray(args.depends_on) ? args.depends_on.map((s) => String(s ?? "").trim()).filter(Boolean) : [];
+        // 代替モデル指定(#12): 基本は既定モデル。リーダー(スレッド開設権持ち)だけ特例で指定可
+        const modelArg = String(args.model ?? "").trim() || null;
+        if (modelArg && !threadOpener) {
+          return { ok: false, text: "model指定はリーダー専用です(基本は既定モデルを使います。代替は相当な理由があるときだけ)。" };
+        }
+        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "", dependsOn, createdBy: agent.id, model: modelArg });
         if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
-        return { ok: true, text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""})。` };
+        // 重複検知: 未着手/作業中の既存タスクと共有ファイルがあれば警告を添える(ブロックはしない)
+        const l = tasks.list();
+                // list()の返値はUI向けサマリ(bodyなし)なので、重複検知にはファイル本文を読んで渡す
+        const existing = [...l.open, ...l.claimed].map((t) => {
+          const rel = String(t.path ?? "").split("/").join("/");
+          const file = rel.startsWith("tasks/") ? join(tasks.dir, rel.slice("tasks/".length)) : null;
+          const body = file && existsSync(file) ? readFileSync(file, "utf8") : "";
+          return { id: t.id, body };
+        });
+        const overlaps = detectTaskOverlap(String(args.body ?? ""), existing.filter((t) => t.id !== id));
+        const warn = (overlaps ?? [])
+          .map((o) => `警告: 既存タスク ${o.taskId} が同じファイル(${o.files.join(", ")})を扱っています。重複の可能性。中止ならtasks cancel ${o.taskId}`)
+          .join("\n");
+        return {
+          ok: true,
+          text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""}${dependsOn.length ? ` / 依存: ${dependsOn.join(",")}` : ""}${modelArg ? ` / model: ${modelArg}` : ""})。` + (warn ? "\n\n" + warn : ""),
+        };
       }
       case "spawn_agent": {
         if (!spawner) return { ok: false, text: "このエージェントにはスポーン権限がありません。" };
@@ -348,6 +527,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           role: args.role ? String(args.role) : undefined,
           project: args.project ? String(args.project) : "",
           brief: String(args.brief ?? ""),
+          model: String(args.model ?? "").trim() || null,
         });
         if (r.error) return { ok: false, text: `スポーンできません: ${r.error}` };
         return { ok: true, text: `サブエージェント ${r.id}(${r.displayName}) をスポーンしました。進捗はボードに流れます。` };
@@ -434,6 +614,35 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const r = await threadCloser({ project: projectName });
         if (r.error) return { ok: false, text: `スレッドを閉じられません: ${r.error}` };
         return { ok: true, text: `スレッド ${projectName} を閉じました。成果物とログは保持されています。` };
+      }
+      case "browser_fetch": {
+        const r = await browserFetch(String(args.url ?? ""));
+        if (!r.ok) return { ok: false, text: r.text };
+        const lines = [];
+        lines.push("[" + r.status + "] " + r.page.url);
+        lines.push("タイトル: " + (r.page.title || "(なし)"));
+        lines.push("");
+        lines.push("見出し: " + (r.page.headings.join(" / ") || "(なし)"));
+        lines.push("");
+        lines.push("リンク:");
+        for (const l of r.page.links.slice(0, 20)) lines.push("- " + l.text + " → " + l.href);
+        lines.push("");
+        lines.push("フォーム " + r.page.forms.length + "件:");
+        for (const f of r.page.forms) lines.push("- [" + f.index + "] " + f.method + " " + f.action + " (" + f.fields.length + "fields)");
+        lines.push("");
+        lines.push("=== 本文 ===");
+        lines.push(r.page.text);
+        return { ok: true, text: lines.join("\n").slice(0, 8000) };
+      }
+      case "browser_extract": {
+        const er = await browserExtract(args);
+        if (!er.ok) return { ok: false, text: er.text };
+        return { ok: true, text: ("[" + er.url + "]" + "\n" + "selector: " + (er.selector || "(全文)") + "\n" + er.text).slice(0, 8000) };
+      }
+      case "browser_submit": {
+        const values = args.values && typeof args.values === "object" ? args.values : {};
+        const sr = await browserSubmit({ html: args.html, base_url: args.base_url, values, selector: args.selector, form_index: args.form_index, follow_redirects: args.follow_redirects });
+        return { ok: sr.ok, text: sr.text.slice(0, 8000) };
       }
       case "web_fetch": {
         const url = String(args.url ?? "").trim();
@@ -656,6 +865,12 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
   }
 
   async function gatedBash(command, timeoutMs) {
+    // worktreeエージェントのmain書込拒否(#8): write/editはsafePathでworkspace外を既に拒否済みだが、
+    // bash経由の絶対パス書込は文字列として検出する。読み取り(cd/cat/diff main)は許可する
+    if (mainWorkspace && WRITE_INDICATORS.some((w) => String(command).includes(w)) && String(command).includes(mainWorkspace)) {
+      bus.emit("permission.denied", { agent: agent.id, command });
+      return { ok: false, text: "このコマンドは拒否されました(メインワークスペースへの書き込み操作を検出)。あなたの作業ディレクトリ(worktree)内でのみ作業してください。成果の反映は finish_task が行います。" };
+    }
     const tamper = auditTampering(command);
     if (tamper) {
       bus.emit("permission.denied", { agent: agent.id, command });
@@ -668,25 +883,26 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         return { ok: false, text: `このコマンドは拒否されました(${verdict.reason})。別の安全な方法で作業を続けてください。` };
       }
     }
-    // 実行後の state/ 変化検知(可視化目的)。静的解析を変数展開等で迂回された場合の
-    // 最後の防衛線: 実行前後で state/ 配下のファイル一覧+サイズを比較し、変化があれば
-    // 拒否ログ(bus emit)を出し、応答テキストへ警告を付ける(実行自体は取り消せない)
-    const stateDir = resolve(mainWorkspace ?? workspace, "state");
-    const before = stateSnapshot(stateDir);
-    const out = await runCommand({ command, cwd: workspace, timeoutMs, outputLimit: BASH_OUTPUT_LIMIT });
-    const after = stateSnapshot(stateDir);
-    if (after !== before) {
-      bus.emit("permission.denied", { agent: agent.id, command, reason: "state/配下がbash実行中に変更されました" });
-      return { ...out, ok: false, text: `${out.text}
-[警告] bash実行中に監査領域 state/ の内容が変更されました。エンジン内部データ(state/)の書き換えは禁止されています。` };
+    // 事後検知: 変数展開($d/…)やbase64等の迂回で事前チェックを素通りした書き込みを、
+    // 実行前後の state/ スナップショット比較で検出する(実行は取り消せないため可視化が目的)。
+    const before = snapshotState();
+    const res = await runCommand({ command, cwd: workspace, timeoutMs, outputLimit: BASH_OUTPUT_LIMIT });
+    const after = snapshotState();
+    const changed = diffSnapshot(before, after);
+    if (changed.length > 0) {
+      bus.emit("permission.denied", { agent: agent.id, command, stateChanged: changed });
+      res.ok = false;
+      res.text = `${res.text}
+[警告] このコマンドは監査領域 state/ 配下を変更しました(${changed.join(", ")})。state/ への書き込みは禁止されています。監査台帳の改変は検出・記録されます。`;
     }
-    return out;
+    return res;
   }
 
-  // state/ 配下の簡易スナップショット(相対パス+サイズの連結。存在しなければ空文字)
-  function stateSnapshot(dir) {
-    let out = "";
-    const walk = (d, rel) => {
+  // state/ 配下のファイル一覧+サイズ+mtimeのスナップショット(事後改ざん検知用)
+  function snapshotState() {
+    const root = join(workspace, "state");
+    const out = new Map();
+    const walk = (d) => {
       let entries;
       try {
         entries = readdirSync(d, { withFileTypes: true });
@@ -694,15 +910,33 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         return;
       }
       for (const e of entries) {
-        const r = rel ? `${rel}/${e.name}` : e.name;
-        if (e.isDirectory()) walk(join(d, e.name), r);
-        else if (e.isFile()) {
-          try { out += `${r}:${statSync(join(d, e.name)).size};`; } catch { /* 競合は無視 */ }
+        const p = join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else {
+          try {
+            const st = statSync(p);
+            out.set(p, `${st.size}:${st.mtimeMs}`);
+          } catch { /* 消えたファイルは無視 */ }
         }
       }
     };
-    walk(dir, "");
+    walk(root);
     return out;
+  }
+
+  function diffSnapshot(before, after) {
+    // 表示はスラッシュ区切りに統一(Windowsのバックスラッシュを正規化)
+    const rel = (p) => {
+      const r = workspace ? p.slice(workspace.length + 1) : p;
+      return r.split(/\\|\//).join("/");  };
+    const changed = [];
+    for (const [p, v] of after) {
+      if (before.get(p) !== v) changed.push(rel(p));
+    }
+    for (const p of before.keys()) {
+      if (!after.has(p)) changed.push(rel(p));
+    }
+    return changed;
   }
 
   return { specs, execute, detectShell };

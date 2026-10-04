@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Board, Bus } from "../src/engine/board.js";
-import { runChat } from "../src/runner.js";
+import { Board, Bus } from "../../src/engine/board.js";
+import { runChat } from "../../src/runner.js";
 
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ } }
 
@@ -67,7 +67,7 @@ test("v6.1: 再起動してもボード投稿・スレッド・会話メモリ�
     discovery: {},
     permissions: {},
     scenario: { name: "test" },
-    chat: { lead: "lead", workers: ["alpha", "beta", "gamma"], maxTurnsPerRound: 8, staggerMs: 5 },
+    chat: { lead: "lead", workers: ["alpha", "beta", "gamma"], maxTurnsPerRound: 8, staggerMs: 5, autoscale: false },
     agents: [
       { id: "alpha", displayName: "アルファ", role: "impl" },
       { id: "beta", displayName: "ベータ", role: "review" },
@@ -87,11 +87,19 @@ test("v6.1: 再起動してもボード投稿・スレッド・会話メモリ�
   assert.equal(existsSync(join(ws, "state", "mem-lead.json")), true); // 会話メモリ保存
   await ctl1.openThread({ project: "demo", goal: "復元テスト" });
   await waitUntil(() => ctl1.listThreads().includes("demo"));
-  // ワーカー3体の起動ラウンド(キックオフ+各ワーカーの応答投稿)が落ち着くまで待つ
+  // ワーカー3体の起動ラウンド(キックオフ+各ワーカーの応答投稿)が落ち着くまで待つ。
+  // 2連続同一行数だけだとstagger遅延で早期抜けし、直後の応答が混入する競合があった
+  // (memory: persist行数固定assertは並行負荷に弱い)。2連続同一+1秒静止を要求する。
   let prev = -1;
-  for (let i = 0; i < 50; i++) {
+  let stableCount = 0;
+  for (let i = 0; i < 100; i++) {
     const c = logLines(demoLog());
-    if (c === prev && c > 0) break;
+    if (c === prev && c > 0) {
+      stableCount++;
+      if (stableCount >= 5) break; // 2連続同一+約1秒静止
+    } else {
+      stableCount = 0;
+    }
     prev = c;
     await new Promise((r) => setTimeout(r, 200));
   }
@@ -107,6 +115,18 @@ test("v6.1: 再起動してもボード投稿・スレッド・会話メモリ�
   const demo2 = opened2.find((t) => t.name === "demo");
   assert.ok(demo2, "スレッドが無音で復元されている");
   assert.equal(demo2.agents.length, 3);
+  // 無音復元の確認: 起動ラウンドの遅延投稿(stagger等)が混ざる場合があるため、
+  // 行数が静止するまで待ってから比較する(固定行数assertは並行負荷でフレーキーする)
+  {
+    let cur = logLines(demoLog());
+    let last = -1;
+    const deadline = Date.now() + 10000;
+    while (cur !== last && Date.now() < deadline) {
+      last = cur;
+      await new Promise((r) => setTimeout(r, 300));
+      cur = logLines(demoLog());
+    }
+  }
   assert.equal(logLines(demoLog()), demoLinesBefore, "無音復元なので投稿が増えない");
   assert.ok(logLines(mainLog()) >= 2, "メインの履歴も保持されている");
   rmTree(ws);

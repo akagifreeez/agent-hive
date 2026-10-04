@@ -37,11 +37,11 @@ test("buildMemoryContext: ファイル無しは空、あれば権威ブロック
 test("buildCompactRequest: hasMemoryで権威分離指示が乗る", () => {
   const msgs = [{ role: "user", content: "hi" }];
   const withMem = buildCompactRequest(msgs, { hasMemory: true });
-  assert.match(withMem[0].content, /権威分離/);
+  assert.match(withMem[0].content, /Authority separation/);
   assert.match(withMem[0].content, /memory\//);
   const without = buildCompactRequest(msgs, { taskContext: "タスク t1: 仕事" });
-  assert.doesNotMatch(without[0].content, /権威分離/);
-  assert.match(without[0].content, /読み取り時キュレーション/);
+  assert.doesNotMatch(without[0].content, /Authority separation/);
+  assert.match(without[0].content, /Read-time curation/);
   const plain = buildCompactRequest(msgs);
   assert.equal(plain[0].content, COMPACT_SYSTEM_PROMPT);
 });

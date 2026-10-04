@@ -10,31 +10,27 @@ import { runAgentLoop } from "./engine/loop.js";
 import { PermissionGate } from "./engine/permissions.js";
 import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
 import { setupWorktrees } from "./engine/worktree.js";
+import { respawnUnfinishedWork } from "./engine/respawn.js";
 import { runCommand } from "./engine/exec.js";
 import { UsageLedger } from "./engine/usage.js";
-import { OpenAIModel, FallbackModel } from "./model/openai.js";
+import { OpenAIModel } from "./model/openai.js";
+import { createModelFactory } from "./model/factory.js";
+import { buildCatalog, resolveModel, resolveAuthValue } from "./model/catalog.js";
+import { hasOAuthEntry } from "./model/openai-auth.js";
+
+// 旧来のrunner.js内実装をsrc/model/factory.jsへ移設済み。api(ワイヤ形式)で
+// アダプタを選択する新版(agent.modelは"provider/model"でもベアIDでもよい)。
+// re-exportで既存の参照(index.js等)の互換を維持する。
+export { createModelFactory };
 import { SpawnManager } from "./engine/spawn.js";
 import { ChatHost } from "./engine/chat.js";
 import { buildMemoryContext, ensurePcRules } from "./engine/memory.js";
 import { buildSkillsIndex } from "./engine/skills.js";
-import { McpHost } from "./engine/mcp.js";
+import { McpHost, mcpServersInfo } from "./engine/mcp.js";
 import { createWorkflowApi, runWorkflowScript } from "./engine/workflow.js";
 import { Hooks } from "./engine/hooks.js";
-import { ROOT } from "./config.js";
-
-export function createModelFactory(config) {
-  return (agent = {}) => {
-    const mk = (model, effort) => new OpenAIModel({
-      ...config.model,
-      model: model ?? config.model.model,
-      reasoningEffort: effort ?? agent.reasoningEffort ?? config.model.reasoningEffort,
-    });
-    const primary = agent.model ? mk(agent.model) : mk();
-    // フォールバック列(config.model.fallbackModels)があれば、終端エラー時に順に試す(ZCode model-selection流)
-    const fallbacks = (config.model.fallbackModels ?? []).map((m) => mk(m));
-    return fallbacks.length ? new FallbackModel({ primary, fallbacks }) : primary;
-  };
-}
+import { ROOT, dataDir } from "./config.js";
+import { renameSync } from "node:fs";
 
 // メインチャット常駐モード(v6): リーダー1体がメインチャットで壁打ちと計画を担い、
 // open_threadで開かれたサブスレッド(project)ごとに3ワーカーが並行作業する。
@@ -57,7 +53,34 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   }
   await ensureGitRepo(config.workspace);
 
+  // 起動時のゾンビclaim回収: プロセス再起動で走行中ラウンドは全て死んでいるため、claimedのまま
+  // 残ったタスクは誰にも進められない(idle-claim待ちのデッドロック)。起動直後なので全claimedは
+  // ゾンビと見なして解放する(task.releasedが出るが、この時点でラウンドは無いので無害)
+  const zombies = tasks.list().claimed;
+  for (const t of zombies) {
+    tasks.release(t.agent, "[起動時回収] プロセス再起動により走行中ラウンドが消滅したため解放しました");
+  }
+  if (zombies.length) {
+    console.log(`[agent-hive] 起動時: 前回走行中だったclaimedタスク${zombies.length}件を解放しました`);
+    bus.emit("scenario.warn", { message: `起動時: 前回のclaimedタスク${zombies.length}件を回収(解放)しました` });
+  }
+
   const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
+  // 起動時のクラッシュ復旧スキャン(#7): 前回プロセス死で中断したworktree差分から
+  // 未完了作業を再起票し、変更ゼロの放棄ブランチを掃除(提案/オプションで自動)する。
+  // 失敗しても起動は止めない(スキャンは最善努力)。
+  try {
+    const rr = await respawnUnfinishedWork({
+      mainWorkspace: config.workspace, worktreeRoot, tasks,
+      board: mainBoard, bus,
+      opts: { cleanup: Boolean(config.chat?.respawn?.cleanup) },
+    });
+    if (rr.respawned.length) console.log(`[agent-hive] 起動時: 未完了のworktree作業を再起票しました(${rr.respawned.join(", ")})`);
+    if (rr.swept.length) console.log(`[agent-hive] 起動時: 放棄worktree/ブランチを掃除しました(${rr.swept.join(", ")})`);
+  } catch (err) {
+    bus.emit("scenario.warn", { message: `起動時スキャンに失敗(起動は続行): ${err instanceof Error ? err.message : err}` });
+  }
+
   // 永続記憶(memory/)+スキル索引を毎回読み直す(distill反映・スキル追加を次ラウンドから効かせる)
   const memoryFn = () => {
     const parts = [buildMemoryContext(config.workspace), buildSkillsIndex(config.workspace)].filter(Boolean);
@@ -70,6 +93,17 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     testCommand: config.discovery?.testCommand,
   });
   bus.on("merge.completed", () => void discovery.tick());
+
+  // 実装者≠検証者の強制(#3): chat.requireSeparateApprove=trueでfinish_task時に検証タスクを
+  // 起票し、approve_task(実装者以外)で承認されたタスクだけをマージする。全createToolsへ共有
+  const approvals = {
+    require: Boolean(config.chat?.requireSeparateApprove),
+    pending: new Map(), // taskId => {agentId, worktreePath}
+    pickReviewer(excludeId) {
+      const candidates = (config.agents ?? []).filter((a) => a.id !== excludeId);
+      return candidates.find((a) => a.role === "review") ?? candidates[0] ?? null;
+    },
+  };
 
   // 実行時のモデル/思考レベル切替(/model・/effortコマンドやUIから)。nullならconfigどおり
   const runtime = { model: null, effort: null };
@@ -87,6 +121,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   };
 
   // MCPサーバー(config.mcp.servers)を起動してツールとして接続(失敗してもhiveは続行)
+  /** @type {import("./engine/mcp.js").McpHostInstance[]} */
   const mcpHosts = Object.entries(config.mcp?.servers ?? {}).map(([name, def]) =>
     new McpHost({ name, bus, ...(typeof def === "string" ? { command: def } : def) })
   );
@@ -96,6 +131,18 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   }
 
   const hooks = new Hooks({ config, cwd: config.workspace, bus });
+  // MCP設定の動的管理(設定ウィンドウから)。追加/削除はhive.local.json(DATA側)へ永続化する
+  const localCfgPath = join(dataDir(), "hive.local.json");
+  const readLocalCfg = () => {
+    try { return JSON.parse(readFileSync(localCfgPath, "utf8")); } catch { return {}; }
+  };
+  const writeLocalServers = (servers) => {
+    const local = readLocalCfg();
+    local.mcp = { ...(local.mcp ?? {}), servers };
+    const tmp = `${localCfgPath}.tmp`;
+    writeFileSync(tmp, JSON.stringify(local, null, 1));
+    renameSync(tmp, localCfgPath);
+  };
   const manager = new SpawnManager({
     mainWorkspace: config.workspace,
     worktreeRoot,
@@ -110,11 +157,23 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     mcpHosts,
     hooks,
     idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0,
+    approvals,
   });
   const mcpTo = (extra) => ({ ...extra, mcpHosts, hooks, idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0 });
 
   // サブスレッド: project名=スレッド名。3ワーカー( personas: workers )が専用ボードで並行作業
   const threads = new Map();
+  // UIからのチャット履歴クリア: 対象スレッドのBoardメモリを空にする(ディスク/索引はserver側のBoardStore.clear)。
+  // タスク・メモリ(mem-*.json)には触らない=完了済みタスクの履歴は消えない。
+  // 既読位置(seen)もリセットする: クリア後の投稿idは1から再採番されるため、旧既読のままだと
+  // since(旧id)が空になりエージェントが新着を見落とす
+  bus.on("board.clear", (p) => {
+    const t = p?.thread ?? "__main__";
+    const b = t === "__main__" ? mainBoard : threads.get(t)?.board;
+    if (b) b.clearMemory();
+    const host = t === "__main__" ? leadHost : threads.get(t)?.host;
+    host?.seen?.clear?.();
+  });
   const workflowRuns = new Map(); // 実行中のワークフロー(同名の同時実行を防ぐ)
   const registryPath = join(stateDir, "threads.json");
   const writeRegistry = () => {
@@ -162,6 +221,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
 
         crossPoster,
         resolveBoard,
+        approvals,
 
       })),
       board: threadBoard, tasks, bus, ledger,
@@ -225,7 +285,8 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     const open = list.open;
     for (const [name, alive] of aliveWorkers) {
       const th = threads.get(name);
-      if (!th || th.host.paused) continue; // 停止中スレッドは増員しない
+      // host無しスレッド(ディスカッション等・タスク請求なし)は増員対象外
+      if (!th || !th.host || th.host.paused) continue; // 停止中スレッドは増員しない
       const nOpen = open.filter((t) => (t.project || "") === name).length;
       const desired = nOpen === 0 ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil(nOpen / 2));
       if (alive.size >= desired || manager.live.size >= globalCap) continue;
@@ -340,6 +401,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       resolveBoard,
       threadOpener: openThread,
       threadCloser: closeThread,
+      approvals,
     })),
     board: mainBoard, tasks, bus, ledger,
     budget: config.budget,
@@ -367,9 +429,39 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
 
   bus.emit("scenario.started", { name: `chat:${config.scenario.name}`, tasks: [] });
   return {
+
+    mcpList: () => mcpServersInfo(mcpHosts),
+    /** @param {{name?: string, command?: string, args?: string[], env?: Object.<string,string>}} o */
+    mcpAdd: async ({ name, command, args, env } = {}) => {
+      const id = String(name ?? "").trim();
+      if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id)) return { error: "サーバー名は英小文字数字と_-で32字以内" };
+      if (!String(command ?? "").trim()) return { error: "commandが空です" };
+      if (mcpHosts.some((h) => h.name === id)) return { error: `サーバー ${id} は既に接続されています` };
+      const host = new McpHost({ name: id, command: String(command).trim(), args, env, bus });
+      const r = await host.start();
+      if (!r.ok) return { error: `起動に失敗: ${r.error}` };
+      mcpHosts.push(/** @type {import("./engine/mcp.js").McpHostInstance} */ (/** @type {any} */ (host))); // 配列は全エージェントのツール一覧と共有。次のラウンドから反映される
+      const local = readLocalCfg();
+      writeLocalServers({ ...(local.mcp?.servers ?? {}), [id]: { command: String(command).trim(), args: args ?? [], env: env ?? {} } });
+      return { ok: true, tools: r.tools };
+    },
+
+    /** @param {{name?: string}} o */
+    mcpRemove: ({ name } = {}) => {
+      const id = String(name ?? "");
+      const idx = mcpHosts.findIndex((h) => h.name === id);
+      if (idx < 0) return { error: `サーバー ${id} は接続されていません` };
+      mcpHosts[idx].stop();
+      mcpHosts.splice(idx, 1);
+      const local = readLocalCfg();
+      const servers = { ...(local.mcp?.servers ?? {}) };
+      delete servers[id];
+      writeLocalServers(servers);
+      return { ok: true };
+    },
     say: (text, thread = null) => {
       const t = thread ? threads.get(thread) : null;
-      if (t) return t.host.say(text);
+      if (t) return t.host ? t.host.say(text) : { ok: false, error: `スレッド ${thread} はワーカーを持たないためsayできません` };
       return leadHost.say(text);
     },
     attachImage: (note, dataUrl, thread = null, path = null) => {
@@ -419,7 +511,11 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       const api = createWorkflowApi({
         openThread,
         closeThread,
-        say: (text, thread) => (thread ? threads.get(thread)?.host : leadHost).say(text, thread),
+        say: (text, thread) => {
+          const h = thread ? threads.get(thread)?.host : leadHost;
+          if (!h) return { ok: false, error: `スレッド ${thread} はワーカーを持たない(host無し)ため、sayできません` };
+          return h.say(text, thread);
+        },
         tasks,
         bus,
         log,
@@ -449,10 +545,92 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     setThreadFolder,
     setThreadPaused,
     listThreads: () => [...threads.keys()],
+    runDiscussion: (req) => {
+      // モデル横断ディスカッション: 接続済みプロバイダの代表モデル同士を1つのボードで議論させる。
+      // host無しのBoard単体スレッド(タスク請求なし)なので、発言分のトークンだけで完結する
+      const topic = String(req?.topic ?? "").trim();
+      if (!topic) return { error: "論点が空です(/discuss <トピック>)" };
+      const refs = Array.isArray(req?.refs) ? req.refs.map(String) : null;
+      const rounds = Math.max(1, Math.min(Number(req?.rounds ?? 2), 5));
+      const name = `discuss-${Date.now().toString(36)}`;
+      const board = new Board(bus, name, join(stateDir, `board-${name}.jsonl`));
+      threads.set(name, { name, goal: `ディスカッション: ${topic}`, folder: "discussion", host: null, board });
+      writeRegistry();
+      bus.emit("thread.opened", { name, goal: `ディスカッション: ${topic}`, folder: "discussion", agents: [] });
+      // 接続済みプロバイダの代表モデル(先頭行)を参加者として構築する(未接続は除外)
+      const factory = createModelFactory(config);
+      const catalog = buildCatalog(config.models);
+      const baseDirs = [ROOT, dataDir()];
+      const participants = [];
+      const notes = [];
+      const providerIds = refs ? [...new Set(refs.map((r) => String(r).split("/")[0]))] : Object.keys(catalog.providers);
+      for (const pid of providerIds) {
+        const p = catalog.providers[pid];
+        if (!p) { notes.push(`${pid}: 未知のプロバイダ(除外)`); continue; }
+        try {
+          const spec = resolveModel(catalog, (refs ?? []).find((r) => String(r).startsWith(pid + "/")) ?? `${pid}/${(p.models ?? [])[0]?.id}`);
+          const authOk = spec.provider.api === "openai-chatgpt-responses"
+            ? hasOAuthEntry({ provider: spec.provider.id, file: spec.provider.auth?.file ?? `state/models-${spec.provider.id}.oauth.json` }, baseDirs)
+            : Boolean(resolveAuthValue(spec.provider, baseDirs));
+          if (!authOk) { notes.push(`${p.name ?? pid}: 未接続(除外)`); continue; }
+          participants.push({
+            id: `dis-${pid}`, provider: pid, ref: `${spec.provider.id}/${spec.model.id}`,
+            model: factory({ model: `${spec.provider.id}/${spec.model.id}` }),
+          });
+        } catch (err) {
+          notes.push(`${pid}: ${err.message}(除外)`);
+        }
+      }
+      if (participants.length < 2) {
+        threads.delete(name);
+        return { error: `参加できるモデルが2つ未満です(${notes.join(" / ") || "接続状況を確認"})` };
+      }
+      void runDiscussionLoop({ board, participants, topic, rounds }).catch((err) => {
+        board.post("system", `[ディスカッション異常] ${err.message}`);
+      });
+      return { ok: true, thread: name, participants: participants.map((p) => p.ref), notes };
+    },
     manager,
     mcpHosts,
     bus,
   };
+}
+
+// ===== モデル横断ディスカッション =====
+// 接続済みプロバイダの代表モデル同士を1つのボードで議論させる。
+// 各参加者はボードの新着を読んで応答する(順番に発言・指定ラウンド数だけ周回)。
+// 最後に先頭参加者が結論をまとめて投稿する。
+export async function runDiscussionLoop({ board, participants, topic, rounds = 2 }) {
+  board.post("system", `[ディスカッション開始] 論点: ${topic}\n参加: ${participants.map((p) => p.ref).join(", ")} / ${rounds}ラウンド`);
+  const seen = new Map(participants.map((p) => [p.id, board.lastId()]));
+  for (let round = 1; round <= rounds; round++) {
+    for (const p of participants) {
+      const fresh = board.since(seen.get(p.id) ?? 0).filter((x) => x.from !== p.id);
+      if (fresh.length) seen.set(p.id, fresh[fresh.length - 1].id);
+      const transcript = fresh.map((x) => `${x.from}: ${x.text}`).join("\n---\n").slice(0, 8000);
+      const prompt = round === 1
+        ? `論点「${topic}」について、あなたの立場から最初の意見を述べてください。日本語・600字以内。`
+        : `これまでの議論:\n${transcript}\n\n論点「${topic}」について、他者の意見を受けた反論・補足・合意のいずれかを述べてください。日本語・600字以内。`;
+      try {
+        const res = await p.model.chat({ messages: [{ role: "user", content: prompt }] });
+        if (res.content) board.post(p.id, res.content);
+        else board.post("system", `[ディスカッション] ${p.ref} から空応答(スキップ)`);
+      } catch (err) {
+        board.post("system", `[ディスカッション] ${p.ref} の発言に失敗: ${String(err.message ?? err).slice(0, 150)}`);
+      }
+    }
+  }
+  // まとめ: 先頭参加者が結論を出す
+  const all = board.posts.map((x) => `${x.from}: ${x.text}`).join("\n---\n");
+  try {
+    const res = await participants[0].model.chat({
+      messages: [{ role: "user", content: `論点「${topic}」の議論全体を、結論・合意事項・残る懸念の3部構成でまとめてください。日本語。\n\n${all.slice(-8000)}` }],
+    });
+    board.post("system", `[結論] ${res.content ?? "(まとめの生成に失敗)"}`);
+  } catch (err) {
+    board.post("system", `[ディスカッション] まとめの生成に失敗: ${String(err.message ?? err).slice(0, 150)}`);
+  }
+  board.post("system", "[ディスカッション終了]");
 }
 
 export async function runScenario({ config, modelFactory, bus = new Bus() }) {
@@ -505,6 +683,7 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
           ...config.model,
           model: agent.model ?? config.model.model,
           reasoningEffort: agent.reasoningEffort ?? config.model.reasoningEffort,
+          webSearch: agent.webSearch ?? config.model.webSearch,
         });
     const tools = createTools({
       agent,

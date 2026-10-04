@@ -3,9 +3,10 @@
 // デスクトップアプリとしての窓・トレイ常駐・ネイティブ通知だけを足す。
 import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, dialog } from "electron";
 import { writeFileSync } from "node:fs";
+import http from "node:http";
 import { join } from "node:path";
 import { loadConfig, dataDir } from "../config.js";
-import { OpenAIModel } from "../model/openai.js";
+import { createModelFactory } from "../model/factory.js";
 import { startUi } from "../ui/server.js";
 import { chatUiHandlers } from "../ui/chat-wiring.js";
 import { runChat } from "../runner.js";
@@ -52,9 +53,13 @@ async function bootstrap() {
     smokeController = await runChat({ config, bus });
     const resultFile = process.env.HIVE_SMOKE_FILE ?? "smoke-result.txt";
     try {
-      const res = await fetch(`http://localhost:${config.ui.port}/api/state`);
-      const ok = res.ok;
-      writeFileSync(resultFile, ok ? "SMOKE OK\n" : `SMOKE FAIL (HTTP ${res.status})\n`);
+      // Electronのfetchはシステムプロキシの影響でlocalhostでも滞留することがあるためnodeのhttpで疎通する
+      const ok = await new Promise((resolve) => {
+        const req = http.get({ host: "localhost", port: config.ui.port, path: "/api/state", timeout: 5000 }, (r) => resolve(r.statusCode === 200));
+        req.on("error", () => resolve(false));
+        req.on("timeout", () => { req.destroy(); resolve(false); });
+      });
+      writeFileSync(resultFile, ok ? "SMOKE OK\n" : "SMOKE FAIL (HTTP)\n");
       app.exit(ok ? 0 : 1);
     } catch (err) {
       writeFileSync(resultFile, `SMOKE FAIL (${err.message})\n`);
@@ -67,16 +72,20 @@ async function bootstrap() {
     notify("シナリオ完了", `「${config.scenario.name}」が終了しました。ボードを確認してください。`));
   bus.on("permission.request", (p) =>
     notify(`承認要求 #${p.id}`, `コマンドの承認待ち: ${p.command.slice(0, 80)}`));
+  bus.on("merge.completed", (p) =>
+    notify(`マージ: ${p.taskId}`, (p.summary ?? "").trim() || `${p.agent} がタスクをマージしました。`));
+  bus.on("thread.opened", (p) =>
+    notify(`スレッド開始: ${p.name}`, p.goal ?? ""));
 
   if (SCENARIO) {
-    await startUi({ config, modelFactory: () => new OpenAIModel(config.model), bus, autoStart: true });
+    await startUi({ config, modelFactory: createModelFactory(config), bus, autoStart: true });
   } else {
     // 既定: メインチャット常駐モード(v6: リーダー+サブスレッド)
     // thread.openedの取りこぼし防止のため、UIの待ち受けを先に立ててからrunChatする
     let controller = null;
     await startUi({
       config, bus, autoStart: false,
-      ...chatUiHandlers(controller),
+      ...chatUiHandlers(() => controller),
     });
     controller = await runChat({ config, bus });
   }

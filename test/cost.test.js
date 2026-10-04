@@ -82,7 +82,7 @@ test("applyCompaction: system+要約+直近4件を残す", () => {
 test("buildCompactRequest: タスク文脈があれば読み取り時キュレーションを足し、無ければ汎用のまま", () => {
   const msgs = [{ role: "user", content: "hi" }];
   const withCtx = buildCompactRequest(msgs, { taskContext: "タスク t1: 素数判定の実装" });
-  assert.match(withCtx[0].content, /読み取り時キュレーション/);
+  assert.match(withCtx[0].content, /Read-time curation/);
   assert.match(withCtx[0].content, /素数判定/);
   const without = buildCompactRequest(msgs);
   assert.equal(without[0].content, COMPACT_SYSTEM_PROMPT);
@@ -99,6 +99,27 @@ test("UsageLedger: エージェント別と合計を集計", () => {
   assert.equal(t.completionTokens, 85);
   assert.equal(t.reasoningTokens, 31);
   assert.ok(Math.abs(t.costUsd - 0.031) < 1e-9);
+});
+
+test("UsageLedger: ms付きaddで平均tok/sを累積する(ms無し呼出は分母外)", () => {
+  const l = new UsageLedger();
+  // 200tok/1000ms + 300tok/2000ms → 平均 500tok/3秒
+  l.add("alpha", { promptTokens: 100, completionTokens: 200, reasoningTokens: 0, costUsd: 0.01 }, { ms: 1000 });
+  l.add("alpha", { promptTokens: 100, completionTokens: 300, reasoningTokens: 0, costUsd: 0.01 }, { ms: 2000 });
+  const e = l.agent("alpha");
+  assert.equal(e.msSum, 3000);
+  assert.ok(Math.abs(e.avgTokPerSec - 500 / 3) < 1e-9);
+  // ms無しの呼出(旧形式・計測外)はトークンには乗るが速度集計の分母に入らない
+  l.add("alpha", { promptTokens: 10, completionTokens: 999, reasoningTokens: 0, costUsd: 0 });
+  assert.equal(e.calls, 3);
+  assert.equal(e.completionTokens, 1499);
+  assert.ok(Math.abs(e.avgTokPerSec - 500 / 3) < 1e-9);
+  const t = l.totals();
+  assert.equal(t.msSum, 3000);
+  assert.ok(Math.abs(t.avgTokPerSec - 500 / 3) < 1e-9);
+  // ms無しのみのエージェントはnull(UIでは「—」表示になる)
+  l.add("beta", { promptTokens: 10, completionTokens: 5, reasoningTokens: 0, costUsd: 0 });
+  assert.equal(l.agent("beta").avgTokPerSec, null);
 });
 
 // ループ統合: 連続3回の請求失敗でエンジンがidle終了する
@@ -154,7 +175,7 @@ test("autocompact: 請求中タスクを条件に要約する", async () => {
   const model = {
     maxTokens: 4000,
     async chat({ messages }) {
-      if (String(messages[0]?.content).includes("要約器")) {
+      if (String(messages[0]?.content).includes("conversation summarizer")) {
         compactPrompts.push(messages[0].content);
         return { content: "要約した", toolCalls: [], raw: { content: "要約した" }, usage: { promptTokens: 10, completionTokens: 1 } };
       }
@@ -164,7 +185,7 @@ test("autocompact: 請求中タスクを条件に要約する", async () => {
   };
   await runAgentLoop({ agent, model, tools, board, tasks, bus, maxTurns: 4, contextWindow: 200000 });
   assert.equal(compactPrompts.length, 1);
-  assert.match(compactPrompts[0], /読み取り時キュレーション/);
+  assert.match(compactPrompts[0], /Read-time curation/);
   assert.match(compactPrompts[0], /bigwork/);
   assert.match(compactPrompts[0], /upper\/pad/);
   cleanup(ws);
@@ -182,7 +203,7 @@ test("autocompact: タスク請求が無ければ直近のユーザー指示を�
   const model = {
     maxTokens: 4000,
     async chat({ messages }) {
-      if (String(messages[0]?.content).includes("要約器")) {
+      if (String(messages[0]?.content).includes("conversation summarizer")) {
         compactPrompts.push(messages[0].content);
         return { content: "要約した", toolCalls: [], raw: { content: "要約した" }, usage: { promptTokens: 10, completionTokens: 1 } };
       }
@@ -197,7 +218,7 @@ test("autocompact: タスク請求が無ければ直近のユーザー指示を�
   ];
   await runAgentLoop({ agent, model, tools, board, tasks, bus, maxTurns: 4, contextWindow: 200000, messages: memory });
   assert.equal(compactPrompts.length, 1);
-  assert.match(compactPrompts[0], /読み取り時キュレーション/);
+  assert.match(compactPrompts[0], /Read-time curation/);
   assert.match(compactPrompts[0], /家計簿アプリ/);
   assert.doesNotMatch(compactPrompts[0], /ボード新着/);
   cleanup(ws);

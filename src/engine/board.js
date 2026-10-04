@@ -6,12 +6,23 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { readBoardTail } from "./boardstore.js";
 
+/**
+ * ボード投稿1件の契約。JSONL永続化・UI配信・LLM注入の全経路でこの形を保つ。
+ * @typedef {Object} Post
+ * @property {number} id ボード内の連番(既読管理・頁送りの基準)
+ * @property {string} from 投稿者(エージェントid / "system" / "you")
+ * @property {string} text 本文
+ * @property {number} at 投稿時刻(エポックms)
+ * @property {string} thread スレッド名(メイン="__main__")
+ */
+
 // メモリに保持する投稿の上限(長時間ランでの肥大止め)。全文はJSONLに残り、
 // UIの頁送り(BoardStore)がディスクから拾う。gather_contextの上限100に十分な量
 const POSTS_KEEP = 1000;
 
 export class Board {
   constructor(bus = null, name = "__main__", persistPath = null) {
+    /** @type {Post[]} */
     this.posts = [];
     this.seq = 0;
     this.bus = bus;
@@ -31,6 +42,19 @@ export class Board {
     }
   }
 
+  // メモリ内の投稿を空にする(UIからの履歴クリア用。ディスク/索引はBoardStore.clearが担当)。
+  // seqも0へ戻す(ファイルが空になったため、次の投稿からidを採番し直す)
+  clearMemory() {
+    this.posts = [];
+    this.seq = 0;
+  }
+
+  /**
+   * 投稿を1件追加して全経路(メモリ/JSONL/bus/waiters)へ流す
+   * @param {string} from
+   * @param {string} text
+   * @returns {Post}
+   */
   post(from, text) {
     const post = { id: ++this.seq, from, text: String(text), at: Date.now(), thread: this.name };
     this.posts.push(post);
@@ -52,10 +76,16 @@ export class Board {
     return post;
   }
 
+  /**
+   * 既読位置以降の投稿を返す(ボード新着注入の正。二重配信は呼び出し側のseen管理で防ぐ)
+   * @param {number|null} id
+   * @returns {Post[]}
+   */
   since(id) {
     return this.posts.filter((p) => p.id > (id ?? 0));
   }
 
+  /** @returns {number} */
   lastId() {
     return this.posts.length ? this.posts[this.posts.length - 1].id : 0;
   }

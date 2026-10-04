@@ -5,10 +5,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Board, Bus } from "../src/engine/board.js";
-import { TaskBlackboard } from "../src/engine/tasks.js";
-import { createTools } from "../src/engine/tools.js";
-import { runAgentLoop, MAX_CONSECUTIVE_RAPID_REFILLS } from "../src/engine/loop.js";
+import { Board, Bus } from "../../src/engine/board.js";
+import { TaskBlackboard } from "../../src/engine/tasks.js";
+import { createTools } from "../../src/engine/tools.js";
+import { runAgentLoop, MAX_CONSECUTIVE_RAPID_REFILLS } from "../../src/engine/loop.js";
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-stab-"));
@@ -17,7 +17,7 @@ function rmTree(p) {
   try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ }
 }
 
-const PERSONA = join(dirname(fileURLToPath(import.meta.url)), "..", "agents", "alpha.md");
+const PERSONA = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents", "alpha.md");
 const AGENT = { id: "alpha", displayName: "アルファ", role: "impl", personaPath: PERSONA };
 function makeEnv(ws) {
   const bus = new Bus();
@@ -90,7 +90,7 @@ test("rapid-refillブレーカー: 圧縮が追いつかない連鎖で打ち切
     maxTokens: 4000,
     async chat({ messages }) {
       // 要約器(コンパクト要求)は常に成功
-      if (String(messages[0]?.content).includes("要約器")) {
+      if (String(messages[0]?.content).includes("conversation summarizer")) {
         return { content: "要約した", toolCalls: [], raw: { content: "要約した" }, usage: { promptTokens: 10, completionTokens: 1 } };
       }
       n++;
@@ -133,7 +133,7 @@ test("rapid-refill: 圧縮間に3ツールターン以上あればストリー�
   const model = {
     maxTokens: 4000,
     async chat({ messages }) {
-      if (String(messages[0]?.content).includes("要約器")) {
+      if (String(messages[0]?.content).includes("conversation summarizer")) {
         compacts++;
         return { content: "要約した", toolCalls: [], raw: { content: "要約した" }, usage: { promptTokens: 10, completionTokens: 1 } };
       }

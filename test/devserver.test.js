@@ -4,7 +4,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startUi } from "../src/ui/server.js";
+import { startUi as _startUi } from "../src/ui/server.js";
+// test-hf-token-inject: UIサーバーのPOSTはCSRFトークンを要求するため、
+// テスト内のfetchは全てトークン付きへ差し替える(startUi後にtokenedFetchOn()を呼ぶ)
+import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
+tokenedFetchOn();
 import { Bus } from "../src/engine/board.js";
 import { TaskBlackboard } from "../src/engine/tasks.js";
 
@@ -42,8 +46,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
     agents: [],
     budget: { maxTokensPerRun: 1 },
   };
-  const ui = await startUi({ config, modelFactory: () => ({}), bus, autoStart: false });
-  const token = ui.token ?? "";
+  const ui = await startUiTokenized(_startUi, { config, modelFactory: () => ({}), bus, autoStart: false });
   const base = `http://127.0.0.1:${config.ui.port}`;
 
   // scripts検出(GET /api/scripts。/api/devserverはGETで起動中サーバー一覧を返す)
@@ -54,7 +57,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   // 起動
   const started = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "start", script: "serve" }),
   });
   assert.equal(started.status, 200, JSON.stringify(started.body));
@@ -65,7 +68,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   // 二重起動は同じプロセスを返す(alreadyRunning)
   const dup = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "start", script: "serve" }),
   });
   assert.equal(dup.status, 200);
@@ -75,7 +78,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   // 停止
   const stopped = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "stop", script: "serve" }),
   });
   assert.equal(stopped.status, 200);
@@ -84,7 +87,7 @@ test("devserver: scripts一覧の検出、起動でHTTP疎通、stopで停止", 
   // 停止後の二重停止はエラー
   const dupStop = await fetchJson(`${base}/api/devserver`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "stop", script: "serve" }),
   });
   assert.equal(dupStop.body.ok, false);

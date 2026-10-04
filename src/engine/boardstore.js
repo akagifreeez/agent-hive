@@ -4,7 +4,7 @@
 // - 過去の頁送りは、行頭バイトオフセットの索引を一度張って2分探索→必要な範囲だけ読む
 // - 索引の更新は追記差分スキャン(前回走査位置から新規バイトだけ)。全体再走査は起きない
 // JSONL自体の形式は従来どおり(Board.postが書く1投稿1行)なので、旧ログともそのまま互換。
-import { openSync, readSync, closeSync, statSync, readdirSync } from "node:fs";
+import { openSync, readSync, closeSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 function parsePost(line) {
@@ -200,5 +200,16 @@ export class BoardStore {
       all.push(...tail.slice(-limit));
     }
     return all.sort((a, b) => (a.at ?? 0) - (b.at ?? 0) || a.id - b.id);
+  }
+
+  // スレッドのチャット履歴を空にする(タスク/メモリには触らない)。索引キャッシュは捨てる
+  // (BoardFileIndexはfdを保持しないのでdeleteで安全)。戻り値は消えた行数の目安(索引があれば)
+  clear(thread) {
+    const file = BoardStore.fileFor(thread);
+    const ix = this.indexes.get(file);
+    const count = ix ? ix.count() : 0;
+    this.indexes.delete(file);
+    writeFileSync(join(this.dir, file), "");
+    return { file, count };
   }
 }

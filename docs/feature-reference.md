@@ -22,6 +22,7 @@
 | スレッドの一時停止 | — | — | ナビの「停」ボタン+/api/pauseでスレッド稼働を停止。起床と自動増員を止めてトークン消費ゼロで休み、「再」で保留分(指示・タスク)を拾い直して続行 | 採用済み(2026-09-27、Claude Squad手本) |
 | CLI操作 | zcode TUI本体 | CLIが本来の形 | bin/hive.js(依存ゼロのHTTPクライアント): status/tasks/threads/say/board/watch/chat/feedback/pause/resume/usage。稼働中の本体(UIサーバー)にREST+SSEで接続。SSH先など端末からも操作可 | 採用済み(2026-09-27)。本体はブラウザUI+常駐トレイ、CLIはその操作面 |
 | 定時実行 | cron/アイドル時実行の automations を内蔵 | 無し(OSのcronで代用) | 無し | 不要。PC常駐アプリとしてはOSのタスクスケジューラで足りる |
+| web検索 | WebSearch/WebFetchツール(ハーネス側が検索を実行) | 無し(?) | model.webSearchでZ.AIのサーバー側web_searchツールを有効化(GLM Coding Planの内蔵ツール。実測2026-09-28、codingエンドポイントで動作確認済み)。リクエストに付けておくとモデルが必要時に検索し、出典がchat返値のsearchesに入る(活動ログ=agent.searchイベント)。agents[].webSearchで個別上書き | 採用済み(2026-09-28)。検索結果注入ぶんpromptトークンが増えるため全員常時付与は予算と相談 |
 
 ## 2. 権限と安全
 
@@ -93,3 +94,4 @@
 - 2026-09-27: チャット肥大化対策としてボード履歴をBoardStore(ディスク索引型)に変更。起動時は各JSONLの末尾だけ読み、過去の頁はバイトオフセット索引の2分探索で必要範囲のみ読む(追記は差分スキャン)。Board/エージェント側もRAMを末尾1000件に上限化、mem-*.jsonは一時ファイル経由の原子書込に。/api/boardはthread指定でスレッド単位の頁送りに対応(旧来のthread無し指定はRAM優先+ディスクフォールバックで互換維持)
 - 2026-09-27: CLI対応(bin/hive.js)。稼働中のhive本体にREST+SSEで接続する依存ゼロのクライアントで、status/tasks/threads/say/board/watch/chat/feedback/pause/resume/usage を端末から実行できる。package.jsonにbin+hiveエントリ、READMEにCLI節、electron-builderの同梱にbin/を追加
 - 2026-09-27: exe化を完了(NSISインストーラ+ポータブル+win-unpackedをdist/へ)。梱包実行時は書き込み系パス(workspace/worktrees/hive.local.json/apiKeyFile)をHIVE_DATA(userData)基準に寄せるようconfig.jsをdataDir()化し、hive.config.json・bin/hive.jsを同梱。梱包exeの--smokeでSMOKE OKを確認
+- 2026-09-28: web検索を採用(model.webSearch)。GLM Coding Planのサーバー側web_searchツールをopenai.jsでbody.toolsに混入し、レスポンス(非ストリーム=トップレベル、ストリーム=usageチャンク)のweb_searchを出典としてsearchesに返す。活動ログにはagent.searchイベント。agents[].webSearchで個別上書き可

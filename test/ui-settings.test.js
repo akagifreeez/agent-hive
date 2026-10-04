@@ -5,7 +5,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bus } from "../src/engine/board.js";
-import { startUi } from "../src/ui/server.js";
+import { startUi as _startUi } from "../src/ui/server.js";
+// test-hf-token-inject: UIサーバーのPOSTはCSRFトークンを要求するため、
+// テスト内のfetchは全てトークン付きへ差し替える(startUi後にtokenedFetchOn()を呼ぶ)
+import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
+tokenedFetchOn();
+
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-settings-"));
@@ -30,7 +35,7 @@ test("設定API: /api/modelは思考レベルとモデルをruntimeへ届け、s
     agents: [],
     budget: { maxTokensPerRun: 1 },
   };
-  const ui = await startUi({
+  const ui = await startUiTokenized(_startUi, {
     config, modelFactory: () => ({}), bus, autoStart: false,
     onModel: (patch) => { calls.push(patch); return { ok: true, model: patch.model ?? "base-model", effort: patch.effort ?? null }; },
     onPermMode: (mode) => ({ ok: true, mode }),
@@ -73,7 +78,7 @@ test("設定API: /api/permで権限モードが変わり、stateのpermModeに�
     agents: [],
     budget: { maxTokensPerRun: 1 },
   };
-  const ui = await startUi({
+  const ui = await startUiTokenized(_startUi, {
     config, modelFactory: () => ({}), bus, autoStart: false,
     onPermMode: (mode) => { modes.push(mode); return { ok: true, mode }; },
   });
@@ -107,7 +112,7 @@ test("設定API: /api/folderでスレッドのフォルダを付け替えられ�
     agents: [],
     budget: { maxTokensPerRun: 1 },
   };
-  const ui = await startUi({
+  const ui = await startUiTokenized(_startUi, {
     config, modelFactory: () => ({}), bus, autoStart: false,
     onFolder: (req) => { reqs.push(req); return { ok: true, name: req.project, folder: req.folder }; },
   });
@@ -124,7 +129,7 @@ test("設定API: /api/folderでスレッドのフォルダを付け替えられ�
 
   // エラー時は400
   const cfg2 = { ...config, ui: { port: 0 } };
-  const ui2 = await startUi({
+  const ui2 = await startUiTokenized(_startUi, {
     config: cfg2, modelFactory: () => ({}), bus, autoStart: false,
     onFolder: () => ({ error: "スレッド x は開いていません" }),
   });

@@ -17,6 +17,11 @@ export async function detectShell() {
   return cachedShell;
 }
 
+/**
+ * コマンドを実行する(outputLimitで出力を丸める)。cwd省略時はプロセスのカレント。
+ * @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number}} o
+ * @returns {Promise<{ok: boolean, text: string}>}
+ */
 export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null }) {
   const kind = await detectShell();
   const child =

@@ -5,8 +5,13 @@ import { openInBrowser, defaultOpenCommand } from "../src/engine/browser.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startUi } from "../src/ui/server.js";
+import { startUi as _startUi } from "../src/ui/server.js";
 import { Bus } from "../src/engine/board.js";
+// test-hf-token-inject: UIサーバーのPOSTはCSRFトークンを要求するため、
+// テスト内のfetchは全てトークン付きへ差し替える(startUi後にtokenedFetchOn()を呼ぶ)
+import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
+tokenedFetchOn();
+
 
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* ロックは無視 */ } }
 
@@ -34,10 +39,9 @@ test("devserver起動時にブラウザオープンが呼ばれる(open:falseで
     writeFileSync(join(ws, "dummy-server.mjs"), "import { createServer } from 'node:http';const s=createServer((q,r)=>r.writeHead(200).end('ok'));s.listen(0,'127.0.0.1',()=>console.log('PORT='+s.address().port));process.on('SIGTERM',()=>process.exit(0));");
     writeFileSync(join(ws, "package.json"), JSON.stringify({ scripts: { serve: "node dummy-server.mjs" } }));
     const config = { workspace: ws, ui: { port: 0 }, model: { model: "t" }, agents: [], budget: { maxTokensPerRun: 1 } };
-    const ui = await startUi({ config, modelFactory: () => ({}), bus: new Bus(), autoStart: false });
-    const token = ui.token ?? "";
+    const ui = await startUiTokenized(_startUi, { config, modelFactory: () => ({}), bus: new Bus(), autoStart: false });
     const base = `http://127.0.0.1:${config.ui.port}`;
-    const post = (b) => fetch(`${base}/api/devserver`, { method: "POST", headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" }, body: JSON.stringify(b) });
+    const post = (b) => fetch(`${base}/api/devserver`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
 
     // open:false で起動 → ブラウザを開かずURLだけ返る
     const r = await post({ action: "start", script: "serve", open: false });

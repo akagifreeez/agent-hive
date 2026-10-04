@@ -4,11 +4,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Board, Bus } from "../src/engine/board.js";
-import { TaskBlackboard } from "../src/engine/tasks.js";
-import { ChatHost } from "../src/engine/chat.js";
-import { createTools } from "../src/engine/tools.js";
-import { runChat } from "../src/runner.js";
+import { Board, Bus } from "../../src/engine/board.js";
+import { TaskBlackboard } from "../../src/engine/tasks.js";
+import { ChatHost } from "../../src/engine/chat.js";
+import { createTools } from "../../src/engine/tools.js";
+import { runChat } from "../../src/runner.js";
 
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのファイルロックは無視 */ } }
 

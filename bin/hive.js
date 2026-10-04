@@ -25,6 +25,7 @@ const HELP = `agent-hive CLI — 稼働中のhiveを端末から操作する
   feedback <taskId> <コメント>  マージ済み差分への修正依頼を送る
   pause <スレッド> / resume <スレッド>  スレッドの一時停止/再開
   audit                     監査台帳(state/audit.jsonl)の直近記録を見る(-n 件数、既定30)
+  notify                    通知(承認待ち/マージ/長時間タスク完了)の最新を監視から見る
   usage                     トークン消費の直近サマリ
 
   --port N                  UIサーバーのポート(既定: HIVE_UI_PORT または 7789)
@@ -47,11 +48,25 @@ function base(port) {
   return `http://127.0.0.1:${port}`;
 }
 
+// CSRFトークン: サーバー再起動で変わるため、最初の呼び出し時に / から自動取得して覚える。
+// GETはトークン不要で、トークンは同一オリジンのHTMLにしか出ない(ローカルCLIが読むのは安全)。
+// HIVE_UI_TOKEN環境変数があればそちらを優先(自動取得できない環境向け)
+let cachedToken = null;
+async function getToken(port, fallback) {
+  if (fallback) return fallback;
+  if (cachedToken != null) return cachedToken;
+  try {
+    const html = await (await fetch(base(port) + "/")).text();
+    const m = html.match(/window\.HIVE_TOKEN = "([^"]*)"/);
+    cachedToken = m ? m[1] : "";
+  } catch { cachedToken = ""; }
+  return cachedToken;
+}
+
 async function api(port, path, body = null, token = null) {
   let res;
   try {
-    const headers = { "content-type": "application/json", origin: "http://localhost" };
-    if (token) headers["x-hive-token"] = token;
+    const headers = { "content-type": "application/json", origin: "http://localhost", "x-hive-token": await getToken(port, token) };
     res = await fetch(base(port) + path, body ? { method: "POST", headers, body: JSON.stringify(body) } : undefined);
   } catch {
     console.error(`hive本体に接続できません(${base(port)})。先に desktop(npm run desktop)か node src/index.js --chat で起動してください。`);
@@ -267,13 +282,39 @@ async function cmdTaskAction(o, args, action) {
   return r;
 }
 
+async function cmdNotify(o) {
+  // 監視(monitor)の通知フィードを見る(#11)。監視が無効なら案内して終わり
+  const s = await api(o.port, "/api/state");
+  const mPort = s.monitorPort;
+  if (!mPort) {
+    console.error("監視(monitor)が無効です。起動時に ui.monitorPort を設定してください。");
+    exit(1);
+  }
+  const snap = await api(mPort, "/api/monitor");
+  const pend = snap.pendingRequests ?? [];
+  const list = snap.notifications ?? [];
+  console.log(`${ACCENT}承認待ち ${pend.length}件${RESET}`);
+  for (const r of pend) console.log(`  \u{1F510} #${r.id} ${r.command}`);
+  console.log(`${ACCENT}通知 ${list.length}件${RESET}(新しい順)`);
+  for (const n of list) {
+    const at = n.at ? String(n.at).replace("T", " ").slice(0, 19) : "-";
+    const icon = n.kind === "permission.request" ? "\u{1F510}" : (n.kind === "merge.completed" ? "\u{1F500}" : "\u23F1");
+    console.log(`  ${DIM}${at}${RESET} ${icon} ${BOLD}${n.title}${RESET} ${n.body}`);
+  }
+  if (!pend.length && !list.length) console.log("(通知なし)");
+}
+
 async function cmdAudit(o) {
   const r = await api(o.port, `/api/audit?limit=${o.limit}`);
   const audit = r.audit ?? [];
-  console.log(`${ACCENT}監査台帳 ${audit.length}件${RESET}`);
+  console.log(`${ACCENT}監査台帳 ${audit.length}件${RESET}(新しい順)`);
   for (const e of audit) {
-    const at = e.at ? String(e.at).replace("T", " ").slice(0, 19) : "-";
-    console.log(`  ${DIM}${at}${RESET} ${BOLD}${e.tool ?? e.name ?? "?"}${RESET} ${DIM}${e.agent ?? ""}${RESET} ${JSON.stringify(e.args ?? e.input ?? {})}`.slice(0, 200));
+    // 台帳の実フィールド: ts/tool/agent/ok/ms/blocked/cmd?/path?/brief
+    const at = e.ts ? String(e.ts).replace("T", " ").slice(0, 19) : "-";
+    const mark = e.blocked ? `${ACCENT}[block]${RESET}` : (e.ok ? `${DIM}ok${RESET}` : "×");
+    const detail = [e.cmd, e.path].filter(Boolean).join(" ");
+    const line = `  ${DIM}${at}${RESET} ${mark} ${BOLD}${e.tool ?? "?"}${RESET} ${DIM}${e.agent ?? ""}${RESET} ${detail} ${DIM}${e.brief ?? ""}${RESET}`;
+    console.log(line.slice(0, 220));
   }
   if (!audit.length) console.log("(記録なし)");
 }
@@ -296,6 +337,7 @@ async function main() {
     return cmdTasks(opts, sub);
   }
   if (cmd === "audit") return cmdAudit(opts);
+  if (cmd === "notify") return cmdNotify(opts);
   if (cmd === "board") return cmdBoard(opts);
   if (cmd === "say") return cmdSay(opts, args);
   if (cmd === "feedback") return cmdFeedback(opts, args);
