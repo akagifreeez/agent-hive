@@ -25,10 +25,9 @@ function mkHost(ws) {
   const agent = { id: "cp-lead", displayName: "リーダー", role: "lead", personaText: "# L" };
   const host = new ChatHost({
     mains: [agent], project: "cp", autoContinueRounds: 0, staggerMs: 0,
-    board, tasks, bus,
+    board, tasks, bus, // 配線必須(board.lastId参照・タスク起床イベント)。抜けるとlastId参照エラー
     modelFactory: () => ({ maxTokens: 10, async chat() { return { content: "ok", toolCalls: [], raw: { content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } }; } }),
     toolsFactory: () => createTools({ agent, workspace: ws, board, tasks, bus }),
-    board, tasks, bus,
     autoStart: false,
   });
   return { host, board, bus, tasks, agent };
@@ -105,7 +104,7 @@ test("say(): 破損検知時も本文はボードへ記録される(欠落させ
     const { host, board } = mkHost(ws);
     host.say("\uFFFDな入力");
     await waitRunning(host, "cp-lead");
-    const posts = board.posts.filter((p) => p.from === "you");
+    const posts = board.posts.filter((p) => p.from === "you"); // Board契約: 投稿はposts配列(list()は無い)
     assert.ok(posts.some((p) => p.text.includes("\uFFFD")), "ユーザー入力の記録は残る");
   } finally { rmTree(ws); }
 });
