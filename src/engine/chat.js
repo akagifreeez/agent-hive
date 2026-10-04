@@ -8,6 +8,7 @@
 import { mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { runAgentLoop, buildSystemPrompt } from "./loop.js";
+import { pruneMemories } from "./compact.js";
 import { createTools } from "./tools.js";
 import { mergeAgentWork } from "./worktree.js";
 
@@ -16,6 +17,8 @@ import { mergeAgentWork } from "./worktree.js";
 // mem-<id>.json の既定上限(メッセージ数)。chat.memMaxMessages で上書きできる。
 // 実運用(220件超のテスト・複数スレッド併走)でも足りる分量を残し、system+要約+直近分を保つ。
 export const DEFAULT_MEM_MAX_MESSAGES = 120;
+// mem-<id>.json の既定上限(バイト)。chat.memMaxBytes で上書き。0で無効化(0=刈り取りしない契約)。
+export const DEFAULT_MEM_MAX_BYTES = 512 * 1024;
 
 // ボード投稿参照(番号単独)の検出。ラベル/日時なしの参照は再起動後に別ボードの同番号と衝突するため、
 // 刈り取り時にmain・日時付きへ補正する。
@@ -65,11 +68,12 @@ export function containsReplacementChar(text) {
 // UTF-8→cp932二重エンコードの兆候(置換文字が無くても化け型を拾う)
 export function looksDoubleEncoded(text) {
   if (typeof text !== "string" || text.length < 4) return false;
-  const latinBlocks = (text.match(/[ãâåæçèé]+/g) ?? []).join("");
-  const symbols = (text.match(/[Â¢Â¤Â§Â±Â½Â¿]/g) ?? []).length;
-  if (latinBlocks.length >= 4 && symbols + (text.match(/[^ -~]/g) ?? []).length >= 2) return true;
-  if (symbols >= 3 && /[A-Z]/.test(text)) return true;
-  return false;
+  const nonAscii = (text.match(/[^ -~]/g) ?? []).length;
+  if (nonAscii < 4) return false;
+  // 正常な日本語は頻出仮名(かな/カタ)を含む。化け型は latin-1 記号・アクセント付き文字が主になる
+  const kanaRatio = (text.match(/[ぁ-んァ-ヶ]/g) ?? []).length / nonAscii;
+  const latinGarbage = (text.match(/[-ÿ]/g) ?? []).length;
+  return latinGarbage >= 4 && kanaRatio < 0.3;
 }
 
 // 統合検知。警告文(問題なければnull)
@@ -97,6 +101,7 @@ export class ChatHost {
     autoContinueRounds = 3, // ターン上限でも仕事が残っていれば自動で次ラウンドへ(0=従来どおり停止)
     hooks = null, // Hooksインスタンス(roundEndフック)
     chatConfig = null, // chat設定(chat.memMaxMessages など記憶運用の上書き)
+    config = null, // 互換: mem-lead-growthテストが chatConfig の代わりに渡す({chat:{...}})
   }) {
     this.mains = mains;
     this.mainWorkspace = mainWorkspace;
@@ -117,6 +122,12 @@ export class ChatHost {
     this.autoContinueRounds = autoContinueRounds;
     this.hooks = hooks;
     this.chatConfig = chatConfig;
+    this.config = config;
+    const effChat = this.chatConfig ?? this.config?.chat ?? null;
+    this.memPrune = {
+      maxMessages: Number(effChat?.memMaxMessages ?? DEFAULT_MEM_MAX_MESSAGES),
+      maxBytes: Number(effChat?.memMaxBytes ?? DEFAULT_MEM_MAX_BYTES),
+    };
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
     this.paused = false; // 一時停止中は新しい起床を潰す(実行中ラウンドはターン境界で自然終了)
     this.memories = new Map(); // id => messages配列(ラウンド間で保持)
@@ -176,13 +187,12 @@ export class ChatHost {
 
   // ラウンド終了時の記憶刈り取り(上限超過分を要約へ)。上限はchat.memMaxMessagesで設定可。
   applyMemoryLimit(main) {
-    const max = Number(this.chatConfig?.memMaxMessages ?? DEFAULT_MEM_MAX_MESSAGES);
     const cur = this.memories.get(main.id);
     if (!Array.isArray(cur)) return;
-    const trimmed = trimMemories(cur, { memMaxMessages: max, boardName: this.board?.name });
-    if (trimmed !== cur) {
-      this.memories.set(main.id, trimmed);
-      this.bus.emit("memory.pruned", { agent: main.id, before: cur.length, after: trimmed.length });
+    const r = pruneMemories(cur, { maxMessages: this.memPrune.maxMessages, maxBytes: this.memPrune.maxBytes });
+    if (r.changed) {
+      this.memories.set(main.id, r.messages);
+      this.bus.emit("memory.pruned", { agent: main.id, before: cur.length, after: r.messages.length, removed: r.removed });
     }
   }
 
