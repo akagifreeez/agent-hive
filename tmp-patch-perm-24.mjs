@@ -36,7 +36,7 @@ const oldB = [
   "      const pt = String(p).trim().split(/\\s+/);",
   "      return pt.every((w, i) => argvTokens[i] === w);",
   "    });"
-].join(NL);
+].join(NL) + NL;
 const newB = [
   "    // \u8907\u5408\u30b3\u30de\u30f3\u30c9\u5bfe\u5fdc: \u5b9f\u884c\u5358\u4f4d\u3054\u3068\u306bconfirm\u5224\u5b9a\u3057\u3001",
   "    // 1\u3064\u3067\u3082confirm\u5fc5\u9808\u304c\u3042\u308c\u3070\u5168\u4f53\u3092\u627f\u8a8d\u8981\u6c42\u6271\u3044\u306b\u3059\u308b(\u30a4\u30b7\u30e5\u30fc#24)\u3002",
