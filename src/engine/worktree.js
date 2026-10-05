@@ -26,16 +26,24 @@ function queueMerge(fn) {
 // 毎ランfreshに張り直す(前回のブランチ残骸を掃除)。ただし無音に壊してはいけないものは保持して
 // onKeptで告知し、引き継ぎ判断を外に見せる: (1)worktree内の未コミット変更 (2)未マージのコミット
 // (プロセス死で中断したコミット済み作業。イシュー#7: respawnスキャンより先に消さない)。
+/** worktree内の未コミット変更(変更・untracked含む)の有無。setupWorktreesとcreateWorktreeで
+ * 同一の判定を使う(イシュー#23: 直呼び経路でもdirtyを見逃さない)。
+ * @returns {Promise<string|null>} dirtyならstatus出力(詳細)、cleanならnull */
+export async function dirtyWorktreeDetail({ path, exec = runCommand }) {
+  const st = await exec({ command: "git status --porcelain", cwd: path, outputLimit: 2000 });
+  if (!st.ok) return null; // 判定不能はclean扱いで続行(既存契約)
+  return st.text.split("\n").slice(1).some((l) => l.trim()) ? st.text.slice(0, 800) : null;
+}
+
 export async function setupWorktrees({ mainWorkspace, worktreeRoot, agents, exec = runCommand, onKept = null }) {
   const paths = {};
   for (const agent of agents) {
     const path = resolve(join(worktreeRoot, agent.id));
     if (existsSync(path)) {
-      const st = await exec({ command: "git status --porcelain", cwd: path, outputLimit: 2000 });
-      const dirty = st.ok && st.text.split("\n").slice(1).some((l) => l.trim());
-      if (dirty) {
+      const dirtyDetail = await dirtyWorktreeDetail({ path, exec });
+      if (dirtyDetail) {
         paths[agent.id] = path;
-        onKept?.({ agentId: agent.id, path, detail: st.text.slice(0, 800) });
+        onKept?.({ agentId: agent.id, path, detail: dirtyDetail });
         continue;
       }
       // dirty無しでも未マージのコミットが残っていれば保持する(respawnスキャンの検出対象)
