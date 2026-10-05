@@ -36,6 +36,27 @@ export function normalizeCommand(cmd, { sort = false } = {}) {
   return out.join(" ");
 }
 
+
+// シェルの実行単位への分割: 複合コマンド(; && & || パイプ 改行)を実行単位ごとに切る。
+// クォート内の区切りは考慮しない(過剰分割は「承認要求が増える」安全側に倒れるため、confirm判定には十分)。
+// 正規表現を使わず文字コードで走査する(59=';' 38='&' 124='|' 10=LF 13=CR)。
+export function splitExecUnits(cmd) {
+  const text = String(cmd ?? "");
+  const units = [];
+  let cur = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 59 || c === 38 || c === 124 || c === 10 || c === 13) {
+      units.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += text[i];
+  }
+  units.push(cur);
+  return units.map((u) => u.trim()).filter(Boolean);
+}
+
 // confirm用の引数正規化: 連結オプション(-9 / -f 等)を分割して照合する。
 // 例: `curl -sS -m 5 http://...` の -sS はそのままでも、`kill -9` の -9 は `kill - 9` に分裂させて
 // 「kill 」前方一致 + オプション除外の照合を素通りさせない。
@@ -92,13 +113,17 @@ export class PermissionGate {
 
     // confirm 段: curl/wget(送信の足がかり)や kill/taskkill(プロセス停止)は、
     // auto モードであっても自動承認しない(必ず承認要求を出して人の判断を待つ)。
-    const argv = normalizeConfirmArgv(command);
-    const argvTokens = argv.split(" ");
-    const hitConfirm = this.confirm.find((p) => {
-      // 先頭トークン一致(部分一致の誤爆「echo killing」等を避ける)。複数語パターンは前置詞一致
-      const pt = String(p).trim().split(/\s+/);
-      return pt.every((w, i) => argvTokens[i] === w);
-    });
+    // 複合コマンド対応: 実行単位ごとにconfirm判定し、
+    // 1つでもconfirm必須があれば全体を承認要求扱いにする(イシュー#24)。
+    // 「echo ready; curl ...」の2番目以降の単位でも素通りさせない。
+    const hitConfirm = splitExecUnits(command).map((unit) => normalizeConfirmArgv(unit)).find((argv) =>
+      this.confirm.find((p) => {
+        // 先頭トークン一致(部分一致の誤爆「echo killing」等を避ける)。複数語パターンは前置詞一致
+        const argvTokens = argv.split(" ");
+        const pt = normalizeCommand(String(p).trim());
+        return pt.split(" ").every((w, i) => argvTokens[i] === w);
+      })
+    );
     if (hitConfirm) {
       const verdict2 = await this.requestApproval(command, hitConfirm);
       if (verdict2 === "approve") {
