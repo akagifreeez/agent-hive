@@ -76,10 +76,24 @@ export async function createWorktree({ mainWorkspace, worktreeRoot, agentId, exe
   const path = resolve(join(worktreeRoot, agentId));
   const branch = `agent/${agentId}`;
   if (existsSync(path)) {
-    // 二重防御: setupWorktrees経由以外の直呼びでも、未マージコミット付きworktreeは壊さない
+    // 二重防御その1: 未マージコミット付きworktreeは壊さない(イシュー#7)
     if (await hasUnmergedWork({ mainWorkspace, agentId, exec })) {
       onKept?.({ agentId, path, detail: "未マージコミットを保持" });
       return path;
+    }
+    // 二重防御その2(イシュー#23): 未コミットファイル(変更・untracked)があるworktreeを
+    // remove --forceで消さない。stash(push -u)で退避してから再作成する。退避失敗時は
+    // 成果喪失を避けるため再作成を拒否して例外にする(呼び出し側spawn.jsはerrorへ変換)。
+    const dirty = await dirtyWorktreeDetail({ path, exec });
+    if (dirty) {
+      const stashMsg = `hive-pre-recreate-${agentId}`;
+      const st = await exec({ command: `git stash push -u -m "${stashMsg}"`, cwd: path, outputLimit: 2000 });
+      const verify = await exec({ command: "git status --porcelain", cwd: path, outputLimit: 2000 });
+      const stillDirty = verify.ok && verify.text.split("\n").slice(1).some((l) => l.trim());
+      if (!st.ok || stillDirty) {
+        throw new Error(`worktree再作成を拒否(${agentId}): 未コミット変更の退避に失敗。手動確認が必要です。status: ${(stillDirty ? verify.text : st.text).slice(0, 200)}`);
+      }
+      onKept?.({ agentId, path, detail: `未コミット変更をstash退避して再作成(${stashMsg})` });
     }
     await exec({ command: `git worktree remove --force '${path}'`, cwd: mainWorkspace, outputLimit: 1000 });
   }
