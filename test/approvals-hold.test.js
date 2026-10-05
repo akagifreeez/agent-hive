@@ -1,156 +1,154 @@
 // イシュー#22: 承認フロー(approvals.require)有効時、実装者に保留中(検証待ち)タスクが
-// 残る間はラウンド終了の自動マージを保留し、承認後に取り込まれることを検証する。
+// 残る間はラウンド終了の自動マージを保留し([承認待ち]告知)、承認後(approve_task)にだけ
+// mainへ取り込まれることを検証する。実ChatHost+実git(worktree)方式。
+// 注: 旧版(48e7a8e)は未定義ヘルパー/未定義識別子で実行不可だったため、現行APIに合わせて再実装した。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Bus } from "../src/engine/board.js";
-import { runChat } from "../src/runner.js";
-import { rmTree } from "./helpers/git-test-utils.js";
+import { Board, Bus } from "../src/engine/board.js";
+import { TaskBlackboard } from "../src/engine/tasks.js";
+import { ChatHost } from "../src/engine/chat.js";
+import { createTools } from "../src/engine/tools.js";
+import { ensureGitRepo } from "../src/engine/discover.js";
+import { createWorktree } from "../src/engine/worktree.js";
+import { runCommand } from "../src/engine/exec.js";
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-approvals-"));
 }
-
-function mkConfig(ws, approvals) {
-  return {
-    workspace: ws,
-    worktrees: { dir: `${ws}-wt` },
-    model: { contextWindow: 200000, maxTokens: 4000 },
-    loop: { maxTurns: 10 },
-    budget: null,
-    compact: { thresholdPercent: 90 },
-    discovery: {},
-    permissions: {},
-    approvals,
-    scenario: { name: "test" },
-    chat: { lead: "lead", workers: ["alpha", "beta", "gamma"], maxTurnsPerRound: 8, staggerMs: 5 },
-    agents: [
-      { id: "alpha", displayName: "アルファ", role: "impl" },
-      { id: "beta", displayName: "ベータ", role: "review" },
-      { id: "gamma", displayName: "ガンマ", role: "impl" },
-    ],
-  };
+function rmTree(p) {
+  try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのロックは無視 */ }
 }
 
-function scriptedModel(script) {
-  let i = 0;
+async function waitUntil(fn, ms = 20000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (fn()) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return fn();
+}
+
+// 即答する固定応答モデル(ツール呼出なし=ラウンドは1ターンで終わる)
+function scriptedModel(text) {
   return {
-    maxTokens: 4000,
+    maxTokens: 100,
     async chat() {
-      const step = script[Math.min(i++, script.length - 1)];
-      return {
-        content: step.text ?? null,
-        reasoning: null,
-        toolCalls: (step.toolCalls ?? []).map((tc, j) => ({ id: `c${i}-${j}`, name: tc.name, arguments: tc.args ?? {} })),
-        raw: { role: "assistant", content: step.text ?? null, tool_calls: [] },
-        usage: { promptTokens: 10, completionTokens: 1 },
-      };
+      return { content: text, toolCalls: [], raw: { content: text }, usage: { promptTokens: 1, completionTokens: 1 } };
     },
   };
 }
 
-test("approvals: 保留中タスクを持つ実装者のラウンド作業はmainへマージされず承認待ち告知が出る", async () => {
+async function commitIn(dir, msg) {
+  await runCommand({ command: `git add -A && git -c user.name=t -c user.email=t@t commit -q -m "${msg}"`, cwd: dir, outputLimit: 500 });
+}
+
+// テスト環境: mainリポジトリ(ws)+alphaのworktree。ChatHostのラウンド末自動マージ経路を有効化。
+async function mkEnv() {
   const ws = mktmp();
+  const wtRoot = `${ws}-wt`;
+  await ensureGitRepo(ws);
+  writeFileSync(join(ws, "base.txt"), "base\n");
+  await commitIn(ws, "base");
+  const wtA = await createWorktree({ mainWorkspace: ws, worktreeRoot: wtRoot, agentId: "alpha" });
+
   const bus = new Bus();
   const posts = [];
   bus.on("board", (p) => posts.push(p));
-  const config = mkConfig(ws, { require: true });
-  const modelFactory = () => scriptedModel([{ text: "待機中" }]);
-  const ctl = await runChat({ config, bus, modelFactory });
+  const board = new Board(bus, "approvals");
+  const tasks = new TaskBlackboard(ws, bus);
+  const approvals = {
+    require: true,
+    pending: new Map(),
+    pickReviewer(excludeId) {
+      return excludeId === "beta"
+        ? { id: "gamma", displayName: "ガンマ", role: "impl" }
+        : { id: "beta", displayName: "ベータ", role: "review" };
+    },
+  };
+  const alpha = { id: "alpha", displayName: "アルファ", role: "impl", personaText: "# A" };
+  const model = scriptedModel("待機中");
+  const host = new ChatHost({
+    mains: [alpha],
+    mainWorkspace: ws, // ラウンド終了の自動マージ(#22の対象経路)
+    project: "approvals",
+    autoContinueRounds: 0,
+    staggerMs: 0,
+    modelFactory: () => model,
+    toolsFactory: (agent) => createTools({ agent, workspace: wtA, mainWorkspace: ws, board, tasks, bus, approvals }),
+    board, tasks, bus,
+    approvals,
+  });
+  host.worktreePaths = { alpha: wtA };
+  const alphaTools = host.toolsFactory(alpha);
 
-  // 実装者alphaがタスクを請求する
-  const tasks = ctl.tasks;
-  tasks.post({ id: "t-hold", body: "テスト用タスク", project: null });
-  const claimed = tasks.claim("t-hold", "alpha");
-  assert.equal(claimed.ok, true);
+  // 検証者beta(approve_taskの実行主体)。マージ対象はpending.worktreePath(実装者側)
+  const beta = { id: "beta", displayName: "ベータ", role: "review", personaText: "# B" };
+  const betaTools = createTools({ agent: beta, workspace: wtA, mainWorkspace: ws, board, tasks, bus, approvals });
 
-  // alphaのworktreeにラウンド中の変更を作る
-  const wt = ctl.worktreePaths["alpha"];
-  writeFileSync(join(wt, "wip.txt"), "ラウンド中の変更");
-  await ctl.runCommand({ command: "git add -A", cwd: wt });
-  await ctl.runCommand({ command: "git commit -m wip", cwd: wt });
+  const cleanup = () => { rmTree(ws); rmTree(wtRoot); };
+  return { ws, wtA, posts, tasks, approvals, alphaTools, betaTools, host, cleanup };
+}
 
-  // alphaのラウンドを回す(モデルは「待機中」で即終了)
-  await ctl.wake("alpha", "[システム] ラウンド実行");
-  await new Promise((r) => setTimeout(r, 300));
+test("approvals: 保留中タスクを持つ実装者のラウンド作業はmainへマージされず、承認後に入る", async () => {
+  const env = await mkEnv();
+  const { ws, wtA, posts, tasks, approvals, alphaTools, betaTools, host, cleanup } = env;
+  try {
+    // alphaが担当中のタスク
+    tasks.assign({ agentId: "alpha", taskId: "t-hold", body: "テスト用タスク", project: "approvals" });
+    assert.ok(tasks.claimedBy("alpha").some((t) => t.id === "t-hold"), "alphaが請求中");
 
-  // 承認待ちのためマージされていないこと
-  const mergedFile = join(config.workspace, "wip.txt");
-  assert.equal(existsSync(mergedFile), false, "承認待ちの間はmainへマージされない");
+    // worktreeにラウンド中の変更を作り、実フローどおりfinish_taskで保留(検証タスク起票)にする
+    writeFileSync(join(wtA, "wip.txt"), "ラウンド中の変更\n");
+    await commitIn(wtA, "wip");
+    const fin = await alphaTools.execute("finish_task", { task_id: "t-hold" });
+    assert.equal(fin.ok, true, `finish_taskが成功: ${fin.text ?? ""}`);
+    assert.match(fin.text, /検証タスク verify-t-hold/, "検証タスクが起票される");
+    assert.equal(approvals.pending.get("t-hold")?.agentId, "alpha", "保留情報が立つ");
 
-  // 承認待ち告知がボードに流れていること
-  const holdPost = posts.find((p) => p.text.includes("[承認待ち]") && p.text.includes("アルファ"));
-  assert.ok(holdPost, "[承認待ち] の告知がボードに流れる");
+    // ラウンド実行(モデルは即答)。ラウンド末マージは保留されるはず
+    host.say("[テスト] ラウンド実行");
+    assert.ok(await waitUntil(() => {
+      const st = host.roundState.get("alpha");
+      return st && !st.running;
+    }), "alphaのラウンドが完了");
 
-  rmTree(ws);
-  rmTree(`${ws}-wt`);
+    // 承認待ちのためmainへマージされていないこと
+    assert.equal(existsSync(join(ws, "wip.txt")), false, "承認待ちの間はmainへマージされない");
+    const holdPost = posts.find((p) => p.text.includes("[承認待ち]") && p.text.includes("アルファ"));
+    assert.ok(holdPost, "[承認待ち] の告知がボードに流れる");
+
+    // 検証者が承認 → マージされる
+    const apr = await betaTools.execute("approve_task", { task_id: "t-hold" });
+    assert.equal(apr.ok, true, `approve_taskが成功: ${apr.text ?? ""}`);
+    assert.equal(existsSync(join(ws, "wip.txt")), true, "承認後はmainへマージされる");
+    const merged = posts.find((p) => p.text.includes("[承認]") && p.text.includes("t-hold"));
+    assert.ok(merged, "[承認] マージ告知が流れる");
+    assert.equal(approvals.pending.has("t-hold"), false, "保留は解消");
+  } finally {
+    cleanup();
+  }
 });
 
-test("approvals: 保留中タスクが無ければ従来どおりラウンド終了時にmainへマージされる", async () 	=> {
-  const ws = mktmp();
-  const bus = new Bus();
-  const posts = [];
-  bus.on("board", (p) => posts.push(p));
-  const config = mkConfig(ws, { require: true });
-  const clean = () => { rmTree(ws); rmTree(`${ws}-wt`); };
+test("approvals: 保留中タスクが無ければ従来どおりラウンド終了時にmainへマージされる", async () => {
+  const env = await mkEnv();
+  const { ws, wtA, posts, host, cleanup } = env;
+  try {
+    writeFileSync(join(wtA, "ok.txt"), "承認不要の変更\n");
+    await commitIn(wtA, "ok");
 
-  const modelFactory = () => scriptedModel([{ text: "待機中" }]);
-  const ctl = await runChat({ config, bus, modelFactory });
+    host.say("[テスト] ラウンド実行2");
+    assert.ok(await waitUntil(() => {
+      const st = host.roundState.get("alpha");
+      return st && !st.running;
+    }), "alphaのラウンドが完了");
 
-  // alphaは保留中タスクなし。worktreeに変更をコミットしておく
-  const wt = ctl.worktreePaths["alpha"];
-  writeFileSync(join(wt, "ok.txt"), "承認不要の変更");
-  await ctl.runCommand({ command: "git add -A", cwd: "path" });
-  await ctl.runCommand({ command: "git commit -m ok", cwd: wt });
-
-  await ctl.wake("alpha", "[システム] ラウンド実行");
-  await new Promise((r) => setTimeout(r, 300));
-
-  // mainへマージされていること
-  assert.equal(existsSync(join(config.workspace, "ok.txt")), true, "保留中タスクが無ければマージされる");
-  const merged = posts.find((p) => p.text.includes("[マージ]"));
-  assert.ok(merged, "[マージ] の告知が流れる");
-
-  clean();
-});
-
-test("approvals: 承認したら保留分が次の機会にmainへ入る(保留告知→approve→マージ)", async () => {
-  const ws = mktasktmp();
-  const bus = new Bus();
-  const posts = [];
-  bus.on("board", (p) => posts.push(p));
-  const config = mkConfig(ws, { require: true });
-  const clean = () => { rmTree(ws); rmTree(`${ws}-wt`); };
-
-  const modelFactory = () => scriptedModel([{ text: "待 Issue" }]);
-  const ctl = await runChat({ config, bus, modelFactory });
-
-  // alphaがタスクを請求してworktreeにコミット
-  ctl.tasks.post({ id: "t-hold2", body: "保留解除の検証", project: null });
-  ctl.tasks.claim("t-hold2", "alpha");
-  const wt = ctl.worktreePaths["alpha"];
-  writeFileSync(join(wt, "later.txt"), "承認後にマージしたい変更");
-  await ctl.runCommand({ command: "git add -A", cwd: wt });
-  await ctl.runCommand({ mkarg: "git commit -m wip2", cwd: wt });
-
-  // 1ラウンド目: 保留でマージされない
-  await ctl.wake("alpha", "[システム] ラウンド実行");
-  await new Promise((r) => setTimeout(r, 300));
-  assert.equal(existsSync(join(config.workspace, "later.txt")), false, "承認前はmainへ入らない");
-
-  // 承認(approve) → 保留中が解消。ラウンドが再度回ればマージされる
-  const apr = await ctl.approve("t-hold2", "beta");
-  assert.equal(apr.ok, true);
-
-  // 2ラウンド目: 保留解消後はマージされる
-  await ctl.wake("alpha", "[システム] ラウンド実行");
-  await new WaitPromise(r => setTimeout(r, 300));
-
-  assert.equal(existsSync(join(config.workspace, "later.txt")), true, "承認後はmainへマージされる");
-  const merged = posts.find((p) => p.text.includes("[マージ]") && p.text.includes("アルファ"));
-  assert.ok(merged, "[マージ] 告知が流れる");
-
-  clean();
+    assert.equal(existsSync(join(ws, "ok.txt")), true, "保留中タスクが無ければマージされる");
+    const merged = posts.find((p) => p.text.includes("[マージ]") && p.text.includes("ラウンド中の作業"));
+    assert.ok(merged, "[マージ] の告知が流れる");
+  } finally {
+    cleanup();
+  }
 });
