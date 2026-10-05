@@ -26,6 +26,7 @@ export class ChatHost {
     project = null, // スレッドスコープ(自動継続の「まだ仕事があるか」判定に使う)
     autoContinueRounds = 3, // ターン上限でも仕事が残っていれば自動で次ラウンドへ(0=従来どおり停止)
     hooks = null, // Hooksインスタンス(roundEndフック)
+    approvals = null, // 承認フロー状態(runner.jsの共有オブジェクト)。ラウンド末マージの保留判定に使う(イシュー#22)
   }) {
     this.mains = mains;
     this.mainWorkspace = mainWorkspace;
@@ -58,6 +59,7 @@ export class ChatHost {
     this.seen = new Map(); // id => ボード既読位置(ラウンド間で保持。配信はボード注入の1経路のみ)
     this.roundState = new Map(); // id => {running, pending[]}
     this.autoRounds = new Map(); // id => 連続自動継続ラウンド数(ユーザー起点ラウンドで0に戻る)
+    this.approvals = approvals; // 承認フロー(null可=無効。ラウンド末マージの保留判定)
     for (const m of mains) this.seen.set(m.id, board.lastId());
     // ボード上の@表示名でメインを起こす(横つながりの入口)
     bus.on("board", (p) => this.handleBoardPost(p));
@@ -322,7 +324,12 @@ export class ChatHost {
           } catch {}
         }
           // メインが自ら直接作業した場合の受け皿: ラウンド終了時にmainへ自動マージ
-          if (this.mainWorkspace) {
+          // 承認フロー(approvals.require)有効時は、この実装者が保留中(検証待ち)のタスクを
+          // 持つ間はマージしない(イシュー#22): 検証承認後(approve_task)にだけmainへ入る。
+          const heldByApproval = this.approvals?.require
+            ? [...(this.approvals.pending ?? [])].some(([, p]) => p.agentId === main.id)
+            : false;
+          if (this.mainWorkspace && !heldByApproval) {
             const m = await mergeAgentWork({
               mainWorkspace: this.mainWorkspace,
               worktreePath: this.worktreePaths?.[main.id],
@@ -332,6 +339,9 @@ export class ChatHost {
             if (m.ok && m.merged) {
               this.board.post("system", `[マージ] ${main.displayName} がラウンド中の作業を main へ取り込みました。`);
             }
+          } else if (heldByApproval) {
+            // 承認待ちで保留した旨を見える化(黙ってマージされない状態で混乱させない)
+            this.board.post("system", `[承認待ち] ${main.displayName} のラウンド作業は検証承認待ちのためmainへの取り込みを保留しました。`);
           }
         } catch (err) {
           this.bus.emit("scenario.warn", { message: `ラウンド異常(${main.id}): ${err.message}` });
