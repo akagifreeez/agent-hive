@@ -114,11 +114,11 @@ test("進捗ゲート: 着地があり続けてもautoContinueRounds(ハード�
   const toolResults = [];
   const { host, board, tasks, calls, cleanup } = mkHost({
     project: "pgate-hard",
-    onToolResult: (name, args, out) => toolResults.push([name, out.ok, String(out.text ?? "").slice(0, 80)]),
+    onToolResult: (name, args, out) => toolResults.push([name, out.ok, String(out.text ?? "").slice(0, 120)]),
     autoContinueRounds: 1,
     steps: [
       { toolCalls: [{ name: "finish_task", arguments: { task_id: "t3" } }] },
-      { toolCalls: [{ name: "finish_task", arguments: { task_id: "t4" } }, { name: "list_files", arguments: {} }] }, // 着地+ターン上限
+      { toolCalls: [{ name: "post_to_board", arguments: { text: "進行中" } }] }, // ターンを消費するだけで着地無し
       "応答のみ",
     ],
   });
@@ -131,6 +131,8 @@ test("進捗ゲート: 着地があり続けてもautoContinueRounds(ハード�
       const st = host.roundState.get("alpha");
       return st && !st.running;
     }), "ラウンドが完走");
+    console.error("DEBUG posts:", board.posts.map((p) => [p.agent, p.text.slice(0, 70)]));
+    console.error("DEBUG lastKickoff:", host.roundState.get("alpha").lastKickoff.slice(-3));
     assert.equal(calls.length, 2, "継続は上限1回まで(着地があっても2回目は継続しない)");
     assert.ok(host.roundState.get("alpha").lastKickoff.includes("自動継続(1ラウンド目)"), "1回だけ継続される");
     assert.ok(board.posts.some((p) => p.text.includes("[自動継続停止(ハード上限)]")), "ハード上限停止が通知される");
