@@ -57,10 +57,11 @@ test("finish_task(verify)の競合経路でnoteRejectionがmodelPolicyを受け�
   try {
     const { main, ws } = initRepos(base);
     writeFileSync(join(ws, "README.md"), "worker side\n");
-    GIT("add -A && commit -qm wip".replace("add -A && commit", "add -A && git -c user.email w@t -c user.name w commit"), ws);
-    // 実装側worktreeをmainから先行させて競合を作る: main側でREADMEを変更してcommulatebmit
-    writeFileSync(join(main, "README.md"), "main side changed\n");
-    GIT("add -A && git -c user.email t@t -c user.name t commit -qm main-change", main);
+    GIT("git add -A", ws);
+    GIT("git -c user.email=w@t -c user.name=w commit -qm wip", ws);
+    // 実装側worktreeをmainから先行させて競合を作る: main側でREADMEを変更してコミット
+    GIT("git add -A", main);
+    GIT("git -c user.email=t@t -c user.name=t commit -qm main-change", main);
 
     const bus = new Bus();
     const tasks = new TaskBlackboard(base, bus);
