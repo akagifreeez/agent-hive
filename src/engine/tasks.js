@@ -181,12 +181,21 @@ export class TaskBlackboard {
     }
   }
 
+  // 請求中タスク一覧。project等のメタを含める(tools.jsの検証タスク起票がprojectを引き継ぐのに使う)
   claimedBy(agentId) {
     const files = readdirSync(this.claimed).filter((f) => f.startsWith(`${agentId}--`) && f.endsWith(".md"));
-    return files.map((f) => ({
-      id: f.replace(/\.md$/, "").slice(agentId.length + 2),
-      body: readFileSync(join(this.claimed, f), "utf8"),
-    }));
+    return files.map((f) => {
+      const meta = readMeta(join(this.claimed, f));
+      return {
+        id: f.replace(/\.md$/, "").slice(agentId.length + 2),
+        role: meta.role,
+        project: meta.project,
+        acceptance: meta.acceptance ?? "",
+        dependsOn: meta.dependsOn ?? [],
+        model: meta.model ?? null,
+        body: readFileSync(join(this.claimed, f), "utf8"),
+      };
+    });
   }
 
   // 担当者が消える終わり方(予算停止/エラー/継続不能)のとき、請求中をopenへ戻す。
