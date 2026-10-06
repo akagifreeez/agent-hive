@@ -20,11 +20,15 @@ export const QUOTA_NOTE = "スレッド内で同時1タスクまで(既存タス
 
 /**
  * ポリシーの設定を取り出す(config.chat.modelPolicy、未設定は既定値)
- * @param {{chat?: {modelPolicy?: {escalationThreshold?: number, escalateModel?: string|null}}} | null} config
+ * 呼び出し形は2種ある: 生config({chat:{modelPolicy:{...}}})と、runner側で一度この関数を
+ * 通した解決済みポリシー({escalationThreshold, escalateModel})。spawn→toolsへポリシーを
+ * 引き回すときに二重正規化で設定値が既定へ落ちないよう、両方を受け付ける。
+ * @param {{chat?: {modelPolicy?: {escalationThreshold?: number, escalateModel?: string|null}}, escalationThreshold?: number, escalateModel?: string|null} | null} config
  * @returns {{escalationThreshold: number, escalateModel: string|null}}
  */
 export function readModelPolicy(config) {
-  const p = config?.chat?.modelPolicy ?? {};
+  const resolved = config && typeof config === "object" && ("escalationThreshold" in config || "escalateModel" in config) ? config : null;
+  const p = config?.chat?.modelPolicy ?? resolved ?? {};
   const th = Number(p.escalationThreshold);
   return {
     escalationThreshold: Number.isFinite(th) && th >= 1 ? Math.floor(th) : DEFAULT_ESCALATION_THRESHOLD,
