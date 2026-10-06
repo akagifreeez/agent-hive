@@ -21,7 +21,7 @@ export function printNotifyLine(n) {
 }
 
 /** 定数: ラウンド静止(全スレッド無音)とみなす無音秒。既定10分。テストではstallSecで上書きする。
- * wireCliNotify の opts.stallSec で上書き可。 */
+ * wireStallNotify の opts.stallSec で上書き可。 */
 const DEFAULT_STALL_SEC = 600;
 
 /**
@@ -29,7 +29,7 @@ const DEFAULT_STALL_SEC = 600;
  * - 自動継続停止: chat.jsが発火する "round.stalled" イベントを購読
  * - ツール失敗停止/予算停止: loop.jsが既に発火する "agent.status" の
  *   status="tool-fail-loop"/"budget-stop" を購読(発火側の変更ゼロで経路だけ足す)
- * - ラウンド静止: 任意のbusイベント(=活動の証拠)が stallSec の間無音なら1回だけ通知。
+ * - ラウンド静止: busイベントが stallSec の間無音なら1回だけ通知。
  *   通知後に再び活動があってから再静止したときは、また1回通知する(静止1回ごとに1通知)。
  * ON/OFF: opts.enabled=false で何も配線しない(設定notify.stallのOFFに対応)。
  * @param {import("./engine/board.js").Bus} bus
@@ -37,8 +37,6 @@ const DEFAULT_STALL_SEC = 600;
  * @returns {{unwire: () => void}} unwire()で全リスナとタイマーを外せる(テスト用)
  */
 export function wireStallNotify(bus, opts = {}) {
-  const anyBus = /** @type {any} */ (bus);
-  /** @type {(n: NotifyItem) => void} */
   const deliver = (n) => {
     printNotifyLine(n);
     if (opts.onNotify) { try { opts.onNotify(n); } catch { /* 配信先の失敗で通知本体を止めない */ } }
@@ -62,9 +60,9 @@ export function wireStallNotify(bus, opts = {}) {
     }
   }));
   // --- ラウンド静止(全エージェント無音 stallSec 秒→1回だけ通知) ---
-  // bus.emitの全イベントを活動の証拠とみなす(投稿・ツール・マージ等、何かが起きている間は静止しない)。
-  // Bus.listenersへ監視リスナを足すのではなく、emitを直接は触らず「全イベント型の購読」を
-  // Busに追加するのは設計変更になるため、ここでは既知の活動イベント群を購読して最終活動時刻を更新する。
+  // 既知の活動イベント群を購読して最終活動時刻を更新する(何かが起きている間は静止しない)。
+  // 注意: "board" イベントは通知自身の出力を含む監視チャネルではなく、Board.post()由来の
+  // 投稿イベント。静止判定の活動証拠として使う(board.postという名前ではない)。
   const ACTIVITY_EVENTS = [
     "board", "task.created", "task.claimed", "task.finished", "task.released", "task.cancelled",
     "agent.status", "agent.turn", "tool.call", "tool.result", "merge.completed", "agent.merged",
