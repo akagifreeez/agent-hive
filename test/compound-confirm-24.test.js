@@ -88,7 +88,7 @@ test("イシュー#24: 承認要求にはコマンド全体が載る(単位で�
   await new Promise((res) => setTimeout(res, 30));
   assert.equal(requests.length, 1);
   assert.equal(requests[0].command, "echo ready; curl -s http://127.0.0.1:9", "全体が監査対象");
-  assert.equal(requests[0].pattern, "curl -s http://127.0.0.1:9", "hitした単位がパターン表示");
+  assert.equal(requests[0].pattern, "curl", "hitしたconfirmパターン(旧契約どおり)");
   bus.emit("permission.verdict", { id: requests[0].id, approve: false });
   const r = await p;
   assert.equal(r.allowed, false);

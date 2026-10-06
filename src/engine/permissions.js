@@ -116,10 +116,10 @@ export class PermissionGate {
     // 複合コマンド対応: 実行単位ごとにconfirm判定し、
     // 1つでもconfirm必須があれば全体を承認要求扱いにする(イシュー#24)。
     // 「echo ready; curl ...」の2番目以降の単位でも素通りさせない。
-    const hitConfirm = splitExecUnits(command).map((unit) => normalizeConfirmArgv(unit)).find((argv) =>
-      this.confirm.find((p) => {
+    const hitConfirm = this.confirm.find((p) =>
+      splitExecUnits(command).some((unit) => {
         // 先頭トークン一致(部分一致の誤爆「echo killing」等を避ける)。複数語パターンは前置詞一致
-        const argvTokens = argv.split(" ");
+        const argvTokens = normalizeConfirmArgv(unit).split(" ");
         const pt = normalizeCommand(String(p).trim());
         return pt.split(" ").every((w, i) => argvTokens[i] === w);
       })
