@@ -176,19 +176,6 @@ export class PermissionGate {
 
     // confirm 段: curl/wget(送信の足がかり)や kill/taskkill(プロセス停止)は、
     // auto モードであっても自動承認しない(必ず承認要求を出して人の判断を待つ)。
-<<<<<<< HEAD
-    // 複合コマンド対応: 実行単位ごとにconfirm判定し、
-    // 1つでもconfirm必須があれば全体を承認要求扱いにする(イシュー#24)。
-    // 「echo ready; curl ...」の2番目以降の単位でも素通りさせない。
-    const hitConfirm = this.confirm.find((p) =>
-      splitExecUnits(command).some((unit) => {
-        // 先頭トークン一致(部分一致の誤爆「echo killing」等を避ける)。複数語パターンは前置詞一致
-        const argvTokens = normalizeConfirmArgv(unit).split(" ");
-        const pt = normalizeCommand(String(p).trim());
-        return pt.split(" ").every((w, i) => argvTokens[i] === w);
-      })
-    );
-=======
     // #24: 複合コマンド対応 — 実行単位区切り(; && || | 改行)で分割し、
     // 各実行単位ごとに confirm 判定を行う。1つでも confirm 対象が含まれれば
     // 全体を承認要求扱いにする(2番目以降の curl/kill 等の素通りを塞ぐ)。
@@ -211,7 +198,6 @@ export class PermissionGate {
         return pt.every((w, i) => argvTokens[i] === w);
       });
     })();
->>>>>>> main
     if (hitConfirm) {
       const verdict2 = await this.requestApproval(command, hitConfirm);
       if (verdict2 === "approve") {
