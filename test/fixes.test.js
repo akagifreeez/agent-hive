@@ -251,6 +251,25 @@ test("OpenAIModel: reasoning(思考テキスト)を応答に含める", async ()
   }
 });
 
+test("OpenAIModel: reasoning_contentのみの応答からもreasoningを拾う(zai/DeepSeek流)", async () => {
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      choices: [{ message: { content: "答え2", reasoning_content: "zaiの思考" } }],
+      usage: { prompt_tokens: 4, completion_tokens: 2, cost: 0.0001 },
+    }),
+  });
+  try {
+    const m = new OpenAIModel({ baseUrl: "http://x/api/v1", apiKey: "k", model: "m" });
+    const r = await m.chat({ messages: [{ role: "user", content: "hi" }] });
+    assert.equal(r.reasoning, "zaiの思考");
+    assert.equal(r.content, "答え2");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
 test("claim_next_task: 待ち行で後から投入されたタスクを請求できる(待ち時間はLLM呼出なし)", async () => {
   const ws = mkdtempSync(join(tmpdir(), "hive-claimwait-"));
   const bus = new Bus();

@@ -58,7 +58,7 @@ test("Hooks roundEnd: ChatHostのラウンド終了で発火する", async () =>
   const ws2 = mktmp();
   const outFile = join(ws2, "rounds.txt");
   const hooks = new Hooks({
-    config: { hooks: { roundEnd: `node -e "const fs=require('fs');fs.appendFileSync('rounds.txt', process.env.HIVE_HOOK_AGENT + '@' + process.env.HIVE_HOOK_THREAD + ':' + process.env.HIVE_HOOK_ENDED_BY + '\\n')"` } },
+    config: { hooks: { roundEnd: `node -e "const fs=require('fs');fs.appendFileSync('rounds.txt', process.env.HIVE_HOOK_AGENT + '@' + process.env.HIVE_HOOK_THREAD + ':' + process.env.HIVE_HOOK_ENDED_BY + '\\010')"` } },
     cwd: ws2,
   });
   const bus = new Bus();

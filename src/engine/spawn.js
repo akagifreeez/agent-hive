@@ -43,8 +43,10 @@ export class SpawnManager {
     hooks = null, // ライフサイクルフック
     idleClaimWaitSec = 0, // 請求ミス時に新着タスクを待つ秒数(トークン消費ゼロの待ち行)
     approvals = null, // 実装者≠検証者の強制(#3)用の共有コンテキスト
+    modelPolicy = null, // モデル選択ポリシー(readModelPolicy(config)の結果)
   }) {
     this.approvals = approvals;
+    this.modelPolicy = modelPolicy;
     this.mainWorkspace = mainWorkspace;
     this.worktreeRoot = worktreeRoot;
     this.board = board;
@@ -62,8 +64,17 @@ export class SpawnManager {
     this.mcpHosts = mcpHosts;
     this.hooks = hooks;
     this.idleClaimWaitSec = idleClaimWaitSec;
-    this.live = new Map(); // id => {displayName, depth, parent, status}
+    this.live = new Map(); // id => {displayName, depth, parent, status} 活性(走行中)のみ
+    this.exited = new Map(); // #26: 終了済みエントリの退避先(snapshot/UI表示・テストの退場待ちに使う)
     this.counter = 0;
+  }
+
+  // #26: 活性(走行中)エージェント数。終了済みはliveから除外するため、
+  // 削除漏れがあってもstatus!==workingのものは数えない二重防护。
+  activeCount() {
+    let n = 0;
+    for (const v of this.live.values()) if (v.status === "working") n++;
+    return n;
   }
 
   // ツールから呼ばれる。呼び出し元は待たせないので、ループは非同期で走らせる。
@@ -73,7 +84,8 @@ export class SpawnManager {
     if (depth > this.hierarchy.maxDepth) {
       return { error: `深さの上限(${this.hierarchy.maxDepth})に達しています。あなたの配下には作れません。` };
     }
-    if (this.live.size >= this.hierarchy.maxConcurrent) {
+    // #26: 判定は活性エージェント数で行う。終了済みがliveに残っていても詰まらせない(二重防护)
+    if (this.activeCount() >= this.hierarchy.maxConcurrent) {
       return { error: `同時エージェント数の上限(${this.hierarchy.maxConcurrent})に達しています。既存の作業の完了を待ってください。` };
     }
     // model指定(#12)はリーダー(depth 0)のみ。子からの指定は既定運用へ戻すため拒否
@@ -135,6 +147,7 @@ export class SpawnManager {
       mcpHosts: this.mcpHosts,
       hooks: this.hooks,
       idleClaimWaitSec: this.idleClaimWaitSec,
+      modelPolicy: this.modelPolicy,
     });
     const shellKind = await tools.detectShell();
     const mem = this.memoryFn?.() ?? "";
@@ -177,6 +190,12 @@ export class SpawnManager {
     // idle(待機終了)とtool-fail-loop(失敗ループ打ち切り)は正常な退場扱い。UIではdoneと表示し、
     // テストの退場待ちもこれで完了とみなす(ended:* は異常系の見た目を作るので避ける)
     if (e) e.status = r.ok || r.endedBy === "idle" || r.endedBy === "tool-fail-loop" ? "done" : `ended:${r.endedBy ?? "error"}`;
+    // #26: 終了したエントリをliveから外しexitedへ退避する。
+    // liveに残り続けると同時実行数判定が満杯のままになり、次のspawnが永久に詰まる。
+    if (e) {
+      this.live.delete(agent.id);
+      this.exited.set(agent.id, e);
+    }
     this.bus.emit("agent.exited", { agent: agent.id, ok: r.ok, endedBy: r.endedBy ?? r.error });
     await this.cleanupOrKeep(b, agent, worktreePath, r);
   }
@@ -200,6 +219,8 @@ export class SpawnManager {
   }
 
   snapshot() {
-    return Object.fromEntries([...this.live].map(([id, v]) => [id, v]));
+    // #26: 表示・テスト用は終了済みも含める(exitedはlive退避後の履歴)。活性の実数はactiveCount()
+    const merged = new Map([...this.exited, ...this.live]);
+    return Object.fromEntries([...merged].map(([id, v]) => [id, v]));
   }
 }

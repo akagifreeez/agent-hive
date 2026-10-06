@@ -74,11 +74,9 @@ test("createWorktree直呼び: マージ済みクリーンworktreeは従来ど�
   } finally { rmTree(ws); rmTree(root); }
 });
 
-test("createWorktree直呼び: 未コミットの下書きだけでは保持しない(既存挙動を明示)", async () => {
-  // setupWorktrees経由ならdirtyで保持されるが、直呼びのcreateWorktreeはgitのみで判断する。
-  // この際の契約「直呼び+dirtyのみ→再作成される」をテストとして固定し、
-  // respawnスキャンが走る前に壊す経路(runChat→spawn直呼び)にdirtyが残らないよう
-  // spawn.jsが直前にコミットする設計(未収載)に依存しない形で文書化する。
+test("createWorktree直呼び: 未コミットの下書きはstash退避してから再作成する(イシュー#23)", async () => {
+  // 直呼び経路でもremove --forceで下書きを無音に壊さない。退避はstash(push -uで
+  // untracked含む)へ残るため、成果喪失ではなく退避+再作成が契約(イシュー#23)。
   const ws = mkdtempSync(join(tmpdir(), "hive-wt-dirty-"));
   const root = `${ws}-wt`;
   try {
@@ -87,11 +85,15 @@ test("createWorktree直呼び: 未コミットの下書きだけでは保持し�
     await runCommand({ command: `git add -A && git -c user.name=t -c user.email=t@t commit -q -m base`, cwd: ws, outputLimit: 500 });
     const p1 = await createWorktree({ mainWorkspace: ws, worktreeRoot: root, agentId: "zeta" });
     writeFileSync(join(p1, "uncommitted.txt"), "dirty draft\n");
+    writeFileSync(join(p1, "tracked.txt"), "modified draft\n"); // tracked変更(unstaged)も退避対象
     const kept = [];
     const p2 = await createWorktree({ mainWorkspace: ws, worktreeRoot: root, agentId: "zeta", onKept: (k) => kept.push(k) });
-    assert.deepEqual(kept, [], "直呼び+dirtyのみは保持対象外(契約を固定)");
-    rmTree(ws);
-    rmTree(root);
+    assert.equal(existsSync(join(p2, "uncommitted.txt")), false, "worktree自体はfreshに張り直す(退避済みのため文件は無い)");
+    assert.equal(kept.length, 1, "onKeptで退避を告知");
+    assert.match(kept[0].detail, /stash退避/, "退避の旨がdetailに入る");
+    const sl = await runCommand({ command: `git stash list`, cwd: p2, outputLimit: 2000 });
+    assert.match(sl.text, /hive-pre-recreate-zeta/, "stashに退避が残る(ブランチagent/zetaのstashとして復元可能)");
+    assert.equal(await hasUnmergedWork({ mainWorkspace: ws, agentId: "zeta" }), false, "退避だけなら未マージコミット判定はfalse(再作成は正しい)");
   } finally { rmTree(ws); rmTree(root); }
 });
 

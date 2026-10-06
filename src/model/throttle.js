@@ -17,6 +17,9 @@ const cooldowns = new Map();
 export const THROTTLE_MAX_COOLDOWN_MS = 5 * 60_000;
 // 429/529を受けなかった場合の既定クールダウン(Retry-After無し時の下限保証)
 export const THROTTLE_DEFAULT_COOLDOWN_MS = 5_000;
+// クォータ窓(GLM 5時間上限等)の上限。応答本文のリセット時刻に従うが、
+// 妙な大値で全員を止め続けないよう6時間で刈る(G3・dsh-vs-hive比較doc)。
+export const THROTTLE_QUOTA_MAX_MS = 6 * 60 * 60_000;
 // gate待ち先頭ジッタの上限。明けの一瞬に全員が突撃して429連鎖が再発するのを避ける
 export const THROTTLE_GATE_JITTER_MS = 1_000;
 
@@ -24,14 +27,19 @@ export const THROTTLE_GATE_JITTER_MS = 1_000;
  * 別々のRetry-Afterを見ても一番長い制約を全員が守る)。
  * @param {string} key プロバイダ識別(baseUrl)
  * @param {number} [retryAfterMs] Retry-Afterヘッダ由来の待ち(妥当性は呼び出し側で判断してもよいが、ここでも上限で刈る)
- * @returns {{until: number, retryAfterMs: number|null}} 適用されたクールダウン */
-export function noteProviderRateLimited(key, retryAfterMs = undefined) {
+ * @param {{quotaUntilMs?: number}} [opts] クォータ窓(GLM 1308の「reset at」等)による長期のリセット時刻(エポックms)。5分上限を超える待ちに使う
+ * @returns {{until: number, retryAfterMs: number|null, quotaUntil: number|null}} 適用されたクールダウン */
+export function noteProviderRateLimited(key, retryAfterMs = undefined, { quotaUntilMs = undefined } = {}) {
   const now = Date.now();
   const valid = retryAfterMs !== undefined && retryAfterMs !== null && Number.isFinite(retryAfterMs) && retryAfterMs >= 0;
   const cd = valid ? Math.min(retryAfterMs, THROTTLE_MAX_COOLDOWN_MS) : THROTTLE_DEFAULT_COOLDOWN_MS;
+  // クォータ窓は5分上限のクールダウンを超える長期の待ち。単調延長はRetry-Afterと同じ規律で併合する
+  const quota = quotaUntilMs !== undefined && quotaUntilMs !== null && Number.isFinite(quotaUntilMs) && quotaUntilMs > now
+    ? Math.min(quotaUntilMs, now + THROTTLE_QUOTA_MAX_MS)
+    : null;
   const prev = cooldowns.get(key);
-  const until = Math.max(now + cd, prev?.until ?? 0);
-  const entry = { until, retryAfterMs: valid ? cd : null };
+  const until = Math.max(now + cd, prev?.until ?? 0, quota ?? 0);
+  const entry = { until, retryAfterMs: valid ? cd : null, quotaUntil: quota ?? prev?.quotaUntil ?? null };
   cooldowns.set(key, entry);
   return entry;
 }
