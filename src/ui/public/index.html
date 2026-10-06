@@ -932,8 +932,9 @@ async function renderUsageTrace(body) {
   const tbl = document.createElement("table");
   tbl.className = "usage-tbl";
   tbl.style.cssText = "margin-top:6px;";
-  tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th><th>tok/s</th></tr></thead>";
+  tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th><th>tok/s</th><th>ヒット率</th></tr></thead>";
   const tb = document.createElement("tbody");
+  const hitByAgent = new Map((data.cacheHits?.byAgent ?? []).map((a) => [a.agent, a]));
   for (const s of data.series) {
     const tr = document.createElement("tr");
     const nm = document.createElement("td");
@@ -946,11 +947,47 @@ async function renderUsageTrace(body) {
     const tp = document.createElement("td");
     tp.textContent = fmtTps(s.tokPerSec);
     tp.title = "直近 " + fmtTps(s.lastTokPerSec) + " tok/s";
-    tr.append(nm, tn, tt, tp);
+    // キャッシュヒット率(エージェント別)。cached未報告のみのワーカーは集計外「-」
+    const hit = hitByAgent.get(s.agent);
+    const th = document.createElement("td");
+    th.textContent = hit && hit.hitRatio != null ? Math.round(hit.hitRatio * 100) + "%" : "-";
+    if (hit?.low) { th.style.color = "var(--red, #e5484d)"; th.title = "閾値未満の低ヒット"; }
+    tr.append(nm, tn, tt, tp, th);
     tb.appendChild(tr);
   }
   tbl.appendChild(tb);
   view.appendChild(tbl);
+  // キャッシュヒット率(cache-hit-rate): 全体+日別(低い日は警告。cached未報告行は集計外なので「-」や除外はaggregateCacheHitsの規則による)
+  const ch = data.cacheHits;
+  if (ch && (ch.byDate.length || ch.total.calls)) {
+    const hitBox = document.createElement("div");
+    hitBox.className = "usage-trace-hits";
+    const hs = document.createElement("div");
+    hs.className = "sec";
+    hs.textContent = "キャッシュヒット率(cached÷prompt・閾値" + Math.round((ch.cacheHitLowThreshold ?? 0.5) * 100) + "%未満を警告)";
+    hitBox.appendChild(hs);
+    const ht = document.createElement("table");
+    ht.className = "usage-tbl";
+    ht.innerHTML = "<thead><tr><th>対象</th><th>calls</th><th>prompt</th><th>cached</th><th>ヒット率</th></tr></thead>";
+    const hb = document.createElement("tbody");
+    const hitCell = (r) => {
+      const x = document.createElement("td");
+      x.textContent = r.hitRatio != null ? Math.round(r.hitRatio * 100) + "%" : "-";
+      if (r.low) { x.style.color = "var(--red, #e5484d)"; x.title = "閾値未満の低ヒット"; }
+      return x;
+    };
+    const hitRow = (label, r) => {
+      const tr = document.createElement("tr");
+      const c = (t) => { const x = document.createElement("td"); x.textContent = t; return x; };
+      tr.append(c(label), c(String(r.calls ?? 0)), c((r.prompt ?? 0).toLocaleString()), c((r.cached ?? 0).toLocaleString()), hitCell(r));
+      return tr;
+    };
+    hb.appendChild(hitRow("全体", ch.total));
+    for (const d of ch.byDate) hb.appendChild(hitRow(d.date, d));
+    ht.appendChild(hb);
+    hitBox.appendChild(ht);
+    body.appendChild(hitBox);
+  }
   body.appendChild(view);
 }
 
