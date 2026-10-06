@@ -25,6 +25,7 @@ const HELP = `agent-hive CLI — 稼働中のhiveを端末から操作する
   feedback <taskId> <コメント>  マージ済み差分への修正依頼を送る
   pause <スレッド> / resume <スレッド>  スレッドの一時停止/再開
   audit                     監査台帳(state/audit.jsonl)の直近記録を見る(-n 件数、既定30)
+  session                   裏ログ(state/session-log/)の直近集計をエージェント別に見る(G2)
   notify                    通知(承認待ち/マージ/長時間タスク完了)の最新を監視から見る
   usage                     トークン消費の直近サマリ
 
@@ -271,6 +272,31 @@ async function cmdUsage(o) {
   console.log(`${DIM}履歴${hist.length}件。詳細は GET /api/usage${RESET}`);
 }
 
+// 裏ログ集計(G2): session-log/(G1のモデル可視バンドル記録)をエージェント別に要約する
+async function cmdSession(o) {
+  const r = await api(o.port, `/api/session-report?maxRecords=${Math.max(o.limit, 500)}`);
+  if (!r.scanned) return console.log("裏ログはまだありません(実装後の最初のラウンドから記録される)。");
+  console.log(`${ACCENT}裏ログ ${r.scanned.toLocaleString()}件${RESET}${DIM}(上限${r.window}件を集計・ファイル${r.files}本)${RESET}`);
+  console.log(`${DIM}  agent            呼出  失敗  圧縮  prompt      completion  cached(命中率)   tok/s${RESET}`);
+  for (const a of r.agents) {
+    const cache = a.cachedTokens != null
+      ? `${a.cachedTokens.toLocaleString()}${a.cacheHitRatio != null ? ` (${Math.round(a.cacheHitRatio * 100)}%)` : ""}`
+      : "-";
+    const row = [
+      `  ${BOLD}${a.agent.slice(0, 16).padEnd(16)}${RESET}`,
+      String(a.calls).padStart(5),
+      String(a.errors).padStart(5),
+      String(a.compactions).padStart(5),
+      a.promptTokens.toLocaleString().padStart(11),
+      a.completionTokens.toLocaleString().padStart(11),
+      cache.padStart(15),
+      a.tokPerSec != null ? a.tokPerSec.toFixed(1).padStart(7) : "      -",
+    ];
+    console.log(row.join(""));
+  }
+  console.log(`${DIM}${new Date().toISOString().slice(0, 10)} 以降の記録。生ログは state/session-log/session.jsonl${RESET}`);
+}
+
 async function cmdTaskAction(o, args, action) {
   const id = args[0];
   if (!id) {
@@ -346,6 +372,7 @@ async function main() {
   if (cmd === "watch") return watch(opts, false);
   if (cmd === "chat") return watch(opts, true);
   if (cmd === "usage") return cmdUsage(opts);
+  if (cmd === "session") return cmdSession(opts);
   console.error(`不明なコマンド: ${cmd}\n${HELP}`);
   exit(1);
 }

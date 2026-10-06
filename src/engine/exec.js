@@ -4,6 +4,29 @@ import { spawn } from "node:child_process";
 
 let cachedShell = null;
 
+// 子プロセスへ渡す環境変数から鍵っぽいものを落とす(DeepSeek Harness defensive-patternsの移植)。
+// ハーネス自身の資格情報(HIVE_UI_TOKEN等)や.env由来の鍵がエージェントのコマンドへ漏えるのを防ぐ。
+// 明示的に渡されたenv(MCPサーバーの設定env等)は狙いの割り当てなので、スクラブ後の上書きとしてそのまま通す。
+// GH_TOKEN/GITHUB_TOKENはhiveの正規ワークフロー(gh issue view等)で使うため既定で残す。
+const ENV_SECRET_RE = /(KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL)/i;
+const ENV_DEFAULT_ALLOW = new Set(["GH_TOKEN", "GITHUB_TOKEN"]);
+
+/** @param {Object} [base] スクラブ対象の基礎(省略時process.env)
+ *  @param {Object|null} [extra] 明示割り当てのenv(スクラブせず上書きする) */
+export function scrubEnv(base = process.env, extra = null) {
+  const allowed = new Set(ENV_DEFAULT_ALLOW);
+  for (const name of String(process.env.HIVE_ENV_ALLOW ?? "").split(",")) {
+    const n = name.trim();
+    if (n) allowed.add(n);
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(base)) {
+    if (ENV_SECRET_RE.test(k) && !allowed.has(k)) continue;
+    out[k] = v;
+  }
+  return extra ? { ...out, ...extra } : out;
+}
+
 export async function detectShell() {
   if (cachedShell) return cachedShell;
   if (process.platform !== "win32") return (cachedShell = "bash");
@@ -19,15 +42,17 @@ export async function detectShell() {
 
 /**
  * コマンドを実行する(outputLimitで出力を丸める)。cwd省略時はプロセスのカレント。
+ * 子プロセスの環境はscrubEnvで鍵っぽい変数を落として渡す(env引数は明示割り当てとして上書き)。
  * @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number}} o
  * @returns {Promise<{ok: boolean, text: string}>}
  */
 export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null }) {
   const kind = await detectShell();
+  const childEnv = scrubEnv(process.env, env);
   const child =
     kind === "bash"
-      ? spawn("bash", ["-c", command], { cwd, windowsHide: true, env: env ? { ...process.env, ...env } : undefined })
-      : spawn(command, { shell: true, cwd, windowsHide: true, env: env ? { ...process.env, ...env } : undefined });
+      ? spawn("bash", ["-c", command], { cwd, windowsHide: true, env: childEnv })
+      : spawn(command, { shell: true, cwd, windowsHide: true, env: childEnv });
   let out = "";
   const append = (d) => {
     if (out.length < outputLimit) out += d.toString();

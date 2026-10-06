@@ -2,6 +2,7 @@
 // 新行区切りJSON-RPCでinitialize → notifications/initialized → tools/list → tools/call。
 // サーバーが起動しなくてもhive全体は止めない(失敗はbusへ通知してスキップ)。
 import { spawn } from "node:child_process";
+import { scrubEnv } from "./exec.js";
 
 /**
  * @typedef {Object} McpHostInstance
@@ -58,7 +59,8 @@ export class McpHost {
     try {
       this.child = spawn(this.command, this.args, {
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, ...this.env },
+        // 周辺環境はスクラブし、設定env(this.env=狙いの割り当て)は上書きで通す(exec.js参照)
+        env: scrubEnv(process.env, this.env),
         windowsHide: true,
       });
     } catch (err) {

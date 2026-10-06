@@ -299,13 +299,14 @@ function readChunkWithIdleTimeout(reader) {
 
 /** Responses usageを正規usageへ(単価は$/1Mトークン。サブスク契約では単価0=コスト計上なし)。 */
 export function codexUsage(u, costRates = null) {
-  if (!u) return { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+  if (!u) return { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, cachedTokens: null, costUsd: 0 };
   const promptTokens = u.input_tokens ?? 0;
   const completionTokens = u.output_tokens ?? 0;
   const costUsd = costRates
     ? (promptTokens * (costRates.input ?? 0) + completionTokens * (costRates.output ?? 0)) / 1_000_000
     : 0;
-  return { promptTokens, completionTokens, reasoningTokens: 0, costUsd };
+  // キャッシュ済み入力(G9): Responses APIはinput_tokens_details.cached_tokensに入る
+  return { promptTokens, completionTokens, reasoningTokens: 0, cachedTokens: u.input_tokens_details?.cached_tokens ?? null, costUsd };
 }
 
 function translateHttpError(status, text = "") {
