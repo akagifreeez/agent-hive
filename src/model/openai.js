@@ -142,7 +142,8 @@ export class OpenAIModel {
       }
       return {
         content: msg.content ?? null,
-        reasoning: msg.reasoning ?? null, // 思考テキスト(OpenRouterのreasoningモデル。UIの活動ログ用)
+        // 思考テキスト: OpenRouter流reasoning、無ければzai/DeepSeek流reasoning_content(UIの活動ログ用)
+        reasoning: msg.reasoning || msg.reasoning_content || null,
         toolCalls: (msg.tool_calls ?? []).map((tc) => ({
           id: tc.id,
           name: tc.function.name,
@@ -191,9 +192,14 @@ async function consumeStream(res, onDelta) {
         if (chunk.usage) usage = chunk.usage;
         if (chunk.web_search) webSearchResults = chunk.web_search; // 最終usageチャンクに付いてくる(Z.AI)
         const d = chunk.choices?.[0]?.delta ?? {};
-        if (d.reasoning) {
-          reasoning += d.reasoning;
-          onDelta?.({ kind: "think", text: d.reasoning });
+        // 思考テキスト: OpenRouter流reasoningに加えDeepSeek/zai流reasoning_contentも拾う
+        // (同一deltaに両方あればこの順で連結、別deltaなら出現順に累積)。断片はonDeltaへ流す。
+        let think = "";
+        if (d.reasoning) think += d.reasoning;
+        if (d.reasoning_content) think += d.reasoning_content;
+        if (think) {
+          reasoning += think;
+          onDelta?.({ kind: "think", text: think });
         }
         if (d.content) {
           content += d.content;
