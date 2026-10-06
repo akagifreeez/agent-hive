@@ -157,7 +157,7 @@ export class OpenAIModel {
   }
 }
 
-// SSEストリームの解析。delta.content/reasoning(=reasoning_contentも含む)/tool_callsを累積し、断片をonDeltaへ流す。
+// SSEストリームの解析。delta.content/reasoning/tool_callsを累積し、断片をonDeltaへ流す。
 // readがidleタイムアウト(ZCodeと同様既定600秒)を過ぎたら例外→chat()のリトライで最初からやり直す。
 function streamIdleTimeoutMs() {
   return Number(process.env.HIVE_STREAM_IDLE_TIMEOUT_MS ?? 600_000);
