@@ -59,7 +59,9 @@ function mkHost({ steps, project, autoContinueRounds = 3, maxTurnsPerRound = 1, 
     maxTurnsPerRound,
     staggerMs: 0,
     landingSignal,
-    modelFactory: () => scriptedModel(steps, calls),
+    // modelFactoryはラウンドごとに呼ばれるため、単一インスタンスを返す(都度生成すると
+    // ステップ位置が毎ラウンド巻き戻り、2ラウンド目がsteps[0]を再実行して着地が消える)
+    modelFactory: (() => { const m = scriptedModel(steps, calls); return () => m; })(),
     toolsFactory: (a) => {
       const t = createTools({ agent: a, workspace: ws, mainWorkspace: null, board, tasks, bus });
       if (!onToolResult) return t;
