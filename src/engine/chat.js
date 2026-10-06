@@ -326,10 +326,11 @@ export class ChatHost {
           // メインが自ら直接作業した場合の受け皿: ラウンド終了時にmainへ自動マージ
           // 承認フロー(approvals.require)有効時は、この実装者が保留中(検証待ち)のタスクを
           // 持つ間はマージしない(イシュー#22): 検証承認後(approve_task)にだけmainへ入る。
+          // worktree未作成ならマージせずスキップ(origin/mainのガード)。
           const heldByApproval = this.approvals?.require
             ? [...(this.approvals.pending ?? [])].some(([, p]) => p.agentId === main.id)
             : false;
-          if (this.mainWorkspace && !heldByApproval) {
+          if (this.mainWorkspace && !heldByApproval && this.worktreePaths?.[main.id]) {
             const m = await mergeAgentWork({
               mainWorkspace: this.mainWorkspace,
               worktreePath: this.worktreePaths?.[main.id],

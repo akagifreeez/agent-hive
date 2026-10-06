@@ -130,13 +130,17 @@ export function statSummary(statText) {
 /**
  * @param {Object} o
  * @param {string} o.mainWorkspace
- * @param {string} [o.worktreePath]
+ * @param {string} o.worktreePath
  * @param {{id: string, displayName?: string}} o.agent
  * @param {string} o.taskId
  * @param {Function} [o.exec]
  * @returns {Promise<MergeResult>}
  */
 export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exec = runCommand }) {
+  // cwd省略はプロセスの現在のフォルダーを使うため、git add/commit前に必ず遮断する。
+  if (!mainWorkspace?.trim() || !worktreePath?.trim()) {
+    return Promise.resolve({ ok: false, text: "マージ先またはworktreeの作業フォルダーが未設定です。マージを中止しました。" });
+  }
   const branch = `agent/${agent.id}`;
   return queueMerge(async () => {
     // 0) 競合マーカーガード: マーカー入りのmainをマージするとmain全体が構文破損する。
