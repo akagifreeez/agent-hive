@@ -697,6 +697,8 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       tasks,
       bus,
       gate,
+      // scenario実行でもモデル選択ポリシーを有効化(承認フロー競合の検証差し戻し経路で参照される)
+      modelPolicy: readModelPolicy(config),
       // scenario実行ではスレッド機構が無いので自分のボードのみ解決(他スレッド宛はok:false)
       resolveBoard: (name) => (String(name ?? "").trim() === board.name ? board : null),
     });
