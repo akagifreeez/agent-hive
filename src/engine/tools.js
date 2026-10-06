@@ -23,7 +23,7 @@ const BASH_OUTPUT_LIMIT = 8 * 1024;
  * @property {boolean} [claimMiss] 請求ミスのときtrue(idle退場判定で連続回数を数える)
  */
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null, approvals = null }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null, approvals = null, modelPolicy = null }) {
 
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
@@ -412,7 +412,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           const implementer = { id: pending.agentId, displayName: pending.agentId };
           const m = await mergeAgentWork({ mainWorkspace, worktreePath: pending.worktreePath, agent: implementer, taskId: originalId });
           if (m.conflict) {
-            const rej = noteRejection(mainWorkspace, originalId, config);
+            const rej = noteRejection(mainWorkspace, originalId, modelPolicy);
             if (rej.notice) board.post("system", rej.notice);
             return { ok: false, text: `マージが競合しています。実装者(${pending.agentId})に \`git merge main\` での解決を依頼してください。\n${m.text.slice(0, 600)}` };
           }
