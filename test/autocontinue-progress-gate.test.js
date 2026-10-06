@@ -119,6 +119,7 @@ test("進捗ゲート: 着地があり続けてもautoContinueRounds(ハード�
   try {
     tasks.assign({ agentId: "alpha", taskId: "t3", body: "仕事3", project: "pgate-hard" });
     tasks.assign({ agentId: "alpha", taskId: "t4", body: "仕事4", project: "pgate-hard" });
+    tasks.create({ id: "seed-hard", body: "シード", project: "pgate-hard" }); // 全タスクdone後もhasWork=trueを保つ
     host.say("着手してください");
     assert.ok(await waitUntil(() => {
       const st = host.roundState.get("alpha");
@@ -136,7 +137,10 @@ test("進捗ゲート: landingSignalが真ならイベント無しでも着地�
   const { host, tasks, calls, cleanup } = mkHost({
     project: "pgate-signal",
     landingSignal: () => true, // コミット検出など外部観測の入口
-    steps: ["応答のみ", "2ラウンド目の応答"],
+        steps: [
+      { toolCalls: [{ name: "list_files", arguments: {} }] }, // ターン上限で終わるラウンド(着地イベント無し)
+      "2ラウンド目の応答",
+    ],
   });
   try {
     tasks.create({ id: "seed-signal", body: "シード", project: "pgate-signal" }); // hasWork=true
