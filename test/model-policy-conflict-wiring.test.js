@@ -60,9 +60,9 @@ test("finish_task(verify)の競合経路でnoteRejectionがmodelPolicyを受け�
     GIT("git add -A", ws);
     GIT("git -c user.email=w@t -c user.name=w commit -qm wip", ws);
     // 実装側worktreeをmainから先行させて競合を作る: main側でREADMEを変更してコミット
+    writeFileSync(join(main, "README.md"), "main side changed\n");
     GIT("git add -A", main);
     GIT("git -c user.email=t@t -c user.name=t commit -qm main-change", main);
-
     const bus = new Bus();
     const tasks = new TaskBlackboard(base, bus);
     tasks.create({ id: "cw1", role: "impl", body: "work" });
