@@ -147,7 +147,7 @@ export class McpHost {
       const text = (r.content ?? [])
         .filter((c) => c.type === "text")
         .map((c) => c.text)
-        .join(String.fromCharCode(10));
+        .join("\n");
       return { ok: !r.isError, text: text || "(空の結果)" };
     } catch (err) {
       // 接続断・起動失敗・タイムアウトはツール失敗(ok:false)として返す(例外を外へ漏らさない)
