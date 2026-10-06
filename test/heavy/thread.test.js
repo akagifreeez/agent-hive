@@ -150,13 +150,14 @@ test("ChatHost自動継続: ターン上限でも仕事が残っていれば次�
   ]);
   const host = new ChatHost({
     mains: [agent], project: "p", autoContinueRounds: 3, maxTurnsPerRound: 2, staggerMs: 0,
+    landingSignal: () => true, // 進捗ゲート対応: 着地ありを模擬(旧仕様の自動継続検証を維持)
     modelFactory: () => model, toolsFactory: () => tools,
     board, tasks, bus,
   });
   host.say("始めて");
   const done = await waitUntil(() => tasks.snapshot().done.includes("p-alpha--t1.md"), 15000);
   assert.ok(done, "自動継続でタスクが完了している");
-  assert.ok(!board.posts.some((p) => p.text.includes("[自動継続停止]")));
+  assert.ok(!board.posts.some((p) => p.text.includes("[自動継続停止(")));
   rmTree(ws);
   rmTree(ws2);
 });
@@ -177,11 +178,12 @@ test("ChatHost自動継続: 上限回数に達したら告知して停止する"
   ]);
   const host = new ChatHost({
     mains: [agent], project: "q", autoContinueRounds: 1, maxTurnsPerRound: 2, staggerMs: 0,
+    landingSignal: () => true, // 進捗ゲート対応: 着地ありを模擬(旧仕様の自動継続検証を維持)
     modelFactory: () => model, toolsFactory: () => tools,
     board, tasks, bus,
   });
   host.say("始めて");
-  const stopped = await waitUntil(() => board.posts.some((p) => p.from === "q-beta" && p.text.includes("[自動継続停止]")), 15000);
+  const stopped = await waitUntil(() => board.posts.some((p) => p.from === "q-beta" && p.text.includes("[自動継続停止(ハード上限)]")), 15000);
   assert.ok(stopped, "上限到達で停止告知が出る");
   assert.ok(tasks.snapshot().claimed.length >= 1, "請求中タスクは解放されず保持される");
   rmTree(ws);
