@@ -59,6 +59,7 @@ export class ChatHost {
     this.seen = new Map(); // id => ボード既読位置(ラウンド間で保持。配信はボード注入の1経路のみ)
     this.roundState = new Map(); // id => {running, pending[]}
     this.autoRounds = new Map(); // id => 連続自動継続ラウンド数(ユーザー起点ラウンドで0に戻る)
+    this.landedThisRound = new Map(); // id => 直前ラウンドに着地(タスクdone/マージ完了)があったか(進捗ゲート用)
     this.approvals = approvals; // 承認フロー(null可=無効。ラウンド末マージの保留判定)
     for (const m of mains) this.seen.set(m.id, board.lastId());
     // ボード上の@表示名でメインを起こす(横つながりの入口)
@@ -66,6 +67,11 @@ export class ChatHost {
     // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
     // これがないと全員退出後の発見器起票タスクが誰にも消化されない。
     bus.on("task.created", (p) => this.handleTaskCreated(p));
+    // 進捗ゲート(自動継続の着地検出): タスク完了とラウンド末mainマージを着地として記録する。
+    // landedThisRoundはwake()でリセットし、ラウンド中の実績だけを次判定に使う。
+    bus.on("task.finished", (p) => this.noteLanding(p.agent));
+    // マージ完了イベント(mainへの着地)。emitter無しでも将来の互換で流す。
+    bus.on("agent.merged", (p) => this.noteLanding(p.agent));
     // 解放(退場した担当者のタスクがopenへ戻る)でも同様に起こす。
     bus.on("task.released", (p) => this.handleTaskReleased(p));
   }
@@ -381,6 +387,14 @@ export class ChatHost {
       if (next) this.wake(main, next, 0);
     };
     void run();
+  }
+
+  // 着地(ランディング)検出: タスクdone・mainマージ・コミットを1か所で記録する。
+  // 未請求タスクのfinishedなど自分に関係ないイベントは無視(agentが無い場合のみ全体通知を拾う)。
+  noteLanding(agent = null) {
+    if (agent == null || this.mains.some((m) => m.id === agent)) {
+      for (const m of this.mains) this.landedThisRound.set(m.id, true);
+    }
   }
 
   // 自動継続を続けるべきか: 請求中タスクが残る/自分のスレッド(project)に未着手タスクがある
