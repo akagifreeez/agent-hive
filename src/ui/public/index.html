@@ -934,6 +934,7 @@ async function renderUsageTrace(body) {
   tbl.style.cssText = "margin-top:6px;";
   tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th><th>tok/s</th><th title='usage-traceのcached÷prompt(未報告行は除外)'>キャッシュ命中率</th></tr></thead>";
   const tb = document.createElement("tbody");
+  const hitByAgent = new Map((data.cacheHits?.byAgent ?? []).map((a) => [a.agent, a]));
   for (const s of data.series) {
     const tr = document.createElement("tr");
     const nm = document.createElement("td");
