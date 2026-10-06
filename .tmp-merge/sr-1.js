@@ -5,7 +5,6 @@
 import { createReadStream, existsSync, readdirSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
-import { aggregateCacheHits, CACHE_HIT_LOW_THRESHOLD } from "./usage.js";
 
 const ROTATED_RE = /^session-\d{4}-\d{2}-\d{2}T.*\.jsonl$/;
 
@@ -42,7 +41,6 @@ export async function summarizeSessionDir(dir, { maxRecords = 2000 } = {}) {
     cachedTokens: null, cachedCalls: 0, msSum: 0, firstTs: null, lastTs: null,
   });
   let scanned = 0;
-  const hitRows = [];
   for await (const rec of records(files)) {
     if (scanned >= maxRecords) break;
     scanned += 1;
@@ -60,9 +58,6 @@ export async function summarizeSessionDir(dir, { maxRecords = 2000 } = {}) {
         s.cachedCalls += 1;
       }
     }
-    // キャッシュヒット率の行集計(cache-hit-rate): usage-traceと同じ純関数へ流す。
-    // tsが無い旧レコードは日別に分類できないため、純関数側の規則で除外される
-    hitRows.push({ ts: rec.ts, agent: rec.agent ?? "?", prompt: u?.promptTokens, cached: u?.cachedTokens });
     if (typeof rec.ms === "number") s.msSum += rec.ms;
     if (rec.ts) { s.firstTs = s.firstTs ?? rec.ts; s.lastTs = rec.ts; }
     byAgent.set(rec.agent ?? "?", s);
@@ -76,5 +71,5 @@ export async function summarizeSessionDir(dir, { maxRecords = 2000 } = {}) {
       ? Math.round((s.cachedTokens / s.promptTokens) * 1000) / 1000
       : null,
   })).sort((a, b) => (b.calls + b.compactions) - (a.calls + a.compactions));
-  return { scanned, window: maxRecords, files: files.length, agents, cacheHits: aggregateCacheHits(hitRows), cacheHitLowThreshold: CACHE_HIT_LOW_THRESHOLD };
+  return { scanned, window: maxRecords, files: files.length, agents };
 }
