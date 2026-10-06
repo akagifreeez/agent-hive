@@ -932,7 +932,7 @@ async function renderUsageTrace(body) {
   const tbl = document.createElement("table");
   tbl.className = "usage-tbl";
   tbl.style.cssText = "margin-top:6px;";
-  tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th><th>tok/s</th></tr></thead>";
+  tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th><th>tok/s</th><th title='usage-traceのcached÷prompt(未報告行は除外)'>キャッシュ命中率</th></tr></thead>";
   const tb = document.createElement("tbody");
   for (const s of data.series) {
     const tr = document.createElement("tr");
@@ -946,11 +946,55 @@ async function renderUsageTrace(body) {
     const tp = document.createElement("td");
     tp.textContent = fmtTps(s.tokPerSec);
     tp.title = "直近 " + fmtTps(s.lastTokPerSec) + " tok/s";
-    tr.append(nm, tn, tt, tp);
+    const tc = document.createElement("td");
+    const hit = data.cacheHits && data.cacheHits.byAgent ? data.cacheHits.byAgent.find((h) => h.agent === s.agent) : null;
+    tc.textContent = hit && hit.hitRatio != null ? Math.round(hit.hitRatio * 100) + "%" : "—";
+    if (hit && hit.low) { tc.style.color = "var(--warn)"; tc.title = "ヒット率が低い(集計閾値未満)ワーカー"; }
+    tr.append(nm, tn, tt, tp, tc);
     tb.appendChild(tr);
   }
   tbl.appendChild(tb);
   view.appendChild(tbl);
+  // キャッシュヒット率サマリ(cache-hit-rate): 日別ヒット率と低ヒットワーカーの一覧。
+  // 集計は /api/usage-trace の cacheHits(usage.jsの純関数 aggregateCacheHits)。
+  const ch = data.cacheHits;
+  if (ch && (ch.byDate.length || ch.byAgent.length)) {
+    const hitTxt = (v) => v == null ? "—" : Math.round(v * 100) + "%";
+    const sec = document.createElement("div");
+    sec.style.cssText = "margin-top:8px;font-size:11px;";
+    const h = document.createElement("div");
+    h.className = "hint";
+    h.textContent = "キャッシュ命中率(cached÷prompt・未報告行は除く)";
+    sec.appendChild(h);
+    const stbl = document.createElement("table");
+    stbl.className = "usage-tbl";
+    stbl.innerHTML = "<thead><tr><th>日付</th><th>ターン数</th><th>prompt</th><th>cached</th><th>命中率</th></tr></thead>";
+    const stb = document.createElement("tbody");
+    for (const d of ch.byDate) {
+      const tr = document.createElement("tr");
+      const td = (t) => { const c = document.createElement("td"); c.textContent = t; return c; };
+      tr.append(td(d.date), td(String(d.calls)), td(d.prompt.toLocaleString()), td(d.cached.toLocaleString()));
+      const hr = td(hitTxt(d.hitRatio));
+      if (d.low) hr.style.color = "var(--warn)";
+      tr.appendChild(hr);
+      stb.appendChild(tr);
+    }
+    const tot = ch.total;
+    const trow = document.createElement("tr");
+    trow.className = "total";
+    trow.append(td("合計"), td(String(tot.calls)), td(tot.prompt.toLocaleString()), td(tot.cached.toLocaleString()), td(hitTxt(tot.hitRatio)));
+    stb.appendChild(trow);
+    stbl.appendChild(stb);
+    sec.appendChild(stbl);
+    const lowAgents = ch.byAgent.filter((a) => a.low);
+    if (lowAgents.length) {
+      const warn = document.createElement("div");
+      warn.style.cssText = "color:var(--warn);margin-top:3px;";
+      warn.textContent = "⚠ 命中率が低いワーカー: " + lowAgents.map((a) => a.agent + "(" + hitTxt(a.hitRatio) + ")").join(", ");
+      sec.appendChild(warn);
+    }
+    view.appendChild(sec);
+  }
   body.appendChild(view);
 }
 
