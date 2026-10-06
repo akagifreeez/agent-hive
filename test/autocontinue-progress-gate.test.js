@@ -44,7 +44,7 @@ function scriptedModel(steps, calls) {
   };
 }
 
-function mkHost({ steps, project, autoContinueRounds = 3, maxTurnsPerRound = 1, landingSignal = null }) {
+function mkHost({ steps, project, autoContinueRounds = 3, maxTurnsPerRound = 1, landingSignal = null, onToolResult = null }) {
   const ws = mktmp();
   const bus = new Bus();
   const board = new Board(bus, "pgate");
@@ -60,7 +60,11 @@ function mkHost({ steps, project, autoContinueRounds = 3, maxTurnsPerRound = 1, 
     staggerMs: 0,
     landingSignal,
     modelFactory: () => scriptedModel(steps, calls),
-    toolsFactory: (a) => createTools({ agent: a, workspace: ws, mainWorkspace: null, board, tasks, bus }),
+    toolsFactory: (a) => {
+      const t = createTools({ agent: a, workspace: ws, mainWorkspace: null, board, tasks, bus });
+      if (!onToolResult) return t;
+      return { specs: t.specs, execute: async (name, args) => { const out = await t.execute(name, args); onToolResult(name, args, out); return out; } };
+    },
     board, tasks, bus,
   });
   return { host, board, tasks, bus, calls, agent, ws, cleanup: () => rmTree(ws) };
@@ -107,12 +111,14 @@ test("進捗ゲート: 着地ゼロラウンドは停止し[自動継続停止(�
 });
 
 test("進捗ゲート: 着地があり続けてもautoContinueRounds(ハード上限)で停止する", async () => {
+  const toolResults = [];
   const { host, board, tasks, calls, cleanup } = mkHost({
     project: "pgate-hard",
+    onToolResult: (name, args, out) => toolResults.push([name, out.ok, String(out.text ?? "").slice(0, 80)]),
     autoContinueRounds: 1,
     steps: [
       { toolCalls: [{ name: "finish_task", arguments: { task_id: "t3" } }] },
-      { toolCalls: [{ name: "finish_task", arguments: { task_id: "t4" } }] },
+      { toolCalls: [{ name: "finish_task", arguments: { task_id: "t4" } }, { name: "list_files", arguments: {} }] }, // 着地+ターン上限
       "応答のみ",
     ],
   });
