@@ -1324,7 +1324,7 @@ function persistUsage(workspace, entry) {
 /**
  * @param {string} workspace
  * @param {{agent?: string|null, fromTurn?: number|string|null, toTurn?: number|string|null, file?: string|null}} [opts] fromTurn/toTurnは文字列(URLクエリ)での指定も受け付ける(内部でNumber化)
- * @returns {{series: Array<{agent: string, points: Array<{ts: string, turn: number, prompt: number, completion: number, reasoning: number, totalTokens: number, tokPerSec: number|null}>, totalTokens: number, tokPerSec: number|null, lastTokPerSec: number|null}>, total: {turns: number, totalTokens: number, byAgent: Record<string, number>, tokPerSec: number|null}, lastTs: string|null}}
+ * @returns {{series: Array<{agent: string, points: Array<{ts: string, turn: number, prompt: number, completion: number, reasoning: number, totalTokens: number, tokPerSec: number|null}>, totalTokens: number, tokPerSec: number|null, lastTokPerSec: number|null}>, total: {turns: number, totalTokens: number, byAgent: Record<string, number>, tokPerSec: number|null}, lastTs: string|null, cacheHits: ReturnType<typeof aggregateCacheHits>}}
  */
 export function analyzeUsageTrace(workspace, opts = {}) {
   const cacheHitRows = [];
