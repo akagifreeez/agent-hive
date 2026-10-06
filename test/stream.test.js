@@ -83,21 +83,11 @@ test("chat(stream): zai/DeepSeek流reasoning_contentも思考テキストとし�
   const origFetch = globalThis.fetch;
   globalThis.fetch = async () => {
     return sseResponse([
-      'data: {"choices":[{"delta":{"reasoning_content":"深く"}}]}
-
-',
-      'data: {"choices":[{"delta":{"reasoning_content":"考えた"}}]}
-
-',
-      'data: {"choices":[{"delta":{"content":"答え"}}]}
-
-',
-      'data: {"usage":{"prompt_tokens":5,"completion_tokens":9}}
-
-',
-      "data: [DONE]
-
-",
+      'data: {"choices":[{"delta":{"reasoning_content":"深く"}}]}\n\n',
+      'data: {"choices":[{"delta":{"reasoning_content":"考えた"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"答え"}}]}\n\n',
+      'data: {"usage":{"prompt_tokens":5,"completion_tokens":9}}\n\n',
+      "data: [DONE]\n\n",
     ]);
   };
   setModelSleep(async () => {});
