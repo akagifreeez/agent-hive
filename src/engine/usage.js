@@ -177,11 +177,11 @@ export function aggregateCacheHits(history) {
     const r = cacheRow(raw);
     if (!r) continue;
     calls += 1; promptSum += r.prompt; cachedSum += r.cached;
-    for (const [map, key] of [
-      [byDate, r.date],
-      [byAgent, r.agent],
-      [matrix, r.date + "|" + r.agent],
-    ]) {
+    const targets = [byDate, byAgent, matrix];
+    const keys = [r.date, r.agent, r.date + "|" + r.agent];
+    for (let i = 0; i < targets.length; i++) {
+      const map = targets[i];
+      const key = keys[i];
       const row = map.get(key) ?? { calls: 0, prompt: 0, cached: 0 };
       row.calls += 1; row.prompt += r.prompt; row.cached += r.cached;
       map.set(key, row);
