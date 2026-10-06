@@ -133,8 +133,6 @@ test("進捗ゲート: 着地があり続けてもautoContinueRounds(ハード�
       const st = host.roundState.get("alpha");
       return st && !st.running;
     }), "ラウンドが完走");
-    console.error("DEBUG posts:", board.posts.map((p) => [p.agent, p.text.slice(0, 70)]));
-    console.error("DEBUG lastKickoff:", host.roundState.get("alpha").lastKickoff.slice(-3));
     assert.equal(calls.length, 2, "継続は上限1回まで(着地があっても2回目は継続しない)");
     assert.ok(host.roundState.get("alpha").lastKickoff.includes("自動継続(1ラウンド目)"), "1回だけ継続される");
     assert.ok(board.posts.some((p) => p.text.includes("[自動継続停止(ハード上限)]")), "ハード上限停止が通知される");
