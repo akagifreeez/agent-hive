@@ -118,15 +118,15 @@ test("進捗ゲート: 着地があり続けてもautoContinueRounds(ハード�
     project: "pgate-hard",
     onToolResult: (name, args, out) => toolResults.push([name, out.ok, String(out.text ?? "").slice(0, 120)]),
     autoContinueRounds: 1,
+    landingSignal: () => true, // 着地があり続ける状況を模擬
     steps: [
       { toolCalls: [{ name: "finish_task", arguments: { task_id: "t3" } }] },
-      { toolCalls: [{ name: "post_to_board", arguments: { text: "進行中" } }] }, // ターンを消費するだけで着地無し
-      "応答のみ",
+      { toolCalls: [{ name: "post_to_board", arguments: { text: "進行中" } }] }, // 着地無しでターンのみ消費
+      { toolCalls: [{ name: "post_to_board", arguments: { text: "停止前" } }] }, // 同上(応答のみだとidle終了で停止通知が出ない)
     ],
   });
   try {
     tasks.assign({ agentId: "alpha", taskId: "t3", body: "仕事3", project: "pgate-hard" });
-    tasks.assign({ agentId: "alpha", taskId: "t4", body: "仕事4", project: "pgate-hard" });
     tasks.create({ id: "seed-hard", body: "シード", project: "pgate-hard" }); // 全タスクdone後もhasWork=trueを保つ
     host.say("着手してください");
     assert.ok(await waitUntil(() => {

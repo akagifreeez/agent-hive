@@ -386,6 +386,7 @@ export class ChatHost {
             this.autoRounds.set(main.id, 0);
             const reason = landed ? "ハード上限" : "着地ゼロ(進捗なし)";
             this.board.post(main.id, `[自動継続停止(${reason})] ${this.autoContinueRounds}ラウンド進めて一旦停止します。続きがあれば「続けて」と送ってください。`);
+            this.bus.emit("round.stalled", { agent: main.id, reason, rounds: this.autoContinueRounds }); // 通知経路(停止系)
           } else {
             // 仕事が無い場合もここで静止(着地ゼロと同じ経路。通知は出さない=元仕様)。
             this.autoRounds.set(main.id, 0);
