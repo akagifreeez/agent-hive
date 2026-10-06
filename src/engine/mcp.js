@@ -67,6 +67,17 @@ export class McpHost {
       this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
       return { ok: false, error: err.message };
     }
+    // イシュー#27: コマンドが存在しない等はspawn自体は成功し、後から非同期のerrorイベント(ENOENT等)が
+    // 発火する。未処理のまま放置するとhiveプロセス全体が落ちるため、ここで捕捉して起動失敗として扱う
+    // (実装契約「起動失敗してもhiveは続行」を実際に満たす)。
+    this.starting = true;
+    this.spawnError = null;
+    this.child.on("error", (err) => {
+      this.spawnError = err;
+      this.failPending(`MCPサーバー ${this.name} の起動に失敗: ${err.message}`);
+    });
+    // stdinへの書き込み口も破棄しておく(起動失敗後にEPIPEが飛ぶのを防ぐ)
+    this.child.stdin.on("error", () => {});
     let out = "";
     this.child.stdout.on("data", (d) => {
       out += d.toString();
@@ -147,6 +158,9 @@ export class McpHost {
   request(method, params) {
     const id = this.nextId++;
     const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
+    if (!this.child || this.spawnError) {
+      return Promise.reject(new Error(`MCPサーバー ${this.name} は接続できません`));
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -163,6 +177,15 @@ export class McpHost {
     } catch {}
   }
 
+
+  // 起動失敗・切断時に全pending要求を失敗させる(タイマーも解放)
+  failPending(message) {
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(new Error(message));
+    }
+    this.pending.clear();
+  }
   stop() {
     try { this.child?.kill(); } catch {}
   }
