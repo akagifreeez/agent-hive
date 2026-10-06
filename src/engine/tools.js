@@ -479,6 +479,8 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const implementer = { id: pending.agentId, displayName: pending.agentId };
         const m = await mergeAgentWork({ mainWorkspace, worktreePath: pending.worktreePath, agent: implementer, taskId: approveId });
         if (m.conflict) {
+          const rej = noteRejection(mainWorkspace, approveId, modelPolicy);
+          if (rej.notice) board.post("system", rej.notice);
           return { ok: false, text: `マージが競合しています。実装者(${pending.agentId})に \`git merge main\` での解決を依頼してください。\n${m.text.slice(0, 600)}` };
         }
         if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
