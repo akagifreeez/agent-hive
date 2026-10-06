@@ -13,6 +13,7 @@ import {
   AUTOCOMPACT_FAILURE_LIMIT,
 } from "./compact.js";
 import { createSessionLog } from "./session-log.js";
+import { MODEL_SELECTION_POLICY } from "./model-policy.js";
 
 const COMMON_RULES = `
 ## あなたの働き方(全エージェント共通)
@@ -30,7 +31,7 @@ const COMMON_RULES = `
 - 自分より前の経過が必要なときは gather_context でボードの全経過・完了タスクを読める。セッションをまたいだ決め事はシステムプロンプトの永続記憶(memory/)にある。
 - wait_for_board で起床したら、期待する報告(完了報告など)が揃っているか確認し、揃うまで再度待ってよい。
 - bashで拒否されたコマンドは、理由を読んで安全な別手段に切り替えること(再試行しない)。
-`;
+` + MODEL_SELECTION_POLICY + `;
 
 // 暴走検知(ZCode runtime/helpers/model-anomaly.ts の移植): 同一ツール+同一引数の
 // 連続呼び出しを検知してリマインダを注入する。回数での打ち切りより先に効く保険。
