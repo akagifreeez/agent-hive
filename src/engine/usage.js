@@ -130,4 +130,73 @@ export function localDateKey(d) {
   const m = String(dd.getMonth() + 1).padStart(2, "0");
   const day = String(dd.getDate()).padStart(2, "0");
   return y + "-" + m + "-" + day;
-}
+}
+
+// ===== キャッシュヒット率の集計(cache-hit-rate)=====
+// usage-trace.jsonl(1行1ターン。cachedはプロバイダ未報告時null)から、
+// ヒット率 = cached ÷ prompt を日別・エージェント別(と日別xエージェント)に集計する純関数。
+// UI(/api/usage-trace)・CLI(hive session)・session-reportの3経路から共利用する。
+// ルール:
+// - cachedがnull(未報告)の行は分母・分子とも除外(未報告と0の区別を保つ。0は有効=命中率0)
+// - promptが数値で0より大きくない行も除外(0除算防止)
+// - tsが読めない行は日別に分類できないため除外
+// - ヒット率は「行ごとの比率の平均」でなく「合算値(cached合計÷prompt合計)」(母数の大きい行が正しく効く)
+
+/** ヒット率の低さ警告の閾値(この値未満をlow扱い。定数化してUI/CLIで共利用) */
+export const CACHE_HIT_LOW_THRESHOLD = 0.5;
+
+/** 空の集計結果(形状の契約)。有効行ゼロではヒット率はnull */
+export function emptyCacheHits() {
+  return { byDate: [], byAgent: [], matrix: [], total: { calls: 0, prompt: 0, cached: 0, hitRatio: null } };
+}
+
+/** 1行(1ターン)から集計に使える数値を取り出す。無効行はnull */
+function cacheRow(r) {
+  if (!r || typeof r !== "object") return null;
+  const d = new Date(typeof r.ts === "string" ? r.ts : "");
+  if (isNaN(d.getTime())) return null;
+  const prompt = Number(r.prompt);
+  const cached = Number(r.cached);
+  if (!Number.isFinite(prompt) || prompt <= 0) return null;
+  if (!Number.isFinite(cached) || r.cached === null) return null; // 未報告(null)は除外
+  return { date: localDateKey(d), agent: String(r.agent ?? "?"), prompt, cached };
+}
+
+/**
+ * usage-traceの行配列からキャッシュヒット率を集計する。
+ * @param {Array<{ts?: string, agent?: string, prompt?: number, cached?: number|null}|null>} history
+ * @returns {{byDate: Array<{date: string, calls: number, prompt: number, cached: number, hitRatio: number|null, low: boolean}>, byAgent: Array<{agent: string, calls: number, prompt: number, cached: number, hitRatio: number|null, low: boolean}>, matrix: Array<{date: string, agent: string, calls: number, prompt: number, cached: number, hitRatio: number|null, low: boolean}>, total: {calls: number, prompt: number, cached: number, hitRatio: number|null}}}
+ */
+export function aggregateCacheHits(history) {
+  const list = Array.isArray(history) ? history : [];
+  const byDate = new Map();
+  const byAgent = new Map();
+  const matrix = new Map();
+  let calls = 0, promptSum = 0, cachedSum = 0;
+  for (const raw of list) {
+    const r = cacheRow(raw);
+    if (!r) continue;
+    calls += 1; promptSum += r.prompt; cachedSum += r.cached;
+    for (const [map, key] of [
+      [byDate, r.date],
+      [byAgent, r.agent],
+      [matrix, r.date + "|" + r.agent],
+    ]) {
+      const row = map.get(key) ?? { calls: 0, prompt: 0, cached: 0 };
+      row.calls += 1; row.prompt += r.prompt; row.cached += r.cached;
+      map.set(key, row);
+    }
+  }
+  const ratio = (p, c) => (p > 0 ? Math.round((c / p) * 1000) / 1000 : null);
+  const decorate = (extra, row) => {
+    const hitRatio = ratio(row.prompt, row.cached);
+    return { ...extra, ...row, hitRatio, low: hitRatio != null && hitRatio < CACHE_HIT_LOW_THRESHOLD };
+  };
+  const dateDesc = (a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+  return {
+    byDate: [...byDate.entries()].map(([date, row]) => decorate({ date }, row)).sort(dateDesc),
+    byAgent: [...byAgent.entries()].map(([agent, row]) => decorate({ agent }, row)).sort((a, b) => b.prompt - a.prompt),
+    matrix: [...matrix.entries()].map(([k, row]) => decorate({ date: k.split("|")[0], agent: k.split("|")[1] }, row)).sort((a, b) => dateDesc(a, b) || (a.agent < b.agent ? -1 : 1)),
+    total: { calls, prompt: promptSum, cached: cachedSum, hitRatio: ratio(promptSum, cachedSum) },
+  };
+}
