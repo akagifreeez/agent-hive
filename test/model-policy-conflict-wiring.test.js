@@ -58,7 +58,6 @@ test("verify完了の競合経路: noteRejectionにmodelPolicyが渡り、しき
     makeConflict(main, ws);
     const bus = new Bus();
     const tasks = new TaskBlackboard(ws, bus);
-    tasks.create({ id: "cw1", role: "impl", body: "work" });
     const approvals = APPROVALS(ws);
     const postedA = [];
     const postedB = [];
