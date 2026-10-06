@@ -48,9 +48,6 @@ function mkTools({ main, ws, board, tasks, bus, modelPolicy }) {
   return { tools, approvals };
 }
 
-function boardPostsOf(board) {
-  return board.timeline ? board.timeline().map((p) => p.text ?? "") : [];
-}
 
 test("finish_task(verify)の競合経路でnoteRejectionがmodelPolicyを受け、差し戻しが記録される", async () => {
   const base = mkdtempSync(join(tmpdir(), "hive-confw-"));
@@ -66,9 +63,10 @@ test("finish_task(verify)の競合経路でnoteRejectionがmodelPolicyを受け�
     const bus = new Bus();
     const tasks = new TaskBlackboard(base, bus);
     tasks.create({ id: "cw1", role: "impl", body: "work" });
-    const capture = new Board({ post(role, text) { board.post(role, text); }, on() { return () => {}; } });
+    const posts = [];
+    bus.on("board", (p) => posts.push(p.text ?? ""));
     const board = new Board(bus, "s");
-    const { tools } = mkTools({ main, ws, board: capture, tasks, bus, modelPolicy: { escalationThreshold: 1, escalateModel: null } });
+    const { tools } = mkTools({ main, ws, board, tasks, bus, modelPolicy: { escalationThreshold: 1, escalateModel: null } });
     // 実装者(alpha)がverify-cw1を起票済みの前提(実運流れを固定)。
     tasks.create({ id: "verify-cw1", role: "review", body: "verify cw1", dependsOn: [] });
     tasks.assign({ agentId: "beta", taskId: "verify-cw1", body: "verify cw1", project: "s" });
@@ -77,7 +75,7 @@ test("finish_task(verify)の競合経路でnoteRejectionがmodelPolicyを受け�
     assert.ok(r.ok === false, "競合時はok:false: " + String(r.text ?? "").slice(0, 80));
     assert.match(r.text, /競合/);
     assert.equal(rejectionCount(main, "cw1"), 1, "差し戻しが台帳に残る");
-    const notice = boardPostsOf(capture).find((t) => /差し戻し|エスカレーション/.test(t));
+    const notice = posts.find((t) => /差し戻し|エスカレーション/.test(t));
     assert.ok(notice, "差し戻し告知(1回目=即差し戻し・2回目以降=エスカレーション)がボードに流れる");
     assert.match(notice, /1 回/, "閾値config(しきい値1)が反映される(2回目からでも1回目で即差し戻し)");
   } finally {
