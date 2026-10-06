@@ -227,7 +227,7 @@ export function fromContentBlocks(blocks, stopReason = null) {
 /** Anthropicのusageを正規usageへ(+カタログ単価でのコスト概算)。
  * 単価は$/1Mトークン。cache_read/cache_creationは対応単価があれば加算。 */
 export function anthropicUsage(u, costRates = null) {
-  if (!u) return { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+  if (!u) return { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, cachedTokens: null, costUsd: 0 };
   const promptTokens = u.input_tokens ?? 0;
   const completionTokens = u.output_tokens ?? 0;
   const cacheRead = u.cache_read_input_tokens ?? 0;
@@ -236,7 +236,8 @@ export function anthropicUsage(u, costRates = null) {
     ? (promptTokens * (costRates.input ?? 0) + completionTokens * (costRates.output ?? 0)
       + cacheRead * (costRates.cacheRead ?? 0) + cacheWrite * (costRates.cacheWrite ?? 0)) / 1_000_000
     : 0;
-  return { promptTokens, completionTokens, reasoningTokens: 0, costUsd };
+  // キャッシュ済み入力(G9): Anthropicのinput_tokensは非キャッシュ分のみなのでcache_readがキャッシュヒット
+  return { promptTokens, completionTokens, reasoningTokens: 0, cachedTokens: u.cache_read_input_tokens ?? null, costUsd };
 }
 
 // ===== SSEストリーム解析 =====

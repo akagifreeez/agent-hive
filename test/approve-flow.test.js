@@ -95,3 +95,27 @@ test("承認フロー: approvals未指定なら従来どおり即マージ(後�
   }
   function approvalsUndefinedPendingCount(t) { return 0; } // 従来パス: 保留概念なし(常に0)
 });
+
+test("承認フロー: 検証タスク起票は元タスクのprojectを引き継ぐ(project指定レビュアーが請求できる)", async () => {
+  // 回帰: claimedBy()がprojectメタを返していなかったため、検証タスクにproject行が付かず、
+  // project絞り込みのレビュアーがclaimできずに承認待ちが詰まる実害があった(イシュー#22対応中に発見)
+  const { ws, main, tasks, approvals, tools } = mkEnv();
+  try {
+    tasks.create({ id: "tp1", role: "impl", project: "proj-x", body: "実装する仕事" });
+    const claim = await tools.execute("claim_next_task", { project: "proj-x" });
+    assert.ok(claim.ok, "implはproject指定でclaimできる");
+    const r = await tools.execute("finish_task", { task_id: "tp1" });
+    assert.match(r.text, /検証タスク verify-tp1/);
+    const verify = tasks.list().open.find((t) => t.id === "verify-tp1");
+    assert.ok(verify, "検証タスクが起票されている");
+    assert.equal(verify.project, "proj-x", "元タスクのprojectを引き継ぐ");
+    // project指定のreviewが請求できる(これができると承認待ちが詰まらない)
+    const reviewer = { id: "beta", displayName: "ベータ", role: "review", personaPath: PERSONA };
+    const rtools = createTools({ agent: reviewer, workspace: ws, mainWorkspace: main, board: new Board(new Bus()), tasks, bus: new Bus(), approvals });
+    const rc = await rtools.execute("claim_next_task", { project: "proj-x" });
+    assert.ok(rc.ok, "reviewが検証タスクを請求できる: " + String(rc.text ?? "").slice(0, 60));
+    assert.equal(approvals.pending.get("tp1")?.agentId, "alpha", "保留情報が立つ");
+  } finally {
+    cleanup(ws, main);
+  }
+});

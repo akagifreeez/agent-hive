@@ -117,6 +117,34 @@ test("throttle: エージェント横断でクールダウンが共有され429�
   }
 });
 
+test("throttle: 3エージェント同時リクエストでも429連鎖なし・全員成功(マルチエージェント同時)", async () => {
+  resetProviderThrottleForTest();
+  const origFetch = globalThis.fetch;
+  const sleeps = [];
+  setModelSleep(async (ms) => sleeps.push(ms));
+  // 最初の2発だけ429、以後は成功。3実体が同時に叩いても、共有クールダウンで
+  // 残り1発の429は誰か1人が受け、最終的に全員が成功すること(受け入れ基準の一般化)。
+  let limited = 2;
+  globalThis.fetch = async () => {
+    if (limited > 0) {
+      limited--;
+      return statusResponse(429, "0.05");
+    }
+    return okResponse();
+  };
+  try {
+    const models = [makeModel("http://multi-p"), makeModel("http://multi-p"), makeModel("http://multi-p")];
+    const results = await Promise.all(models.map((m) => m.chat({ messages: [{ role: "user", content: "hi" }] })));
+    assert.equal(results.length, 3);
+    for (const r of results) assert.equal(r.content, "ok", "全エージェントが最終成功");
+    assert.equal(limited, 0, "429は2回とも誰かに記録され、3発目以降は共有クールダウンで通過");
+    assert.ok(sleeps.some((ms) => ms > 0 && ms <= 400), "共有クールダウンの待ちが発生: " + JSON.stringify(sleeps));
+  } finally {
+    globalThis.fetch = origFetch;
+    setModelSleep((ms) => new Promise((r) => setTimeout(r, ms)));
+    resetProviderThrottleForTest();
+  }
+});
 test("throttle: 別プロバイダは互いに影響しない", async () => {
   resetProviderThrottleForTest();
   const origFetch = globalThis.fetch;

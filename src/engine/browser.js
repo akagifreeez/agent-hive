@@ -11,9 +11,11 @@ export function defaultOpenCommand(url) {
 export async function openInBrowser(url, runner = defaultOpenCommand) {
   try {
     const { cmd, args } = runner(url);
-    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
-    child.unref();
-    return true;
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true, windowsHide: true });
+    return await new Promise((resolve) => {
+      child.once("error", () => resolve(false));
+      child.once("spawn", () => { child.unref(); resolve(true); });
+    });
   } catch {
     return false;
   }
