@@ -64,9 +64,9 @@ export class ChatHost {
     this.landedThisRound = new Map(); // id => 直前ラウンドに着地(タスクdone/マージ完了)があったか(進捗ゲート用)
     this.approvals = approvals; // 承認フロー(null可=無効。ラウンド末マージの保留判定)
     for (const m of mains) {
-  this.seen.set(m.id, board.lastId());
-  this.landedThisRound.set(m.id, false); // 着地フラグの初期値(進捗ゲート)
-}
+      this.seen.set(m.id, board.lastId());
+      this.landedThisRound.set(m.id, false); // 着地フラグの初期値(進捗ゲート)
+    }
     // ボード上の@表示名でメインを起こす(横つながりの入口)
     bus.on("board", (p) => this.handleBoardPost(p));
     // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
@@ -77,6 +77,9 @@ export class ChatHost {
     bus.on("task.finished", (p) => this.noteLanding(p.agent));
     // テスト起点: ChatHost外(ユニットテスト等)から着地を直接報せる入口(進捗ゲートの観測点)。
     bus.on("agent.merged", (p) => this.noteLanding(p.agent));
+    // create_task(新しい仕事の発生)も着地として扱う: 「次にやることが生まれた」のは進捗。
+    // これが無いと「探索ラウンドで新タスクを起票→次ラウンドで着手」の正当な循環が止まる。
+    bus.on("task.created", (p) => this.noteLanding(null));
     // 解放(退場した担当者のタスクがopenへ戻る)でも同様に起こす。
     bus.on("task.released", (p) => this.handleTaskReleased(p));
   }
@@ -377,7 +380,7 @@ export class ChatHost {
           if (work && landed && count <= this.autoContinueRounds) {
             this.autoRounds.set(main.id, count);
             kickoffText = `[システム] 自動継続(${count}ラウンド目)。請求中タスクが残っていれば finish_task で完了し、無ければ claim_next_task で次を請求してください。`;
-st.lastKickoff = kickoffText; // 継続ノートも観測・テスト契約に反映
+            st.lastKickoff = kickoffText; // 継続ノートも観測・テスト契約に反映
             again = true;
           } else if (work) {
             this.autoRounds.set(main.id, 0);
