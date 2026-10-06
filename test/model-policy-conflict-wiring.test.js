@@ -61,6 +61,7 @@ test("verify完了の競合経路: noteRejectionにmodelPolicyが渡り、しき
     const capture = { post(role, text) { posted.push(text); }, on() { return () => {}; } };
     const { tools } = mkTools({ main, ws, board: capture, tasks, bus, modelPolicy: { escalationThreshold: 1, escalateModel: null } });
     // 検証者(beta)が検証タスクverify-cw1を請求済みの状態を作る
+    tasks.create({ id: "verify-cw1", role: null, body: "検証する" });
     await tools.execute("claim_next_task", {});
     const r = await tools.execute("finish_task", { task_id: "verify-cw1" });
     assert.ok(r.ok === false, "競合時はok:false: " + String(r.text ?? "").slice(0, 80));
