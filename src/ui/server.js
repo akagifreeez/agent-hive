@@ -14,7 +14,7 @@ import { runCommand } from "../engine/exec.js";
 import { openInBrowser } from "../engine/browser.js";
 import { PermissionGate } from "../engine/permissions.js";
 import { ROOT, dataDir } from "../config.js";
-import { wireCliNotify } from "../notify.js";
+import { wireCliNotify, wireStallNotify } from "../notify.js";
 import { modelStateInfo, resolveDefaultSpec, probeModel, startOpenAIAuth } from "../model/factory.js";
 import { buildCatalog } from "../model/catalog.js";
 import { spawn } from "node:child_process";
@@ -104,6 +104,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (notifications.length > 30) notifications.length = 30;
     },
   });
+  wireStallNotify(bus, { enabled: config.notify?.stop !== false, stallSec: config.notify?.stallSec ?? 600, onNotify: (n) => { notifications.unshift(n); if (notifications.length > 30) notifications.length = 30; } });
   const live = {
     // CLI通知(#11): 最新の通知(承認待ち/マージ完了/長時間タスク完了)。新着順・最大30件
     notifications,
