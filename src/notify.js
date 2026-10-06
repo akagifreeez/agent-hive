@@ -66,7 +66,7 @@ export function wireStallNotify(bus, opts = {}) {
   // Bus.listenersへ監視リスナを足すのではなく、emitを直接は触らず「全イベント型の購読」を
   // Busに追加するのは設計変更になるため、ここでは既知の活動イベント群を購読して最終活動時刻を更新する。
   const ACTIVITY_EVENTS = [
-    "board.post", "task.created", "task.claimed", "task.finished", "task.released", "task.cancelled",
+    "board", "task.created", "task.claimed", "task.finished", "task.released", "task.cancelled",
     "agent.status", "agent.turn", "tool.call", "tool.result", "merge.completed", "agent.merged",
     "thread.opened", "permission.request",
   ];
