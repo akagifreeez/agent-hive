@@ -347,6 +347,7 @@ export class ChatHost {
               taskId: "chat-round",
             });
             if (m.ok && m.merged) {
+              this.bus.emit("agent.merged", { agent: main.id, thread: this.board.name }); // 着地(進捗ゲート)
               this.board.post("system", `[マージ] ${main.displayName} がラウンド中の作業を main へ取り込みました。`);
             }
           } else if (heldByApproval) {
@@ -397,8 +398,9 @@ export class ChatHost {
     void run();
   }
 
-  // 着地(ランディング)検出: タスクdone・mainマージ・コミットを1か所で記録する。
-  // 未請求タスクのfinishedなど自分に関係ないイベントは無視(agentが無い場合のみ全体通知を拾う)。
+  // 着地(ランディング)検出: タスクdone(task.finished)・mainマージ(agent.merged)・
+  // コミット等(landingSignalをゲート判定時に評価)の3経路を1か所に集約する。
+  // agent指定時は自分に関係ないイベントを無視(agentが無い場合のみ全体として記録)。
   noteLanding(agent = null) {
     if (agent == null || this.mains.some((m) => m.id === agent)) {
       for (const m of this.mains) this.landedThisRound.set(m.id, true);
