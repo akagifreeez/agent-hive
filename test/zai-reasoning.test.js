@@ -94,7 +94,7 @@ test("OpenAIModel: ストリームでdelta.reasoning_contentを累積しonDelta(
   );
 });
 
-test("OpenAIModel: ストリームで旧delta.reasoningは回帰なし、同一deltaに両形式が来たらreasoning優先", async () => {
+test("OpenAIModel: ストリームで旧delta.reasoningは回帰なし、同一deltaに両形式が来たら連結", async () => {
   await withFetch(
     async () => sseResponse([
       'data: {"choices":[{"delta":{"reasoning":"旧"}}]}\n\n',
@@ -116,7 +116,7 @@ test("OpenAIModel: ストリームで旧delta.reasoningは回帰なし、同一d
     async () => {
       const m = new OpenAIModel({ baseUrl: "http://x/api/v1", apiKey: "k", model: "m" });
       const r = await m.chat({ messages: USER, onDelta: () => {} });
-      assert.equal(r.reasoning, "旧");
+      assert.equal(r.reasoning, "旧新"); // 仕様: 両形式はこの順で連結
     },
   );
 });
