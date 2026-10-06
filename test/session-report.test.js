@@ -48,6 +48,34 @@ test("session-report: エージェント別に呼出/失敗/圧縮/トークン�
   rmTree(ws);
 });
 
+test("session-report: cacheHits(日別・エージェント別ヒット率。cached未報告行は除外)", async () => {
+  const ws = mktmp();
+  const dir = join(ws, "state", "session-log");
+  writeLog(dir, [
+    // lead: prompt 1000+2000, cached 500+500 → 0.333(日跨ぎ無しでも日別1行)
+    { ts: "2026-10-06T10:00:00Z", agent: "lead", kind: "chat", request: {}, response: { usage: { promptTokens: 1000, completionTokens: 10, cachedTokens: 500 } }, ms: 100 },
+    { ts: "2026-10-06T10:01:00Z", agent: "lead", kind: "chat", request: {}, response: { usage: { promptTokens: 2000, completionTokens: 10, cachedTokens: 500 } }, ms: 100 },
+    // cached未報告(null)の行は分母・分子とも除外
+    { ts: "2026-10-06T10:02:00Z", agent: "lead", kind: "chat", request: {}, response: { usage: { promptTokens: 9000, completionTokens: 10, cachedTokens: null } }, ms: 100 },
+    // alpha: 未報告のみ → byAgentに出ない
+    { ts: "2026-10-06T10:03:00Z", agent: "alpha", kind: "chat", request: {}, response: { usage: { promptTokens: 100, completionTokens: 10 } }, ms: 100 },
+  ]);
+  const r = await summarizeSessionDir(dir);
+  assert.ok(r.cacheHits, "cacheHitsフィールドがある");
+  const lead = r.cacheHits.byAgent.find((a) => a.agent === "lead");
+  assert.ok(lead, "未報告行だけのエージェントは出ず、有効行のあるleadは出る");
+  assert.equal(lead.calls, 2, "null行は集計から除外される");
+  assert.equal(lead.prompt, 3000);
+  assert.equal(lead.cached, 1000);
+  assert.ok(Math.abs(lead.hitRatio - 1000 / 3000) < 0.001, "小数3桁丸めなので誤差0.001許容");
+  assert.equal(lead.low, true, "既定閾値0.5未満はlow");
+  assert.equal(r.cacheHits.byAgent.find((a) => a.agent === "alpha"), undefined, "cachedが全て未報告のエージェントは出ない");
+  assert.equal(r.cacheHits.byDate.length, 1);
+  assert.ok(Math.abs(r.cacheHits.total.hitRatio - 1000 / 3000) < 0.001, "小数3桁丸めなので誤差0.001許容");
+  assert.equal(r.cacheHitLowThreshold, 0.5, "閾値定数も応答に載る(UI/CLIで共利用)");
+  rmTree(ws);
+});
+
 test("session-report: maxRecordsで打ち切る", async () => {
   const ws = mktmp();
   const dir = join(ws, "state", "session-log");
