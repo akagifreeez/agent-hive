@@ -23,9 +23,12 @@ test("#25: 通常テキスト応答がmessagesに残り、直後の質問で参�
   const bus = new Bus();
   const board = new Board(bus);
   const tasks = new TaskBlackboard(ws, bus);
+  // 請求中タスクがある状態を作る(終了促し[nudge]で1回目の応答の後に再呼出が起きる)
+  mkdirSync(tasks.claimed, { recursive: true });
+  writeFileSync(join(tasks.claimed, `${"alpha"}--dbg-1.md`), "body\n");
   const tools = { specs: [], execute: async () => ({ ok: true, text: "" }) };
   // 1ターン目: 通常テキスト応答(ツール呼出なし)。2ターン目も通常テキスト応答で終了
-  const turns = ["今日の定数は CACHE_HIT_WARN です", "理解しました"];
+  const turns = ["今日の定数は CACHE_HIT_WARN です", "続けます", "理解しました"];
   const seen = [];
   const model = {
     maxTokens: 4000,
@@ -39,8 +42,7 @@ test("#25: 通常テキスト応答がmessagesに残り、直後の質問で参�
     assert.equal(r.ok, true);
     assert.ok(seen.length >= 2, "2回の呼出が起きる(1回目の応答後、終了促し[nudge]で再呼出)");
     // 2回目のリクエストに、1回目の通常応答がassistantメッセージとして含まれる
-    const second = seen[1];
-    const assistants = second.filter((m) => m.role === "assistant");
+    const second = seen[1];    const assistants = second.filter((m) => m.role === "assistant");
     assert.ok(assistants.length >= 1, "assistantメッセージが履歴に残る");
     assert.ok(
       assistants.some((m) => (m.content ?? "").includes("CACHE_HIT_WARN")),
