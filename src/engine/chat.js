@@ -26,6 +26,8 @@ export class ChatHost {
     project = null, // スレッドスコープ(自動継続の「まだ仕事があるか」判定に使う)
     autoContinueRounds = 3, // ターン上限でも仕事が残っていれば自動で次ラウンドへ(0=従来どおり停止)
     hooks = null, // Hooksインスタンス(roundEndフック)
+    approvals = null, // 承認フロー状態(runner.jsの共有オブジェクト)。ラウンド末マージの保留判定に使う(イシュー#22)
+    landingSignal = null, // テスト起点: () => 着地(タスクdone/マージ/コミット)を報せる。ラウンド中に真を返したら着地あり
   }) {
     this.mains = mains;
     this.mainWorkspace = mainWorkspace;
@@ -58,12 +60,26 @@ export class ChatHost {
     this.seen = new Map(); // id => ボード既読位置(ラウンド間で保持。配信はボード注入の1経路のみ)
     this.roundState = new Map(); // id => {running, pending[]}
     this.autoRounds = new Map(); // id => 連続自動継続ラウンド数(ユーザー起点ラウンドで0に戻る)
-    for (const m of mains) this.seen.set(m.id, board.lastId());
+    this.landingSignal = landingSignal; // null可(未指定時はイベント購読のみ)
+    this.landedThisRound = new Map(); // id => 直前ラウンドに着地(タスクdone/マージ完了)があったか(進捗ゲート用)
+    this.approvals = approvals; // 承認フロー(null可=無効。ラウンド末マージの保留判定)
+    for (const m of mains) {
+      this.seen.set(m.id, board.lastId());
+      this.landedThisRound.set(m.id, false); // 着地フラグの初期値(進捗ゲート)
+    }
     // ボード上の@表示名でメインを起こす(横つながりの入口)
     bus.on("board", (p) => this.handleBoardPost(p));
     // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
     // これがないと全員退出後の発見器起票タスクが誰にも消化されない。
     bus.on("task.created", (p) => this.handleTaskCreated(p));
+    // 進捗ゲート(自動継続の着地検出): タスク完了とラウンド末mainマージを着地として記録する。
+    // landedThisRoundはwake()でリセットし、ラウンド中の実績だけを次判定に使う。
+    bus.on("task.finished", (p) => this.noteLanding(p.agent));
+    // テスト起点: ChatHost外(ユニットテスト等)から着地を直接報せる入口(進捗ゲートの観測点)。
+    bus.on("agent.merged", (p) => this.noteLanding(p.agent));
+    // create_task(新しい仕事の発生)も着地として扱う: 「次にやることが生まれた」のは進捗。
+    // これが無いと「探索ラウンドで新タスクを起票→次ラウンドで着手」の正当な循環が止まる。
+    bus.on("task.created", (p) => this.noteLanding(null));
     // 解放(退場した担当者のタスクがopenへ戻る)でも同様に起こす。
     bus.on("task.released", (p) => this.handleTaskReleased(p));
   }
@@ -261,6 +277,7 @@ export class ChatHost {
     st.running = true;
     st.lastKickoff = kickoffText; // 直近ラウンドの注入文(観測・テスト用)
     this.autoRounds.set(main.id, 0); // ユーザー/ボード起点のラウンドでは連続回数をリセット
+    this.landedThisRound.set(main.id, false); // ラウンド開始で着地フラグをリセット(ラウンド中の実績だけを見る)
     const run = async () => {
       if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
       let r = null; // 最後のラウンド結果(roundEndフックで参照)
@@ -322,7 +339,13 @@ export class ChatHost {
           } catch {}
         }
           // メインが自ら直接作業した場合の受け皿: ラウンド終了時にmainへ自動マージ
-          if (this.mainWorkspace) {
+          // 承認フロー(approvals.require)有効時は、この実装者が保留中(検証待ち)のタスクを
+          // 持つ間はマージしない(イシュー#22): 検証承認後(approve_task)にだけmainへ入る。
+          // worktree未作成ならマージせずスキップ(origin/mainのガード)。
+          const heldByApproval = this.approvals?.require
+            ? [...(this.approvals.pending ?? [])].some(([, p]) => p.agentId === main.id)
+            : false;
+          if (this.mainWorkspace && !heldByApproval && this.worktreePaths?.[main.id]) {
             const m = await mergeAgentWork({
               mainWorkspace: this.mainWorkspace,
               worktreePath: this.worktreePaths?.[main.id],
@@ -330,8 +353,12 @@ export class ChatHost {
               taskId: "chat-round",
             });
             if (m.ok && m.merged) {
+              this.bus.emit("agent.merged", { agent: main.id, thread: this.board.name }); // 着地(進捗ゲート)
               this.board.post("system", `[マージ] ${main.displayName} がラウンド中の作業を main へ取り込みました。`);
             }
+          } else if (heldByApproval) {
+            // 承認待ちで保留した旨を見える化(黙ってマージされない状態で混乱させない)
+            this.board.post("system", `[承認待ち] ${main.displayName} のラウンド作業は検証承認待ちのためmainへの取り込みを保留しました。`);
           }
         } catch (err) {
           this.bus.emit("scenario.warn", { message: `ラウンド異常(${main.id}): ${err.message}` });
@@ -341,19 +368,27 @@ export class ChatHost {
             this.board.post("system", `[エラー] ${main.displayName}のラウンドが失敗しました: ${err.message}\n設定の「モデルと接続」から接続と鍵を確認してください。`);
           } catch { /* ボード書き込みに失敗しても元の例外を優先 */ }
         }
-        // 自動継続: ターン上限で止まっても、まだ仕事が残っていれば次ラウンドへ(上限回数まで)
+        // 自動継続(進捗ゲート): ターン上限で止まっても「直前ラウンドに着地(進捗)があった」
+        // ときだけ次ラウンドへ。着地ゼロのラウンドでは静止(これ以上続けても進まないため)。
+        // autoContinueRounds はハード上限として残す(着地ありでも上限に達したら停止)。
         let again = false;
         if (r?.endedBy === "turn-limit" && this.autoContinueRounds > 0) {
           const count = (this.autoRounds.get(main.id) ?? 0) + 1;
           const work = this.hasWork(main);
-          if (work && count <= this.autoContinueRounds) {
+          const landed = this.landedThisRound.get(main.id) === true || this.landingSignal?.() === true;
+          this.landedThisRound.set(main.id, false); // 着地フラグは1判定で消費する
+          if (work && landed && count <= this.autoContinueRounds) {
             this.autoRounds.set(main.id, count);
             kickoffText = `[システム] 自動継続(${count}ラウンド目)。請求中タスクが残っていれば finish_task で完了し、無ければ claim_next_task で次を請求してください。`;
+            st.lastKickoff = kickoffText; // 継続ノートも観測・テスト契約に反映
             again = true;
           } else if (work) {
             this.autoRounds.set(main.id, 0);
-            this.board.post(main.id, `[自動継続停止] ${this.autoContinueRounds}ラウンド進めて一旦停止します。続きがあれば「続けて」と送ってください。`);
+            const reason = landed ? "ハード上限" : "着地ゼロ(進捗なし)";
+            this.board.post(main.id, `[自動継続停止(${reason})] ${this.autoContinueRounds}ラウンド進めて一旦停止します。続きがあれば「続けて」と送ってください。`);
+            this.bus.emit("round.stalled", { agent: main.id, reason, rounds: this.autoContinueRounds }); // 通知経路(停止系)
           } else {
+            // 仕事が無い場合もここで静止(着地ゼロと同じ経路。通知は出さない=元仕様)。
             this.autoRounds.set(main.id, 0);
           }
         } else {
@@ -370,6 +405,15 @@ export class ChatHost {
       if (next) this.wake(main, next, 0);
     };
     void run();
+  }
+
+  // 着地(ランディング)検出: タスクdone(task.finished)・mainマージ(agent.merged)・
+  // コミット等(landingSignalをゲート判定時に評価)の3経路を1か所に集約する。
+  // agent指定時は自分に関係ないイベントを無視(agentが無い場合のみ全体として記録)。
+  noteLanding(agent = null) {
+    if (agent == null || this.mains.some((m) => m.id === agent)) {
+      for (const m of this.mains) this.landedThisRound.set(m.id, true);
+    }
   }
 
   // 自動継続を続けるべきか: 請求中タスクが残る/自分のスレッド(project)に未着手タスクがある

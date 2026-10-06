@@ -90,12 +90,22 @@ export class OpenAIModel {
             writeFileSync(process.env.HIVE_DEBUG_FILE, JSON.stringify({ status: res.status, messages, tools }, null, 1));
           } catch {}
         }
-        if (isRetryableStatus(res.status) && attempt <= RETRY_MAX_RETRIES) {
+        if (isRetryableStatus(res.status)) {
+          const quotaResetMs = res.status === 429 ? parseQuotaResetMs(bodyText) : null;
           if (res.status === 429 || res.status === 529) {
-            noteProviderRateLimited(this.baseUrl, parseRetryAfterMs(res));
+            noteProviderRateLimited(this.baseUrl, parseRetryAfterMs(res), { quotaUntilMs: quotaResetMs ?? undefined });
           }
-          await modelSleep(computeRetryDelay(attempt, parseRetryAfterMs(res)));
-          continue;
+          // クォータ窓(GLM 5時間上限等・G3): リセット時刻が応答本文で分かる場合は短いリトライの
+          // 繰り返しに意味が無いので即座に打ち切る。復帰までの待ちはthrottleの共有クールダウンが担い、
+          // 同プロバイダを叩く全エージェントがリセット時刻までゲートで待つ
+          if (quotaResetMs) {
+            const min = Math.max(1, Math.round((quotaResetMs - Date.now()) / 60_000));
+            throw new Error(`クォータ上限に到達しました(リセットまで約${min}分)。${String(bodyText).slice(0, 200)}`);
+          }
+          if (attempt <= RETRY_MAX_RETRIES) {
+            await modelSleep(computeRetryDelay(attempt, parseRetryAfterMs(res)));
+            continue;
+          }
         }
         throw new Error(translateHttpError(res.status, bodyText));
       }
@@ -132,7 +142,8 @@ export class OpenAIModel {
       }
       return {
         content: msg.content ?? null,
-        reasoning: msg.reasoning ?? null, // 思考テキスト(OpenRouterのreasoningモデル。UIの活動ログ用)
+        // 思考テキスト: OpenRouter流reasoning、無ければzai/DeepSeek流reasoning_content(UIの活動ログ用)
+        reasoning: msg.reasoning || msg.reasoning_content || null,
         toolCalls: (msg.tool_calls ?? []).map((tc) => ({
           id: tc.id,
           name: tc.function.name,
@@ -146,7 +157,7 @@ export class OpenAIModel {
   }
 }
 
-// SSEストリームの解析。delta.content/reasoning/tool_callsを累積し、断片をonDeltaへ流す。
+// SSEストリームの解析。delta.content/reasoning(=reasoning_contentも含む)/tool_callsを累積し、断片をonDeltaへ流す。
 // readがidleタイムアウト(ZCodeと同様既定600秒)を過ぎたら例外→chat()のリトライで最初からやり直す。
 function streamIdleTimeoutMs() {
   return Number(process.env.HIVE_STREAM_IDLE_TIMEOUT_MS ?? 600_000);
@@ -181,9 +192,14 @@ async function consumeStream(res, onDelta) {
         if (chunk.usage) usage = chunk.usage;
         if (chunk.web_search) webSearchResults = chunk.web_search; // 最終usageチャンクに付いてくる(Z.AI)
         const d = chunk.choices?.[0]?.delta ?? {};
-        if (d.reasoning) {
-          reasoning += d.reasoning;
-          onDelta?.({ kind: "think", text: d.reasoning });
+        // 思考テキスト: OpenRouter流reasoningに加えDeepSeek/zai流reasoning_contentも拾う
+        // (同一deltaに両方あればこの順で連結、別deltaなら出現順に累積)。断片はonDeltaへ流す。
+        let think = "";
+        if (d.reasoning) think += d.reasoning;
+        if (d.reasoning_content) think += d.reasoning_content;
+        if (think) {
+          reasoning += think;
+          onDelta?.({ kind: "think", text: think });
         }
         if (d.content) {
           content += d.content;
@@ -303,8 +319,24 @@ export function parseRetryAfterMs(res) {
   return undefined;
 }
 
+// クォータ窓のリセット時刻を応答本文から読む(G3)。
+// GLMの5時間上限はレート制限ヘッダを出さず(2026-10-06実測)、本文に
+// code 1308「Usage limit reached for 5 hour. reset at 19:11:09」の形で返ってくる。
+// リセットはローカルの時計時刻で示されるため、過ぎていれば翌日として解釈する。
+const QUOTA_RESET_RE = /reset at (\d{1,2}):(\d{2}):(\d{2})/;
+export function parseQuotaResetMs(bodyText, now = Date.now()) {
+  if (!bodyText) return null;
+  const m = String(bodyText).match(QUOTA_RESET_RE);
+  if (!m) return null;
+  const d = new Date(now);
+  d.setHours(Number(m[1]), Number(m[2]), Number(m[3]), 0);
+  let target = d.getTime();
+  if (target <= now + 30_000) target += 24 * 60 * 60_000;
+  return target;
+}
+
 export function extractUsage(u, costRates = null) {
-  if (!u) return { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+  if (!u) return { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, cachedTokens: null, costUsd: 0 };
   const promptTokens = u.prompt_tokens ?? 0;
   const completionTokens = u.completion_tokens ?? 0;
   let costUsd = u.cost ?? 0;
@@ -316,6 +348,8 @@ export function extractUsage(u, costRates = null) {
     promptTokens,
     completionTokens,
     reasoningTokens: u.completion_tokens_details?.reasoning_tokens ?? 0,
+    // キャッシュ済み入力トークン(G9): プロバイダが報告しない場合は0でなくnull(「未報告」と「0」を区別する)
+    cachedTokens: u.prompt_tokens_details?.cached_tokens ?? null,
     costUsd,
   };
 }

@@ -12,6 +12,7 @@ import {
   applyCompaction,
   AUTOCOMPACT_FAILURE_LIMIT,
 } from "./compact.js";
+import { createSessionLog } from "./session-log.js";
 
 const COMMON_RULES = `
 ## あなたの働き方(全エージェント共通)
@@ -131,6 +132,11 @@ export async function runAgentLoop({
   let toolTurnsSinceCompact = 0; // 最終圧縮からのツール実行ターン数
   let rapidRefills = 0;
   let sawInput = false; // ラウンド中にユーザー入力(steering)を届けたか。idle退場の抑制に使う
+  // モデル可視バンドルの裏ログ(G1): 「モデルが見たものは全部ログに残る」。usage-traceと同じく
+  // board persistPathの親配下へ書き、persistPathが無い(単体テスト等)場合はno-op。
+  const sessionLog = createSessionLog({
+    dir: board.persistPath ? join(dirname(board.persistPath), "session-log") : null,
+  });
   bus.emit("agent.status", { agent: agent.id, status: "working" });
 
   // 担当者不在になる終わり方のとき、請求中タスクをopenへ戻す(凍結防止)
@@ -206,6 +212,12 @@ export async function runAgentLoop({
       // ストリーミング: 断片をbusへ流してUIのライブ表示に使う
       res = await model.chat({ messages, tools: tools.specs, onDelta: (d) => bus.emit("agent.delta", { agent: agent.id, ...d }) });
     } catch (err) {
+      // 失敗した呼出も裏ログへ残す(dshのassistant/attempt相当): どのペイロードで壊れたかを後から追えるように
+      sessionLog.append({
+        ts: new Date().toISOString(), agent: agent.id, turn, kind: "chat",
+        request: { messages, tools: tools.specs },
+        error: err?.message ?? String(err), ms: Date.now() - chatStartedAt,
+      });
       releaseClaims("モデルエラー");
       bus.emit("agent.status", { agent: agent.id, status: "error" });
       bus.emit("agent.error", { agent: agent.id, turn, error: err.message });
@@ -233,6 +245,8 @@ export async function runAgentLoop({
         prompt: res.usage?.promptTokens ?? 0,
         completion: res.usage?.completionTokens ?? 0,
         reasoning: res.usage?.reasoningTokens ?? 0,
+        // キャッシュ済み入力トークン(G9): プロバイダが報告しない場合はnull(未報告と0の区別)
+        cached: res.usage?.cachedTokens ?? null,
         ms: chatMs,
         tokPerSec: chatMs > 0 ? (res.usage?.completionTokens ?? 0) / (chatMs / 1000) : null,
         ctxChars, msgCount: messages.length,
@@ -241,6 +255,17 @@ export async function runAgentLoop({
       // server.jsが受けて live.agents[id].ctx へ使用/上限/残りを、tok へ直近/平均のtok/sを計算して保持する
       bus.emit("usage.trace", { agent: agent.id, turn, ctxChars, ms: chatMs, completion: res.usage?.completionTokens ?? 0 });
     } catch { /* トレースの失敗でループを止めない */ }
+    // 裏ログ(G1): 組立済みペイロード(system+messages+ツール定義)と応答の完全な1レコード。
+    // appendFileSyncは同期的なので、ここで書いた内容がそのターンにモデルへ渡したものの正確な時点 snapshot になる
+    sessionLog.append({
+      ts: new Date().toISOString(), agent: agent.id, turn, kind: "chat",
+      request: { messages, tools: tools.specs },
+      response: {
+        content: res.content ?? null, reasoning: res.reasoning ?? null,
+        toolCalls: res.toolCalls ?? [], usage: res.usage ?? null, searches: res.searches ?? null,
+      },
+      ms: chatMs,
+    });
     // サーバー側web_searchが走ったら活動ログへ(ZCodeの検索表示相当)
     if (res.searches?.length) {
       bus.emit("agent.search", {
@@ -249,6 +274,14 @@ export async function runAgentLoop({
       });
     }
     bus.emit("agent.turn", { agent: agent.id, turn, content: res.content ?? "", reasoning: res.reasoning ?? "" });
+
+    // イシュー#25: ツール呼出なしの通常テキスト応答もassistantとしてmessagesへ残す。
+    // 旧実装はtoolCallsがある分岐だけpushしていたため、通常返答が履歴から消え、
+    // 直後の質問で自身の直前の返答を参照できなかった。空応答は続行促しに回るので対象外。
+    if (!res.toolCalls.length) {
+      const finalText = (res.content ?? "").trim();
+      if (finalText) messages.push({ role: "assistant", content: finalText });
+    }
 
     if (res.toolCalls.length > 0) {
       // GLM/OpenRouterはcontent:nullのassistantメッセージを拒むため文字列に正規化。
@@ -326,13 +359,22 @@ export async function runAgentLoop({
       thresholdPercent,
     });
     if (ac.should && autocompactFailures < AUTOCOMPACT_FAILURE_LIMIT) {
+      const acStartedAt = Date.now();
+      let compactReq = null;
       try {
-        const acStartedAt = Date.now();
-        const summary = await model.chat({ messages: buildCompactRequest(messages, { taskContext: currentTaskContext(tasks, agent, messages), hasMemory: Boolean(memory) }) });
+        compactReq = buildCompactRequest(messages, { taskContext: currentTaskContext(tasks, agent, messages), hasMemory: Boolean(memory) });
+        const summary = await model.chat({ messages: compactReq });
         if (ledger) ledger.add(agent.id, summary.usage, { ms: Date.now() - acStartedAt });
         runTokens += (summary.usage?.promptTokens ?? 0) + (summary.usage?.completionTokens ?? 0);
         const text = (summary.content ?? "").trim();
         if (!text) throw new Error("要約が空でした");
+        // 裏ログ(G1): 圧縮要約の呼出も1レコード。要約の入力(圧縮前の全履歴)と要約文の両方が残る
+        sessionLog.append({
+          ts: new Date().toISOString(), agent: agent.id, turn, kind: "compact",
+          request: { messages: compactReq },
+          response: { content: text, usage: summary.usage ?? null },
+          ms: Date.now() - acStartedAt,
+        });
         const compacted = applyCompaction(messages, text);
         messages.length = 0;
         messages.push(...compacted);
@@ -354,6 +396,12 @@ export async function runAgentLoop({
         }
       } catch (err) {
         autocompactFailures += 1;
+        // 圧縮要約の失敗も裏ログへ(要約が空/要約モデルのエラーの区別が後からつくように)
+        sessionLog.append({
+          ts: new Date().toISOString(), agent: agent.id, turn, kind: "compact",
+          request: { messages: compactReq },
+          error: err?.message ?? String(err), ms: Date.now() - acStartedAt,
+        });
         bus.emit("compact.failed", { agent: agent.id, error: err.message, failures: autocompactFailures });
       }
       continue; // 圧縮したので次のターンで作業を続ける

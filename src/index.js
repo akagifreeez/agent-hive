@@ -5,7 +5,7 @@ import { Bus } from "./engine/board.js";
 import { startUi } from "./ui/server.js";
 import { chatUiHandlers } from "./ui/chat-wiring.js";
 import { wireConsoleLog } from "./log.js";
-import { wireCliNotify } from "./notify.js";
+import { wireCliNotify, wireStallNotify } from "./notify.js";
 
 function usage() {
   console.log(`agent-hive — 複数エージェントが同一ワークスペースで同時作業するハーネス
