@@ -42,7 +42,7 @@
       "gamma"
     ],
     "maxTurnsPerRound": 12,
-    "autoContinueRounds": 3,
+    "autoContinueRounds": 6,
     "requireSeparateApprove": true,
     "idleClaimWaitSec": 45,
     "autoscale": true,
