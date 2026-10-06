@@ -62,7 +62,7 @@ test("着地ありラウンドは自動継続する(着地あり→継続)", asy
     steps: [{ toolCalls: [{ name: "create_task", args: { task_id: "land-1", body: "次の仕事", project } }] }, "応答のみ"],
   });
   // スレッド内の未着手タスクを1件用意(ラウンド開始時点でhasWork=true)
-  tasks.create({ taskId: "seed-open", body: "シード", project });
+  tasks.create({ id: "seed-open", body: "シード", project });
   host.say("着手してください");
   // ラウンド1: create_task(着地)でターン上限 → 着地ありなので継続される
   assert.ok(await waitUntil(() => {
@@ -110,7 +110,7 @@ test("ハード上限: 着地があり続けてもautoContinueRoundsで停止す
       "応答のみ",
     ],
   });
-  tasks.create({ taskId: "seed-hard", body: "シード", project });
+  tasks.create({ id: "seed-hard", body: "シード", project });
   host.say("着手してください");
   assert.ok(await waitUntil(() => {
     const st = host.roundState.get("alpha");
