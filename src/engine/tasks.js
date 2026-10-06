@@ -44,6 +44,9 @@ export class TaskBlackboard {
   // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
   // acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
   create({ id, role, body, project = "", acceptance = "", dependsOn = [], createdBy = null, model = null }) {
+    // id無し/不正形式の起票は拒否(busへ taskId: undefined が飛ぶ・undefined.md 残骸が生まれるのを防ぐ)
+    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(id.trim())) return false;
+    id = id.trim();
     const f = join(this.open, `${id}.md`);
     if (existsSync(f)) return false;
     const meta = metaLines(project, role, acceptance, dependsOn, model);
@@ -55,6 +58,7 @@ export class TaskBlackboard {
 
   // スポーンなどで最初から請求済みとしてタスクを投入する(ブリーフ=そのエージェントの担当)
   assign({ agentId, taskId, body, project = "", model = null }) {
+    if (!agentId || !taskId) return false; // 引数欠けの防御(claimedファイル名が壊れるのを防ぐ)
     const f = join(this.claimed, `${agentId}--${taskId}.md`);
     if (existsSync(f)) return false;
     const meta = metaLines(project, null, "", [], model);
@@ -170,6 +174,7 @@ export class TaskBlackboard {
   }
 
   finish(agent, taskId) {
+    if (!agent?.id || !taskId) return false; // 引数欠けの防御
     const src = join(this.claimed, `${agent.id}--${taskId}.md`);
     const dst = join(this.done, `${agent.id}--${taskId}.md`);
     try {
