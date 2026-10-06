@@ -149,7 +149,7 @@ test("ChatHost自動継続: ターン上限でも仕事が残っていれば次�
     { text: "完了しました" },
   ]);
   const host = new ChatHost({
-    mains: [agent], project: "p", autoContinueRounds: 3, maxTurnsPerRound: 2, staggerMs: 0,
+    mains: [agent], project: "p", autoContinueRounds: 3, maxTurnsPerRound: 4, staggerMs: 0, // 1モデル呼出=1ターンの現行実装で完走に4ターン要る
     modelFactory: () => model, toolsFactory: () => tools,
     board, tasks, bus,
   });
@@ -176,7 +176,7 @@ test("ChatHost自動継続: 上限回数に達したら告知して停止する"
     { toolCalls: [{ name: "write_file", args: { path: "wip.txt", content: "作業中" } }] },
   ]);
   const host = new ChatHost({
-    mains: [agent], project: "q", autoContinueRounds: 1, maxTurnsPerRound: 2, staggerMs: 0,
+    mains: [agent], project: "q", autoContinueRounds: 1, maxTurnsPerRound: 3, staggerMs: 0, // 上限到達までに3ターン要る(現行loop実装)
     modelFactory: () => model, toolsFactory: () => tools,
     board, tasks, bus,
   });
