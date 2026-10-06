@@ -1,0 +1,577 @@
+[
+ {
+  "name": "agent-hive",
+  "wt": "D:/working/_projects/agent-hive",
+  "branch": "main"
+ },
+ {
+  "name": "autocontinue-progress-gate-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/autocontinue-progress-gate-beta",
+  "branch": "agent/notify-idle-stall-beta"
+ },
+ {
+  "name": "cache-hit-rate-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/cache-hit-rate-alpha",
+  "branch": "agent/cache-hit-rate-alpha"
+ },
+ {
+  "name": "cache-hit-rate-delta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/cache-hit-rate-delta",
+  "branch": "agent/cache-hit-rate-delta"
+ },
+ {
+  "name": "cache-hit-rate-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/cache-hit-rate-gamma",
+  "branch": "agent/cache-hit-rate-gamma"
+ },
+ {
+  "name": "discuss-mumdrr6i-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/discuss-mumdrr6i-alpha",
+  "branch": "agent/discuss-mumdrr6i-alpha"
+ },
+ {
+  "name": "discuss-mumdrr6i-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/discuss-mumdrr6i-beta",
+  "branch": "agent/discuss-mumdrr6i-beta"
+ },
+ {
+  "name": "engine-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/engine-gamma",
+  "branch": "agent/engine-gamma"
+ },
+ {
+  "name": "engine-r3-cleanup-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/engine-r3-cleanup-alpha",
+  "branch": "agent/engine-r3-cleanup-alpha"
+ },
+ {
+  "name": "engine-r3-cleanup-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/engine-r3-cleanup-beta",
+  "branch": "agent/engine-r3-cleanup-beta"
+ },
+ {
+  "name": "engine-r3-cleanup-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/engine-r3-cleanup-gamma",
+  "branch": "agent/engine-r3-cleanup-gamma"
+ },
+ {
+  "name": "feat-ctx-window-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-ctx-window-alpha",
+  "branch": "agent/feat-ctx-window-alpha"
+ },
+ {
+  "name": "feat-ctx-window-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-ctx-window-beta",
+  "branch": "agent/feat-ctx-window-beta"
+ },
+ {
+  "name": "feat-ctx-window-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-ctx-window-gamma",
+  "branch": "agent/feat-ctx-window-gamma"
+ },
+ {
+  "name": "feat-monitor-chart-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-monitor-chart-alpha",
+  "branch": "agent/feat-monitor-chart-alpha"
+ },
+ {
+  "name": "feat-monitor-chart-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-monitor-chart-beta",
+  "branch": "agent/feat-monitor-chart-beta"
+ },
+ {
+  "name": "feat-monitor-chart-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-monitor-chart-gamma",
+  "branch": "agent/feat-monitor-chart-gamma"
+ },
+ {
+  "name": "feat-readme-auto-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-readme-auto-alpha",
+  "branch": "agent/feat-readme-auto-alpha"
+ },
+ {
+  "name": "feat-readme-auto-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-readme-auto-beta",
+  "branch": "agent/feat-readme-auto-beta"
+ },
+ {
+  "name": "feat-readme-auto-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-readme-auto-gamma",
+  "branch": "agent/feat-readme-auto-gamma"
+ },
+ {
+  "name": "feat-trace-dash-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-trace-dash-alpha",
+  "branch": "agent/feat-trace-dash-alpha"
+ },
+ {
+  "name": "feat-trace-dash-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-trace-dash-beta",
+  "branch": "agent/feat-trace-dash-beta"
+ },
+ {
+  "name": "feat-trace-dash-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/feat-trace-dash-gamma",
+  "branch": "agent/feat-trace-dash-gamma"
+ },
+ {
+  "name": "finish-throttle-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/finish-throttle-alpha",
+  "branch": "agent/finish-throttle-alpha"
+ },
+ {
+  "name": "finish-throttle-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/finish-throttle-beta",
+  "branch": "agent/finish-throttle-beta"
+ },
+ {
+  "name": "finish-throttle-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/finish-throttle-gamma",
+  "branch": "agent/finish-throttle-gamma"
+ },
+ {
+  "name": "fix-lead-priority-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/fix-lead-priority-alpha",
+  "branch": "agent/fix-lead-priority-alpha"
+ },
+ {
+  "name": "fix-lead-priority-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/fix-lead-priority-beta",
+  "branch": "agent/fix-lead-priority-beta"
+ },
+ {
+  "name": "fix-lead-priority-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/fix-lead-priority-gamma",
+  "branch": "agent/fix-lead-priority-gamma"
+ },
+ {
+  "name": "gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/gamma",
+  "branch": "agent/gamma"
+ },
+ {
+  "name": "glm-reasoning-content-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/glm-reasoning-content-alpha",
+  "branch": "agent/glm-reasoning-content-alpha"
+ },
+ {
+  "name": "glm-reasoning-content-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/glm-reasoning-content-beta",
+  "branch": "agent/glm-reasoning-content-beta"
+ },
+ {
+  "name": "glm-reasoning-content-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/glm-reasoning-content-gamma",
+  "branch": "agent/glm-reasoning-content-gamma"
+ },
+ {
+  "name": "governance-r5-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/governance-r5-alpha",
+  "branch": "agent/governance-r5-alpha"
+ },
+ {
+  "name": "governance-r5-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/governance-r5-beta",
+  "branch": "agent/governance-r5-beta"
+ },
+ {
+  "name": "governance-r5-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/governance-r5-gamma",
+  "branch": "agent/governance-r5-gamma"
+ },
+ {
+  "name": "impl-1",
+  "wt": "D:/working/_projects/agent-hive/worktrees/impl-1",
+  "branch": "agent/impl-1"
+ },
+ {
+  "name": "impl-11",
+  "wt": "D:/working/_projects/agent-hive/worktrees/impl-11",
+  "branch": "agent/impl-11"
+ },
+ {
+  "name": "impl-3",
+  "wt": "D:/working/_projects/agent-hive/worktrees/impl-3",
+  "branch": "agent/impl-3"
+ },
+ {
+  "name": "impl-4",
+  "wt": "D:/working/_projects/agent-hive/worktrees/impl-4",
+  "branch": "agent/impl-4"
+ },
+ {
+  "name": "impl-5",
+  "wt": "D:/working/_projects/agent-hive/worktrees/impl-5",
+  "branch": "agent/impl-5"
+ },
+ {
+  "name": "impl-6",
+  "wt": "D:/working/_projects/agent-hive/worktrees/impl-6",
+  "branch": "agent/impl-6"
+ },
+ {
+  "name": "impl-8",
+  "wt": "D:/working/_projects/agent-hive/worktrees/impl-8",
+  "branch": "agent/impl-8"
+ },
+ {
+  "name": "impl-9",
+  "wt": "D:/working/_projects/agent-hive/worktrees/impl-9",
+  "branch": "agent/impl-9"
+ },
+ {
+  "name": "issue-browser-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-browser-alpha",
+  "branch": "agent/issue-browser-alpha"
+ },
+ {
+  "name": "issue-browser-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-browser-beta",
+  "branch": "agent/issue-browser-beta"
+ },
+ {
+  "name": "issue-browser-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-browser-gamma",
+  "branch": "agent/issue-browser-gamma"
+ },
+ {
+  "name": "issue-checkpoint-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-checkpoint-alpha",
+  "branch": "agent/issue-checkpoint-alpha"
+ },
+ {
+  "name": "issue-checkpoint-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-checkpoint-beta",
+  "branch": "agent/issue-checkpoint-beta"
+ },
+ {
+  "name": "issue-checkpoint-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-checkpoint-gamma",
+  "branch": "agent/issue-checkpoint-gamma"
+ },
+ {
+  "name": "issue-cost-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-cost-alpha",
+  "branch": "agent/issue-cost-alpha"
+ },
+ {
+  "name": "issue-cost-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-cost-beta",
+  "branch": "agent/issue-cost-beta"
+ },
+ {
+  "name": "issue-cost-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-cost-gamma",
+  "branch": "agent/issue-cost-gamma"
+ },
+ {
+  "name": "issue-depends-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-depends-alpha",
+  "branch": "agent/issue-depends-alpha"
+ },
+ {
+  "name": "issue-depends-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-depends-beta",
+  "branch": "agent/issue-depends-beta"
+ },
+ {
+  "name": "issue-depends-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-depends-gamma",
+  "branch": "agent/issue-depends-gamma"
+ },
+ {
+  "name": "issue-modelselect-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-modelselect-alpha",
+  "branch": "agent/issue-modelselect-alpha"
+ },
+ {
+  "name": "issue-modelselect-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-modelselect-beta",
+  "branch": "agent/issue-modelselect-beta"
+ },
+ {
+  "name": "issue-modelselect-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-modelselect-gamma",
+  "branch": "agent/issue-modelselect-gamma"
+ },
+ {
+  "name": "issue-notify-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-notify-alpha",
+  "branch": "agent/issue-notify-alpha"
+ },
+ {
+  "name": "issue-notify-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-notify-beta",
+  "branch": "agent/issue-notify-beta"
+ },
+ {
+  "name": "issue-notify-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-notify-gamma",
+  "branch": "agent/issue-notify-gamma"
+ },
+ {
+  "name": "issue-respawn-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-respawn-alpha",
+  "branch": "agent/issue-respawn-alpha"
+ },
+ {
+  "name": "issue-respawn-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-respawn-beta",
+  "branch": "agent/issue-respawn-beta"
+ },
+ {
+  "name": "issue-respawn-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-respawn-gamma",
+  "branch": "agent/issue-respawn-gamma"
+ },
+ {
+  "name": "issue-schema-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-schema-alpha",
+  "branch": "agent/issue-schema-alpha"
+ },
+ {
+  "name": "issue-schema-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-schema-beta",
+  "branch": "agent/issue-schema-beta"
+ },
+ {
+  "name": "issue-schema-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-schema-gamma",
+  "branch": "agent/issue-schema-gamma"
+ },
+ {
+  "name": "issue-throttle-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-throttle-alpha",
+  "branch": "agent/issue-throttle-alpha"
+ },
+ {
+  "name": "issue-throttle-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-throttle-beta",
+  "branch": "agent/issue-throttle-beta"
+ },
+ {
+  "name": "issue-throttle-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/issue-throttle-gamma",
+  "branch": "agent/issue-throttle-gamma"
+ },
+ {
+  "name": "lead",
+  "wt": "D:/working/_projects/agent-hive/worktrees/lead",
+  "branch": "agent/lead"
+ },
+ {
+  "name": "merge-queue-r6-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/merge-queue-r6-alpha",
+  "branch": "agent/merge-queue-r6-alpha"
+ },
+ {
+  "name": "merge-queue-r6-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/merge-queue-r6-beta",
+  "branch": "agent/merge-queue-r6-beta"
+ },
+ {
+  "name": "merge-queue-r6-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/merge-queue-r6-gamma",
+  "branch": "agent/merge-queue-r6-gamma"
+ },
+ {
+  "name": "model-policy-escalation-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/model-policy-escalation-alpha",
+  "branch": "agent/model-policy-escalation-alpha"
+ },
+ {
+  "name": "model-policy-escalation-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/model-policy-escalation-beta",
+  "branch": "agent/model-policy-escalation-beta"
+ },
+ {
+  "name": "model-policy-escalation-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/model-policy-escalation-gamma",
+  "branch": "agent/model-policy-escalation-gamma"
+ },
+ {
+  "name": "overlap-guard-r6-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/overlap-guard-r6-alpha",
+  "branch": "agent/overlap-guard-r6-alpha"
+ },
+ {
+  "name": "overlap-guard-r6-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/overlap-guard-r6-beta",
+  "branch": "agent/overlap-guard-r6-beta"
+ },
+ {
+  "name": "overlap-guard-r6-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/overlap-guard-r6-gamma",
+  "branch": "agent/overlap-guard-r6-gamma"
+ },
+ {
+  "name": "packaging-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/packaging-alpha",
+  "branch": "agent/packaging-alpha"
+ },
+ {
+  "name": "packaging-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/packaging-beta",
+  "branch": "agent/packaging-beta"
+ },
+ {
+  "name": "packaging-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/packaging-gamma",
+  "branch": "agent/packaging-gamma"
+ },
+ {
+  "name": "polish-r4-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/polish-r4-alpha",
+  "branch": "agent/polish-r4-alpha"
+ },
+ {
+  "name": "polish-r4-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/polish-r4-beta",
+  "branch": "agent/polish-r4-beta"
+ },
+ {
+  "name": "polish-r4-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/polish-r4-gamma",
+  "branch": "agent/polish-r4-gamma"
+ },
+ {
+  "name": "redteam-auto-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/redteam-auto-alpha",
+  "branch": "agent/redteam-auto-alpha"
+ },
+ {
+  "name": "redteam-auto-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/redteam-auto-beta",
+  "branch": "agent/redteam-auto-beta"
+ },
+ {
+  "name": "redteam-auto-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/redteam-auto-gamma",
+  "branch": "agent/redteam-auto-gamma"
+ },
+ {
+  "name": "redteam-r5-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/redteam-r5-alpha",
+  "branch": "agent/redteam-r5-alpha"
+ },
+ {
+  "name": "redteam-r5-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/redteam-r5-beta",
+  "branch": "agent/redteam-r5-beta"
+ },
+ {
+  "name": "redteam-r5-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/redteam-r5-gamma",
+  "branch": "agent/redteam-r5-gamma"
+ },
+ {
+  "name": "respawn-cleanup-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/respawn-cleanup-alpha",
+  "branch": "agent/respawn-cleanup-alpha"
+ },
+ {
+  "name": "respawn-cleanup-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/respawn-cleanup-beta",
+  "branch": "agent/respawn-cleanup-beta"
+ },
+ {
+  "name": "respawn-cleanup-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/respawn-cleanup-gamma",
+  "branch": "agent/respawn-cleanup-gamma"
+ },
+ {
+  "name": "review-4",
+  "wt": "D:/working/_projects/agent-hive/worktrees/review-4",
+  "branch": "agent/review-4"
+ },
+ {
+  "name": "review-verify-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/review-verify-alpha",
+  "branch": "agent/review-verify-alpha"
+ },
+ {
+  "name": "review-verify-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/review-verify-beta",
+  "branch": "agent/review-verify-beta"
+ },
+ {
+  "name": "review-verify-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/review-verify-gamma",
+  "branch": "agent/review-verify-gamma"
+ },
+ {
+  "name": "search-alert-r7-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/search-alert-r7-alpha",
+  "branch": "agent/search-alert-r7-alpha"
+ },
+ {
+  "name": "search-alert-r7-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/search-alert-r7-beta",
+  "branch": "agent/search-alert-r7-beta"
+ },
+ {
+  "name": "search-alert-r7-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/search-alert-r7-gamma",
+  "branch": "agent/search-alert-r7-gamma"
+ },
+ {
+  "name": "stability-r3-ports-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/stability-r3-ports-alpha",
+  "branch": "agent/stability-r3-ports-alpha"
+ },
+ {
+  "name": "stability-r3-ports-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/stability-r3-ports-beta",
+  "branch": "agent/stability-r3-ports-beta"
+ },
+ {
+  "name": "stability-r3-ports-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/stability-r3-ports-gamma",
+  "branch": "agent/stability-r3-ports-gamma"
+ },
+ {
+  "name": "ui-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/ui-alpha",
+  "branch": "agent/ui-alpha"
+ },
+ {
+  "name": "ui-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/ui-beta",
+  "branch": "agent/ui-beta"
+ },
+ {
+  "name": "ui-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/ui-gamma",
+  "branch": "agent/ui-gamma"
+ },
+ {
+  "name": "ui-r3-audit-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/ui-r3-audit-alpha",
+  "branch": "agent/ui-r3-audit-alpha"
+ },
+ {
+  "name": "ui-r3-audit-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/ui-r3-audit-beta",
+  "branch": "agent/ui-r3-audit-beta"
+ },
+ {
+  "name": "ui-r3-audit-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/ui-r3-audit-gamma",
+  "branch": "agent/ui-r3-audit-gamma"
+ },
+ {
+  "name": "weather-ai-research-alpha",
+  "wt": "D:/working/_projects/agent-hive/worktrees/weather-ai-research-alpha",
+  "branch": "agent/weather-ai-research-alpha"
+ },
+ {
+  "name": "weather-ai-research-beta",
+  "wt": "D:/working/_projects/agent-hive/worktrees/weather-ai-research-beta",
+  "branch": "agent/weather-ai-research-beta"
+ },
+ {
+  "name": "weather-ai-research-gamma",
+  "wt": "D:/working/_projects/agent-hive/worktrees/weather-ai-research-gamma",
+  "branch": "agent/weather-ai-research-gamma"
+ }
+]
