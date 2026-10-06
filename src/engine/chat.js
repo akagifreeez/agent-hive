@@ -370,6 +370,7 @@ export class ChatHost {
           const count = (this.autoRounds.get(main.id) ?? 0) + 1;
           const work = this.hasWork(main);
           const landed = this.landedThisRound.get(main.id) === true || this.landingSignal?.() === true;
+          this.landedThisRound.set(main.id, false); // 着地フラグは1判定で消費する
           if (work && landed && count <= this.autoContinueRounds) {
             this.autoRounds.set(main.id, count);
             kickoffText = `[システム] 自動継続(${count}ラウンド目)。請求中タスクが残っていれば finish_task で完了し、無ければ claim_next_task で次を請求してください。`;
