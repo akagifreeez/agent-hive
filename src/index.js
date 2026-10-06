@@ -30,6 +30,7 @@ async function main() {
   // --chat/--serve はstartUi側で同じbusへ配線する(コンソール+監視/monitor配信)ので二重にやらない
   if (!args.includes("--chat") && !args.includes("--serve")) {
     wireCliNotify(bus, { longTaskSec: config.notify?.longTaskSec ?? 600 });
+    wireStallNotify(bus, { enabled: config.notify?.stop !== false, stallSec: config.notify?.stallSec ?? 600 });
   }
 
   if (args.includes("--chat")) {
