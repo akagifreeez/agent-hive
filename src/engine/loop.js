@@ -275,6 +275,14 @@ export async function runAgentLoop({
     }
     bus.emit("agent.turn", { agent: agent.id, turn, content: res.content ?? "", reasoning: res.reasoning ?? "" });
 
+    // イシュー#25: ツール呼出なしの通常テキスト応答もassistantとしてmessagesへ残す。
+    // 旧実装はtoolCallsがある分岐だけpushしていたため、通常返答が履歴から消え、
+    // 直後の質問で自身の直前の返答を参照できなかった。空応答は続行促しに回るので対象外。
+    if (!res.toolCalls.length) {
+      const finalText = (res.content ?? "").trim();
+      if (finalText) messages.push({ role: "assistant", content: finalText });
+    }
+
     if (res.toolCalls.length > 0) {
       // GLM/OpenRouterはcontent:nullのassistantメッセージを拒むため文字列に正規化。
       // 呼び出しは共通形 res.toolCalls から組み立てる(rawはワイヤ形式ごとに形が違うため依存しない:
