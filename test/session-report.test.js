@@ -67,19 +67,11 @@ test("session-report: cacheHits(日別・エージェント別ヒット率。cac
   assert.equal(lead.calls, 2, "null行は集計から除外される");
   assert.equal(lead.prompt, 3000);
   assert.equal(lead.cached, 1000);
-<<<<<<< HEAD
-  assert.ok(Math.abs(lead.hitRatio - 0.333) < 0.001, "hitRatioは小数3桁丸め(1000/3000=0.3333…)");
-=======
   assert.ok(Math.abs(lead.hitRatio - 1000 / 3000) < 0.001, "小数3桁丸めなので誤差0.001許容");
->>>>>>> main
   assert.equal(lead.low, true, "既定閾値0.5未満はlow");
   assert.equal(r.cacheHits.byAgent.find((a) => a.agent === "alpha"), undefined, "cachedが全て未報告のエージェントは出ない");
   assert.equal(r.cacheHits.byDate.length, 1);
-<<<<<<< HEAD
-  assert.ok(Math.abs(r.cacheHits.total.hitRatio - 0.333) < 0.001, "totalも同じ丸め");
-=======
   assert.ok(Math.abs(r.cacheHits.total.hitRatio - 1000 / 3000) < 0.001, "小数3桁丸めなので誤差0.001許容");
->>>>>>> main
   assert.equal(r.cacheHitLowThreshold, 0.5, "閾値定数も応答に載る(UI/CLIで共利用)");
   rmTree(ws);
 });
