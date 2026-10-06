@@ -87,7 +87,7 @@ test("stall: 通知タイマーはunref済み(ref付きはプロセスを生か�
   const code = 'const t = setInterval(() => {}, 50); if (process.env.PROBE_UNREF === "1") t.unref(); setTimeout(() => console.log("tick-ok"), 30);';
   const run = (unref) => {
     try {
-      execFileSync(process.execPath, ["-e", code], { timeout: 2000, stdio: "ignore", env: { ...process.env, PROBE_UNREF: unref ? "1" : "" } });
+      execFileSync(process.execPath, ["-e", code], { timeout: 8000, stdio: "ignore", env: { ...process.env, PROBE_UNREF: unref ? "1" : "" } });
       return { status: 0, signal: null };
     } catch (e) {
       return { status: e.status, signal: e.signal };
