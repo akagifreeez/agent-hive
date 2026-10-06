@@ -64,9 +64,9 @@ export class ChatHost {
     this.landedThisRound = new Map(); // id => 直前ラウンドに着地(タスクdone/マージ完了)があったか(進捗ゲート用)
     this.approvals = approvals; // 承認フロー(null可=無効。ラウンド末マージの保留判定)
     for (const m of mains) {
-  this.seen.set(m.id, board.lastId());
-  this.landedThisRound.set(m.id, false); // 着地フラグの初期値(進捗ゲート)
-}
+      this.seen.set(m.id, board.lastId());
+      this.landedThisRound.set(m.id, false); // 着地フラグの初期値(進捗ゲート)
+    }
     // ボード上の@表示名でメインを起こす(横つながりの入口)
     bus.on("board", (p) => this.handleBoardPost(p));
     // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
@@ -380,7 +380,7 @@ export class ChatHost {
           if (work && landed && count <= this.autoContinueRounds) {
             this.autoRounds.set(main.id, count);
             kickoffText = `[システム] 自動継続(${count}ラウンド目)。請求中タスクが残っていれば finish_task で完了し、無ければ claim_next_task で次を請求してください。`;
-st.lastKickoff = kickoffText; // 継続ノートも観測・テスト契約に反映
+            st.lastKickoff = kickoffText; // 継続ノートも観測・テスト契約に反映
             again = true;
           } else if (work) {
             this.autoRounds.set(main.id, 0);
