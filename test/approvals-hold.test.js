@@ -152,3 +152,39 @@ test("approvals: 保留中タスクが無ければ従来どおりラウンド終
     cleanup();
   }
 });
+
+test("approvals: 検証タスクはprojectを引き継ぎ、project指定レビュアーの検証完了でmainへマージされる", async () => {
+  // 回帰(イシュー#22対応中に発見): 検証タスク起票時にprojectメタが欠落し、project絞り込みの
+  // レビュアーがclaimできず承認待ちが詰まる実害。claim→検証finish→マージの実フローで検証する。
+  const env = await mkEnv();
+  const { ws, wtA, tasks, approvals, alphaTools, betaTools, host, cleanup } = env;
+  try {
+    tasks.assign({ agentId: "alpha", taskId: "t-proj", body: "project付きの仕事", project: "approvals" });
+    writeFileSync(join(wtA, "proj.txt"), "project付きの変更\n");
+    await commitIn(wtA, "proj");
+    const fin = await alphaTools.execute("finish_task", { task_id: "t-proj" });
+    assert.equal(fin.ok, true, "finish_taskが成功");
+    const verify = tasks.list().open.find((t) => t.id === "verify-t-proj");
+    assert.ok(verify, "検証タスクが起票されている");
+    assert.equal(verify.project, "approvals", "元タスクのprojectを引き継ぐ");
+
+    // ラウンド実行 → 承認待ちのため保留
+    host.say("[テスト] ラウンド実行3");
+    assert.ok(await waitUntil(() => {
+      const st = host.roundState.get("alpha");
+      return st && !st.running;
+    }), "alphaのラウンドが完了");
+    assert.equal(existsSync(join(ws, "proj.txt")), false, "承認待ちの間はmainへマージされない");
+
+    // project指定の検証者がclaim → 検証finishでマージ(実フロー)
+    const c = await betaTools.execute("claim_next_task", { project: "approvals" });
+    assert.ok(c.ok, "レビュアーが検証タスクを請求できる: " + String(c.text ?? "").slice(0, 60));
+    const vf = await betaTools.execute("finish_task", { task_id: "verify-t-proj" });
+    assert.equal(vf.ok, true, "検証finishが成功: " + String(vf.text ?? "").slice(0, 60));
+    assert.equal(existsSync(join(ws, "proj.txt")), true, "検証完了でmainへマージされる");
+    assert.equal(approvals.pending.has("t-proj"), false, "保留は解消");
+    assert.equal(tasks.claimedBy("alpha").some((t) => t.id === "t-proj"), false, "元タスクも完了確定");
+  } finally {
+    cleanup();
+  }
+});

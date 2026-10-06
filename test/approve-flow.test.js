@@ -113,7 +113,7 @@ test("承認フロー: 検証タスク起票は元タスクのprojectを引き�
     const reviewer = { id: "beta", displayName: "ベータ", role: "review", personaPath: PERSONA };
     const rtools = createTools({ agent: reviewer, workspace: ws, mainWorkspace: main, board: new Board(new Bus()), tasks, bus: new Bus(), approvals });
     const rc = await rtools.execute("claim_next_task", { project: "proj-x" });
-    assert.ok(rc.ok, );
+    assert.ok(rc.ok, "reviewが検証タスクを請求できる: " + String(rc.text ?? "").slice(0, 60));
     assert.equal(approvals.pending.get("tp1")?.agentId, "alpha", "保留情報が立つ");
   } finally {
     cleanup(ws, main);

@@ -116,11 +116,11 @@ test("進捗ゲート: 着地があり続けてもautoContinueRounds(ハード�
   const toolResults = [];
   const { host, board, tasks, calls, cleanup } = mkHost({
     project: "pgate-hard",
-    onToolResult: (name, args, out) => toolResults.push([name, out.ok, String(out.text ?? "").slice(0, 80)]),
+    onToolResult: (name, args, out) => toolResults.push([name, out.ok, String(out.text ?? "").slice(0, 120)]),
     autoContinueRounds: 1,
     steps: [
       { toolCalls: [{ name: "finish_task", arguments: { task_id: "t3" } }] },
-      { toolCalls: [{ name: "finish_task", arguments: { task_id: "t4" } }, { name: "list_files", arguments: {} }] }, // 着地+ターン上限
+      { toolCalls: [{ name: "post_to_board", arguments: { text: "進行中" } }] }, // ターンを消費するだけで着地無し
       "応答のみ",
     ],
   });
