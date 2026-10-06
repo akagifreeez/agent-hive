@@ -68,6 +68,7 @@ test("verify完了の競合経路: noteRejectionにmodelPolicyが渡り、しき
       modelPolicy: { escalationThreshold: 1, escalateModel: null },
     });
     // 実装者が cw1 を請求→完了(検証タスクverify-cw1が起票・保留情報が立つ)
+    tasks.create({ id: "cw1", role: "impl", body: "work" });
     const c1 = await alpha.execute("claim_next_task", {});
     assert.ok(c1.ok, "alphaがclaimできる");
     const f1 = await alpha.execute("finish_task", { task_id: "cw1" });
