@@ -74,6 +74,9 @@ export class ChatHost {
     bus.on("task.finished", (p) => this.noteLanding(p.agent));
     // テスト起点: ChatHost外(ユニットテスト等)から着地を直接報せる入口(進捗ゲートの観測点)。
     bus.on("agent.merged", (p) => this.noteLanding(p.agent));
+    // create_task(新しい仕事の発生)も着地として扱う: 「次にやることが生まれた」のは進捗。
+    // これが無いと「探索ラウンドで新タスクを起票→次ラウンドで着手」の正当な循環が止まる。
+    bus.on("task.created", (p) => this.noteLanding(null));
     // 解放(退場した担当者のタスクがopenへ戻る)でも同様に起こす。
     bus.on("task.released", (p) => this.handleTaskReleased(p));
   }
