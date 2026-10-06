@@ -27,11 +27,9 @@ async function mkEnv(hook) {
   GIT("git worktree add -q -b agent/alpha \"" + wt + "\" main", ws);
   GIT("git config user.email w@t && git config user.name w", wt);
   if (hook) {
-    mkdirSync(join(wt, ".git"), { recursive: true });
-    // worktreeの.gitはファイル(gitdir:ポインタ)なので実リポジトリ側のhooksへ置く
-    const gitDir = GIT("git rev-parse --git-dir", wt).trim();
-    const abs = gitDir.includes(":") || gitDir.startsWith("/") ? gitDir : join(ws, gitDir);
-    writeFileSync(join(abs, "hooks", "pre-commit"), "#!/bin/sh\nexit 1\n");
+    // フックは共通gitdir(main側 .git/hooks)で効く(worktreeのコミットも共通フックを参照)
+    mkdirSync(join(ws, ".git", "hooks"), { recursive: true });
+    writeFileSync(join(ws, ".git", "hooks", "pre-commit"), "#!/bin/sh" + String.fromCharCode(10) + "exit 1" + String.fromCharCode(10));
   }
   return { base, ws, wt };
 }
