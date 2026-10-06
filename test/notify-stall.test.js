@@ -55,11 +55,12 @@ test("stall: ラウンド静止は1回だけ通知し、静止中は繰り返さ
   // さらに待っても(静止継続でも)2通目は出ない
   await new Promise((r) => setTimeout(r, 120));
   assert.equal(got.length, 1, "静止中の繰り返し通知はしない");
-  // 活動があれば再武装され、再び静止するとまた1回だけ通知
+  // 活動があれば再武装され、再び静止するとまた1回だけ通知。
+  // 活動直後(静止未満)は通知が増えず、閾値を再び超えた時点で2通目。
   bus.emit("board", { from: "alpha", text: "作業再開" });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(got.length, 1, "活動直後(静止未満)は通知しない");
   await new Promise((r) => setTimeout(r, 120));
-  assert.equal(got.length, 1, "活動直後は静止扱いにしない");
-  await new Promise((r) => setTimeout(r, 80));
   assert.equal(got.length, 2, "再静止したらまた1回通知");
   assert.equal(got[1].kind, "idle.stall");
   w.unwire();
