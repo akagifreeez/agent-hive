@@ -278,9 +278,21 @@ async function cmdSession(o) {
   if (!r.scanned) return console.log("裏ログはまだありません(実装後の最初のラウンドから記録される)。");
   console.log(`${ACCENT}裏ログ ${r.scanned.toLocaleString()}件${RESET}${DIM}(上限${r.window}件を集計・ファイル${r.files}本)${RESET}`);
   console.log(`${DIM}  agent            呼出  失敗  圧縮  prompt      completion  cached(命中率)   tok/s${RESET}`);
+  // 日別のキャッシュヒット率(cache-hit-rate): usage-traceと同じ純関数の集計をAPI経由で受けて表示
+  if (r.cacheHits?.byDate?.length) {
+    for (const d of r.cacheHits.byDate) {
+      const pct = d.hitRatio != null ? `${Math.round(d.hitRatio * 100)}%` : "-";
+      const mark = d.low ? " ←低" : "";
+      console.log(`${DIM}  ${d.date}  prompt ${d.prompt.toLocaleString().padStart(9)}  cached ${d.cached.toLocaleString().padStart(9)}  命中率 ${pct}${mark}${RESET}`);
+    }
+    const t = r.cacheHits.total;
+    const tpct = t.hitRatio != null ? `${Math.round(t.hitRatio * 100)}%` : "-";
+    console.log(`${DIM}  合計     prompt ${t.prompt.toLocaleString().padStart(9)}  cached ${t.cached.toLocaleString().padStart(9)}  命中率 ${tpct}${RESET}`);
+  }
   for (const a of r.agents) {
+    const hitLow = r.cacheHits?.byAgent?.find((x) => x.agent === a.agent)?.low;
     const cache = a.cachedTokens != null
-      ? `${a.cachedTokens.toLocaleString()}${a.cacheHitRatio != null ? ` (${Math.round(a.cacheHitRatio * 100)}%)` : ""}`
+      ? `${a.cachedTokens.toLocaleString()}${a.cacheHitRatio != null ? ` (${Math.round(a.cacheHitRatio * 100)}%${hitLow ? " 低" : ""})` : ""}`
       : "-";
     const row = [
       `  ${BOLD}${a.agent.slice(0, 16).padEnd(16)}${RESET}`,
