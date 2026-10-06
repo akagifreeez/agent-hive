@@ -6,6 +6,7 @@ import { resolve, join, dirname, sep } from "node:path";
 import { runCommand, detectShell } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
 import { readMeta, detectTaskOverlap } from "./tasks.js";
+import { noteRejection } from "./model-policy.js";
 import { readSkill } from "./skills.js";
 import { browserFetch, browserExtract, browserSubmit } from "./browser.js";
 
@@ -411,6 +412,8 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           const implementer = { id: pending.agentId, displayName: pending.agentId };
           const m = await mergeAgentWork({ mainWorkspace, worktreePath: pending.worktreePath, agent: implementer, taskId: originalId });
           if (m.conflict) {
+            const rej = noteRejection(mainWorkspace, originalId, config);
+            if (rej.notice) board.post("system", rej.notice);
             return { ok: false, text: `マージが競合しています。実装者(${pending.agentId})に \`git merge main\` での解決を依頼してください。\n${m.text.slice(0, 600)}` };
           }
           if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
