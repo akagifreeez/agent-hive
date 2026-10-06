@@ -52,7 +52,9 @@ function mkTools({ main, ws, board, tasks, bus, modelPolicy }) {
 test("finish_task(verify)の競合経路でnoteRejectionがmodelPolicyを受け、差し戻しが記録される", async () => {
   const base = mkdtempSync(join(tmpdir(), "hive-confw-"));
   try {
+    const ti = Date.now();
     const { main, ws } = initRepos(base);
+    console.log("init_ms", Date.now() - ti);
     writeFileSync(join(ws, "README.md"), "worker side\n");
     GIT("git add -A", ws);
     GIT("git -c user.email=w@t -c user.name=w commit -qm wip", ws);
@@ -70,8 +72,12 @@ test("finish_task(verify)の競合経路でnoteRejectionがmodelPolicyを受け�
     // 実装者(alpha)がverify-cw1を起票済みの前提(実運流れを固定)。
     tasks.create({ id: "verify-cw1", role: "review", body: "verify cw1", dependsOn: [] });
     tasks.assign({ agentId: "beta", taskId: "verify-cw1", body: "verify cw1", project: "s" });
-    await tools.execute("claim_next_task", {});
+    const t0 = Date.now();
+    const cr = await tools.execute("claim_next_task", { wait_sec: 0 });
+    console.log("claim_ms", Date.now() - t0);
+    const t1 = Date.now();
     const r = await tools.execute("finish_task", { task_id: "verify-cw1" });
+    console.log("finish_ms", Date.now() - t1);
     assert.ok(r.ok === false, "競合時はok:false: " + String(r.text ?? "").slice(0, 80));
     assert.match(r.text, /競合/);
     assert.equal(rejectionCount(main, "cw1"), 1, "差し戻しが台帳に残る");
