@@ -142,8 +142,13 @@ export class OpenAIModel {
       }
       return {
         content: msg.content ?? null,
+<<<<<<< HEAD
         // 思考テキスト(OpenRouter流reasoning、zai/DeepSeek流reasoning_content。UIの活動ログ用)
         reasoning: msg.reasoning ?? msg.reasoning_content ?? null,
+=======
+        // 思考テキスト: OpenRouter流reasoning、無ければzai/DeepSeek流reasoning_content(UIの活動ログ用)
+        reasoning: msg.reasoning || msg.reasoning_content || null,
+>>>>>>> main
         toolCalls: (msg.tool_calls ?? []).map((tc) => ({
           id: tc.id,
           name: tc.function.name,
@@ -192,9 +197,17 @@ async function consumeStream(res, onDelta) {
         if (chunk.usage) usage = chunk.usage;
         if (chunk.web_search) webSearchResults = chunk.web_search; // 最終usageチャンクに付いてくる(Z.AI)
         const d = chunk.choices?.[0]?.delta ?? {};
+<<<<<<< HEAD
         // 思考テキスト: OpenRouter系は delta.reasoning、zai coding plan(DeepSeek系)は
         // delta.reasoning_content に流れる。両方来た場合は順に連結する。
         const think = d.reasoning ?? d.reasoning_content;
+=======
+        // 思考テキスト: OpenRouter流reasoningに加えDeepSeek/zai流reasoning_contentも拾う
+        // (同一deltaに両方あればこの順で連結、別deltaなら出現順に累積)。断片はonDeltaへ流す。
+        let think = "";
+        if (d.reasoning) think += d.reasoning;
+        if (d.reasoning_content) think += d.reasoning_content;
+>>>>>>> main
         if (think) {
           reasoning += think;
           onDelta?.({ kind: "think", text: think });
