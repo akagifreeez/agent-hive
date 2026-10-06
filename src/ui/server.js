@@ -20,6 +20,7 @@ import { buildCatalog } from "../model/catalog.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
 import { aggregateUsage, localDateKey } from "../engine/usage.js";
+import { summarizeSessionDir } from "../engine/session-report.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
 
@@ -809,6 +810,13 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
           agent: url.searchParams.get("agent"),
           fromTurn: url.searchParams.get("fromTurn"),
           toTurn: url.searchParams.get("toTurn"),
+        });
+        return json(res, r);
+      }
+      if (url.pathname === "/api/session-report") {
+        // 裏ログ集計(G2): session-log/(G1のモデル可視バンドル記録)の直近レコードをエージェント別に集計
+        const r = await summarizeSessionDir(join(config.workspace, "state", "session-log"), {
+          maxRecords: Number(url.searchParams.get("maxRecords")) || 2000,
         });
         return json(res, r);
       }

@@ -26,6 +26,7 @@ export class ChatHost {
     project = null, // スレッドスコープ(自動継続の「まだ仕事があるか」判定に使う)
     autoContinueRounds = 3, // ターン上限でも仕事が残っていれば自動で次ラウンドへ(0=従来どおり停止)
     hooks = null, // Hooksインスタンス(roundEndフック)
+    approvals = null, // 承認フロー状態(runner.jsの共有オブジェクト)。ラウンド末マージの保留判定に使う(イシュー#22)
   }) {
     this.mains = mains;
     this.mainWorkspace = mainWorkspace;
@@ -58,6 +59,7 @@ export class ChatHost {
     this.seen = new Map(); // id => ボード既読位置(ラウンド間で保持。配信はボード注入の1経路のみ)
     this.roundState = new Map(); // id => {running, pending[]}
     this.autoRounds = new Map(); // id => 連続自動継続ラウンド数(ユーザー起点ラウンドで0に戻る)
+    this.approvals = approvals; // 承認フロー(null可=無効。ラウンド末マージの保留判定)
     for (const m of mains) this.seen.set(m.id, board.lastId());
     // ボード上の@表示名でメインを起こす(横つながりの入口)
     bus.on("board", (p) => this.handleBoardPost(p));
@@ -171,7 +173,12 @@ export class ChatHost {
     if (!p) return null;
     try {
       const d = JSON.parse(readFileSync(p, "utf8"));
-      if (Array.isArray(d.messages) && d.messages.length > 1) return d.messages;
+      if (Array.isArray(d.messages) && d.messages.length > 1) {
+        // 復元でもsaveMemoriesと同じ上限を適用する(イシュー#21): 上限超過のスナップショットを
+        // そのまま積むと、復元を起点に再肥大する。超過分はここで刈っておく。
+        const pruned = pruneMemories(d.messages, this.memPrune);
+        return pruned.messages;
+      }
     } catch {}
     return null;
   }
@@ -182,7 +189,8 @@ export class ChatHost {
     try { rmSync(p, { force: true }); } catch {}
   }
   // ユーザー入力: 全メインを時間差で起こす(同時だと議論にならないため)。
-  // 本文はボード経由で1回だけ届く(seen管理)。キックオフは中身を持たない汎用文。
+  // イシュー#21: ボード側はslice(0,6000)打ち切り+seen進行を持ち、巨大worker投稿の影で
+  // 質問本文は実行中ならsteering([入力])で、未実行ならkickoffへ載せて届ける(二重配信しない)。
   say(text) {
     // 破損入力(U+FFFD等)の検知(イシュー#20 提案3): 化けた入力をそのまま渡すと
     // リーダーが断片から主題を推測して答えてしまうため、注入文へ明示的に警告を載せる。
@@ -191,7 +199,8 @@ export class ChatHost {
       : "";
     this.board.post("you", text);
     this.mains.forEach((m, i) => {
-      this.wake(m, "[チャット] ユーザーからの新着入力があります。ユーザー入力を最優先で応答してください。直近のワーカー投稿は触れなくてよい(必要なら後でまとめて)。" + broken, i * this.staggerMs);
+      const bodyText = this.roundState.get(m.id)?.running ? "" : "\n[入力] " + text;
+      this.wake(m, "[チャット] ユーザーからの新着入力があります。ユーザー入力を最優先で応答してください。直近のワーカー投稿は触れなくてよい(必要なら後でまとめて)。" + bodyText + broken, i * this.staggerMs);
     });
   }
 
@@ -315,7 +324,13 @@ export class ChatHost {
           } catch {}
         }
           // メインが自ら直接作業した場合の受け皿: ラウンド終了時にmainへ自動マージ
-          if (this.mainWorkspace) {
+          // 承認フロー(approvals.require)有効時は、この実装者が保留中(検証待ち)のタスクを
+          // 持つ間はマージしない(イシュー#22): 検証承認後(approve_task)にだけmainへ入る。
+          // worktree未作成ならマージせずスキップ(origin/mainのガード)。
+          const heldByApproval = this.approvals?.require
+            ? [...(this.approvals.pending ?? [])].some(([, p]) => p.agentId === main.id)
+            : false;
+          if (this.mainWorkspace && !heldByApproval && this.worktreePaths?.[main.id]) {
             const m = await mergeAgentWork({
               mainWorkspace: this.mainWorkspace,
               worktreePath: this.worktreePaths?.[main.id],
@@ -325,6 +340,9 @@ export class ChatHost {
             if (m.ok && m.merged) {
               this.board.post("system", `[マージ] ${main.displayName} がラウンド中の作業を main へ取り込みました。`);
             }
+          } else if (heldByApproval) {
+            // 承認待ちで保留した旨を見える化(黙ってマージされない状態で混乱させない)
+            this.board.post("system", `[承認待ち] ${main.displayName} のラウンド作業は検証承認待ちのためmainへの取り込みを保留しました。`);
           }
         } catch (err) {
           this.bus.emit("scenario.warn", { message: `ラウンド異常(${main.id}): ${err.message}` });
