@@ -46,16 +46,16 @@ test("aggregateCacheHits: cached÷promptを日別・エージェント別に集�
   assert.ok(d6);
   assert.equal(d6.prompt, 3400, "日別の分母は全エージェント合算");
   assert.equal(d6.cached, 1100, "日別の分子も合算");
-  assert.ok(Math.abs(d6.hitRatio - 1100 / 3400) < 1e-9, "ヒット率は合算値(cached÷prompt)");
+  assert.ok(Math.abs(d6.hitRatio - 1100 / 3400) < 0.001, "ヒット率は合算値(cached÷prompt)。小数3桁丸め");
   assert.equal(d6.calls, 3);
   // エージェント別(w1は日をまたいで合算)
   const w1 = r.byAgent.find((a) => a.agent === "w1");
   assert.equal(w1.prompt, 4000);
   assert.equal(w1.cached, 1250);
-  assert.ok(Math.abs(w1.hitRatio - 0.3125) < 1e-9);
+  assert.ok(Math.abs(w1.hitRatio - 1250 / 4000) < 0.001, "w1=(500+500+250)/(1000+2000+1000)=0.3125(丸め許容)");
   assert.equal(w1.calls, 3);
   const w2 = r.byAgent.find((a) => a.agent === "w2");
-  assert.ok(Math.abs(w2.hitRatio - 0.25) < 1e-9);
+  assert.ok(Math.abs(w2.hitRatio - 0.25) < 0.001);
   // 日別xエージェント
   const key = (d, a) => d + "|" + a;
   const m = Object.fromEntries(r.matrix.map((x) => [key(x.date, x.agent), x]));
