@@ -10,6 +10,8 @@ import { ensureGitRepo } from "../src/engine/discover.js";
 import { createWorktree } from "../src/engine/worktree.js";
 import { runCommand } from "../src/engine/exec.js";
 
+function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { "Windowsのファイルロックは無視" } }
+
 async function commitIn(dir, msg) {
   await runCommand({ command: `git add -A && git -c user.name=t -c user.email=t@t commit -q -m "${msg}"`, cwd: dir, outputLimit: 500 });
 }
@@ -46,6 +48,6 @@ test("diag", async () => {
   console.log("ST:", JSON.stringify(st));
   console.log("EVENTS:", events.filter(e => e[0] !== "board").slice(0, 20).join("\n"));
   console.log("BOARD POSTS:", board.posts.map(p => `${p.from}: ${p.text.slice(0, 80)}`).join(" | "));
-  rmSync(ws, { recursive: true, force: true });
-  rmSync(wtRoot, { recursive: true, force: true });
+  rmTree(ws);
+  rmTree(wtRoot);
 });
