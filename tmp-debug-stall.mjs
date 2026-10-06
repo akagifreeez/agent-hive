@@ -1,0 +1,16 @@
+import { Bus } from "./src/engine/board.js";
+import { wireStallNotify } from "./src/notify.js";
+const bus = new Bus();
+const got = [];
+const w = wireStallNotify(bus, { stallSec: 0.05, onNotify: (n) => got.push(n.kind + "@" + Date.now() % 100000) });
+await new Promise((r) => setTimeout(r, 120));
+console.log("after 120ms:", got.length);
+await new Promise((r) => setTimeout(r, 120));
+console.log("after 240ms:", got.length);
+bus.emit("board", { from: "alpha", text: "saisai" });
+console.log("after emit board:", got.length, "now:", Date.now() % 100000);
+await new Promise((r) => setTimeout(r, 120));
+console.log("after 120ms more:", got.length);
+await new Promise((r) => setTimeout(r, 80));
+console.log("final:", got.length, got);
+w.unwire();
