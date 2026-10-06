@@ -4,7 +4,7 @@
 // 未定義識別子ではなく createTools に渡された modelPolicy であることを実gitで固定する。
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,6 @@ import { TaskBlackboard } from "../src/engine/tasks.js";
 import { createTools } from "../src/engine/tools.js";
 import { rejectionCount } from "../src/engine/model-policy.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function GIT(cmd, cwd) {
   return execSync(cmd, { cwd, stdio: ["ignore", "pipe", "ignore"] }).toString();
@@ -58,7 +57,8 @@ test("verify完了の競合経路: noteRejectionにmodelPolicyが渡り、しき
     const board = new Board(bus);
     const tasks = new TaskBlackboard(ws, bus);
     tasks.create({ id: "cw1", role: "impl", body: "work" });
-    const capture = new Board({ post(role, text) { board.post(role, text); }, on() { return () => {}; } });
+    const posted = [];
+    const capture = { post(role, text) { posted.push(text); }, on() { return () => {}; } };
     const { tools } = mkTools({ main, ws, board: capture, tasks, bus, modelPolicy: { escalationThreshold: 1, escalateModel: null } });
     // 検証者(beta)が検証タスクverify-cw1を請求済みの状態を作る
     await tools.execute("claim_next_task", {});
@@ -66,7 +66,7 @@ test("verify完了の競合経路: noteRejectionにmodelPolicyが渡り、しき
     assert.ok(r.ok === false, "競合時はok:false: " + String(r.text ?? "").slice(0, 80));
     assert.match(r.text, /競合/);
     assert.equal(rejectionCount(main, "cw1"), 1, "差し戻しが記録される");
-    const notice = boardPostsOf(capture).find((t) => /モデル選択エスカレーション推奨/.test(t));
+    const notice = posted.find((t) => /モデル選択エスカレーション推奨/.test(t));
     assert.ok(notice, "しきい値1なら1回目で推奨が投稿される");
     assert.match(notice, /1 回/, "実config(しきい値1)が効いている(既定2なら出ない)");
   } finally {
@@ -79,4 +79,23 @@ test("approve_taskの競合経路でもnoteRejectionがmodelPolicyを受け、�
   try {
     const { main, ws } = initRepos(base);
     writeFileSync(join(ws, "README.md"), "worker side\n");
-    GIT("test: 競合經路テスト(approve_task側)をtools.jsのL482付近に追加
+    GIT("git add -A && git commit -qm w1", ws);
+    writeFileSync(join(main, "README.md"), "main side\n");
+    GIT("git add -A && git commit -qm m1", main);
+    const bus = new Bus();
+    const board = new Board(bus);
+    const tasks = new TaskBlackboard(ws, bus);
+    tasks.create({ id: "cw1", role: "impl", body: "work" });
+    const posted = [];
+    const capture = { post(role, text) { posted.push(text); }, on() { return () => {}; } };
+    const { tools } = mkTools({ main, ws, board: capture, tasks, bus, modelPolicy: { escalationThreshold: 1, escalateModel: null } });
+    const r = await tools.execute("approve_task", { task_id: "cw1" });
+    assert.ok(r.ok === false, "競合時はok:false: " + String(r.text ?? "").slice(0, 80));
+    assert.match(r.text, /競合/);
+    assert.equal(rejectionCount(main, "cw1"), 1, "approve_task側でも差し戻しが記録される");
+    const notice = posted.find((t) => /モデル選択エスカレーション推奨/.test(t));
+    assert.ok(notice, "しきい値1ならapprove経路でも推奨が出る");
+  } finally {
+    try { rmSync(base, { recursive: true, force: true }); } catch { /* ロック無視 */ }
+  }
+});
