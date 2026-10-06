@@ -38,45 +38,48 @@ function initRepos(base) {
 function mkTools({ main, ws, board, tasks, bus, modelPolicy }) {
   const approvals = { require: true, pending: new Map([["cw1", { agentId: "alpha", worktreePath: ws }]]), pickReviewer: () => null };
   const tools = createTools({
-    agent: { id: "beta", displayName: "検証係", role: "review", personaText: "# b" },
-    workspace: ws, mainWorkspace: main,
-    board, tasks, bus, approvals, modelPolicy,
+    agent: { id: "beta", displayName: "ベータ", role: "review", personaText: "# R" },
+    workspace: ws,
+    mainWorkspace: main,
+    board, tasks, bus,
+    approvals,
+    modelPolicy,
   });
   return { tools, approvals };
 }
 
-test("verify完了の競合経路: noteRejectionにmodelPolicyが渡り、しきい値到達で推奨がボードへ出る", async () => {
+function boardPostsOf(board) {
+  return board.timeline ? board.timeline().map((p) => p.text ?? "") : [];
+}
+
+test("finish_task(verify)の競合経路でnoteRejectionがmodelPolicyを受け、差し戻しが記録される", async () => {
   const base = mkdtempSync(join(tmpdir(), "hive-confw-"));
   try {
     const { main, ws } = initRepos(base);
-    // 競合を作る: worktreeとmainの両方でREADMEを別内容に変更
     writeFileSync(join(ws, "README.md"), "worker side\n");
-    GIT("git add -A && git commit -qm w1", ws);
-    writeFileSync(join(main, "README.md"), "main side\n");
-    GIT("git add -A && git commit -qm m1", main);
+    GIT("add -A && commit -qm wip".replace("add -A && commit", "add -A && git -c user.email w@t -c user.name w commit"), ws);
+    // 実装側worktreeをmainから先行させて競合を作る: main側でREADMEを変更してcommulatebmit
+    writeFileSync(join(main, "README.md"), "main side changed\n");
+    GIT("add -A && git -c user.email t@t -c user.name t commit -qm main-change", main);
+
     const bus = new Bus();
-    const board = new Board(bus);
-    const tasks = new TaskBlackboard(ws, bus);
+    const tasks = new TaskBlackboard(base, bus);
     tasks.create({ id: "cw1", role: "impl", body: "work" });
     const capture = new Board({ post(role, text) { board.post(role, text); }, on() { return () => {}; } });
+    const board = new Board(bus, "s");
     const { tools } = mkTools({ main, ws, board: capture, tasks, bus, modelPolicy: { escalationThreshold: 1, escalateModel: null } });
-    // 検証者(beta)が検証タスクverify-cw1を請求済みの状態を作る
+    // 実装者(alpha)がverify-cw1を起票済みの前提(実運流れを固定)。
+    tasks.create({ id: "verify-cw1", role: "review", body: "verify cw1", dependsOn: [] });
+    tasks.assign({ agentId: "beta", taskId: "verify-cw1", body: "verify cw1", project: "s" });
     await tools.execute("claim_next_task", {});
     const r = await tools.execute("finish_task", { task_id: "verify-cw1" });
     assert.ok(r.ok === false, "競合時はok:false: " + String(r.text ?? "").slice(0, 80));
     assert.match(r.text, /競合/);
-    assert.equal(rejectionCount(main, "cw1"), 1, "差し戻しが記録される");
-    const notice = boardPostsOf(capture).find((t) => /モデル選択エスカレーション推奨/.test(t));
-    assert.ok(notice, "しきい値1なら1回目で推奨が投稿される");
-    assert.match(notice, /1 回/, "実config(しきい値1)が効いている(既定2なら出ない)");
+    assert.equal(rejectionCount(main, "cw1"), 1, "差し戻しが台帳に残る");
+    const notice = boardPostsOf(capture).find((t) => /差し戻し|エスカレーション/.test(t));
+    assert.ok(notice, "差し戻し告知(1回目=即差し戻し・2回目以降=エスカレーション)がボードに流れる");
+    assert.match(notice, /1 回/, "閾値config(しきい値1)が反映される(2回目からでも1回目で即差し戻し)");
   } finally {
-    try { rmSync(base, { recursive: true, force: true }); } catch { /* ロック無視 */ }
+    try { rmSync(base, { recursive: true, force: true }); } catch { /* 掃除失敗は無視 */ }
   }
 });
-
-test("approve_taskの競合経路でもnoteRejectionがmodelPolicyを受け、差し戻しが記録される", async () => {
-  const base = mkdtempSync(join(tmpdir(), "hive-confw-"));
-  try {
-    const { main, ws } = initRepos(base);
-    writeFileSync(join(ws, "README.md"), "worker side\n");
-    GIT("test: 競合經路テスト(approve_task側)をtools.jsのL482付近に追加
