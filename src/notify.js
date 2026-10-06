@@ -83,7 +83,8 @@ export function wireStallNotify(bus, opts = {}) {
       deliver({ kind: "idle.stall", at: new Date().toISOString(), title: "ラウンド静止(全エージェント無音)", body: `${idleMin}分間アクティビティなし。宙吊りのタスクがないかボードを確認してください` });
     }
   };
-  timer = setInterval(checkStall, Math.max(250, Math.min(stallMs / 4, 5000)));
+  // 刻み幅: 閾値の1/4(上限5秒)。閾値が極端に短いテスト用設定でも検出遅れが出ないよう下限は1ms
+  timer = setInterval(checkStall, Math.max(1, Math.min(stallMs / 4, 5000)));
   if (typeof timer === "object" && timer && "unref" in /** @type {any} */ (timer)) {
     /** @type {any} */ (timer).unref(); // プロセスをタイマーで生かさない(常駐テストの落ち込み防止)
   }
