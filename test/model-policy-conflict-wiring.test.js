@@ -58,16 +58,6 @@ test("verify完了の競合経路: noteRejectionにmodelPolicyが渡り、しき
     makeConflict(main, ws);
     const bus = new Bus();
     const tasks = new TaskBlackboard(ws, bus);
-    tasks.create({ id: "cw1", role: "impl", body: "work" });
-<<<<<<< HEAD
-    const posted = [];
-    const capture = { post(role, text) { posted.push(text); }, on() { return () => {}; } };
-    const { tools } = mkTools({ main, ws, board: capture, tasks, bus, modelPolicy: { escalationThreshold: 1, escalateModel: null } });
-    // 検証者(beta)が検証タスクverify-cw1を請求済みの状態を作る
-    tasks.create({ id: "verify-cw1", role: null, body: "検証する" });
-    await tools.execute("claim_next_task", {});
-    const r = await tools.execute("finish_task", { task_id: "verify-cw1" });
-=======
     const approvals = APPROVALS(ws);
     const postedA = [];
     const postedB = [];
@@ -93,7 +83,6 @@ test("verify完了の競合経路: noteRejectionにmodelPolicyが渡り、しき
     const c2 = await beta.execute("claim_next_task", {});
     assert.ok(c2.ok && c2.text.includes("verify-cw1"), "betaが検証タスクを請求: " + String(c2.text).slice(0, 60));
     const r = await beta.execute("finish_task", { task_id: "verify-cw1" });
->>>>>>> main
     assert.ok(r.ok === false, "競合時はok:false: " + String(r.text ?? "").slice(0, 80));
     assert.match(r.text, /競合/);
     assert.equal(rejectionCount(main, "cw1"), 1, "差し戻しが記録される");
