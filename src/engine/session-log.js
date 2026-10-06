@@ -16,7 +16,7 @@ const CURRENT = "session.jsonl";
 const ROTATED_RE = /^session-\d{4}-\d{2}-\d{2}T/;
 
 /**
- * @param {{dir: string|null, maxBytes?: number, keep?: number}} o dir=nullなら何もしないno-op
+ * @param {{dir?: string|null, maxBytes?: number, keep?: number}} [o] dir省略/nullなら何もしないno-op
  * @returns {{append: (record: object) => void, rotations: () => number}}
  */
 export function createSessionLog({ dir, maxBytes = SESSION_LOG_MAX_BYTES, keep = SESSION_LOG_KEEP } = {}) {
