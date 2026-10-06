@@ -5,6 +5,7 @@
 import { createReadStream, existsSync, readdirSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
+import { aggregateCacheHits } from "./usage.js";
 
 const ROTATED_RE = /^session-\d{4}-\d{2}-\d{2}T.*\.jsonl$/;
 
@@ -71,5 +72,5 @@ export async function summarizeSessionDir(dir, { maxRecords = 2000 } = {}) {
       ? Math.round((s.cachedTokens / s.promptTokens) * 1000) / 1000
       : null,
   })).sort((a, b) => (b.calls + b.compactions) - (a.calls + a.compactions));
-  return { scanned, window: maxRecords, files: files.length, agents };
+  return { scanned, window: maxRecords, files: files.length, agents, cacheHits: aggregateCacheHits(cacheRows) };
 }

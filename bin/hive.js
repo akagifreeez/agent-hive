@@ -295,6 +295,18 @@ async function cmdSession(o) {
     console.log(row.join(""));
   }
   console.log(`${DIM}${new Date().toISOString().slice(0, 10)} 以降の記録。生ログは state/session-log/session.jsonl${RESET}`);
+  const ch = r.cacheHits;
+  if (ch && (ch.byDate.length || ch.byAgent.length)) {
+    console.log("");
+    console.log(`${ACCENT}キャッシュヒット率(usage-trace集計・閾値50%未満を警告)${RESET}`);
+    console.log(`${DIM}  date        calls  prompt       cached  hit${RESET}`);
+    for (const d of ch.byDate) {
+      const hit = d.hitRatio != null ? Math.round(d.hitRatio * 100) + "%" : "-";
+      const warn = d.low ? " !低" : "";
+      console.log("  " + d.date + "  " + String(d.calls).padStart(5) + "  " + d.prompt.toLocaleString().padStart(11) + "  " + d.cached.toLocaleString().padStart(11) + "  " + hit.padStart(5) + warn);
+    }
+    if (ch.total.hitRatio != null) console.log(`${DIM}  全体: ${Math.round(ch.total.hitRatio * 100)}% (有効${ch.total.calls}ターン)${RESET}`);
+  }
 }
 
 async function cmdTaskAction(o, args, action) {
