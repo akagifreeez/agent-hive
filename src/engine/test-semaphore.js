@@ -15,6 +15,11 @@ const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラ
  * マッチさせ、文中の"test"語には反応しない。 */
 export function isTestCommand(command) {
   const c = String(command ?? "");
+  if (/(^|[;&|(]s*)npms+(runs+)?test/.test(c) || /(^|[;&|(]s*)nodes+--test/.test(c)) return true;
+  return /(^|[;&|(]s*)npms+(--S+s+)*--test(s|$)/.test(c); // npm --test / npm --silent --test もテスト意図
+}
+export function isTestCommand(command) {
+  const c = String(command ?? "");
   return /(^|[;&|(]\s*)npm\s+(run\s+)?test/.test(c) || /(^|[;&|(]\s*)node\s+--test/.test(c);
 }
 
