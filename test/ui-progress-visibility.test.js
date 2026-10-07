@@ -48,10 +48,31 @@ test("UI: 進捗チップがヘッダー右上にあり、y/x計算と作業中�
   assert.match(html, /syncProgressChip\(lastState\);/);
 });
 
-test("UI: 進捗チップのクリックでパネル(作業中一覧+直近完了10件)が出る", () => {
+test("UI: 進捗チップのクリックでパネル(作業中一覧+直近完了15件+他N件)がトグルする", () => {
   assert.match(html, /function renderProgressPanel\(\) \{/);
-  assert.match(html, /\[\.\.\.l\.done\]\.reverse\(\)\.slice\(0, 10\)/);
-  assert.match(html, /\$\("progress-chip"\)\.onclick/);
+  assert.match(html, /const doneDesc = \[\.\.\.l\.done\]\.reverse\(\);/);
+  assert.match(html, /doneDesc\.slice\(0, 15\)/); // 完了は直近15件に絞る
+  assert.match(html, /他\d+件|他" \+/); // 省略分の表記(「他N件」形式に統一)
+  assert.match(html, /\$\("progress-chip"\)\.onclick/); // クリックトグル(ホバー表示は使わない)
+});
+
+test("UI: 進捗パネルはビューポート内に収める(右端基準+上限寸法+縦スクロール)", () => {
+  // 幅800px×高さ600px相当の狭いビューポートでも画面外に出ない設定の固定:
+  // - right:0 右端基準(左側へ伸びる)で横のはみ出しを構造的に防ぐ
+  // - width: min(520px, 90vw) → 800px幅でも90vw=720pxなので実幅520pxで左に収まる
+  // - max-height: 60vh → 600px高でも実高360pxで下にはみ出さない(超過分はスクロール)
+  assert.match(html, /#progress-panel \{ display: none; position: absolute; top: 100%; right: 0;/);
+  assert.match(html, /width: min\(520px, 90vw\); max-width: 520px; max-height: 60vh;/);
+  assert.match(html, /overflow-x: hidden; overflow-y: auto;/); // 縦スクロール(横は出さない)
+});
+
+test("UI: パネルの行はellipsisで1行に収め、title属性で全文をホバー表示する", () => {
+  assert.match(html, /\.pc-id \{ font-family: var\(--font-mono\); color: var\(--accent\); flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; \}/);
+  assert.match(html, /\.pc-sum \{ color: var\(--sub\); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; \}/);
+  assert.match(html, /\.pc-ag \{ color: var\(--label-tertiary\); flex-shrink: 0; font-size: 11px; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; \}/);
+  assert.match(html, /i\.title = id;/); // タスクidの全文をホバーで
+  assert.match(html, /m\.title = sum;/); // 要約の全文をホバーで
+  assert.match(html, /a\.title = ag;/); // 担当者の全文をホバーで
 });
 
 test("UI: 進捗チップはSSE更新で即時再描画される(refreshSoon経路に乗る)", () => {

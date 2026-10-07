@@ -12,6 +12,8 @@ import { chatUiHandlers } from "../ui/chat-wiring.js";
 import { runChat } from "../runner.js";
 import { Bus } from "../engine/board.js";
 import { wireConsoleLog } from "../log.js";
+import { installProcessGuard } from "../engine/process-guard.js";
+import { wireProcessErrorToBoards } from "../engine/process-error-wiring.js";
 
 const SMOKE = process.argv.includes("--smoke");
 const SCENARIO = process.argv.includes("--scenario"); // 既定はchatモード(v5)。--scenarioで従来のバッチ実行
@@ -83,10 +85,27 @@ async function bootstrap() {
     // 既定: メインチャット常駐モード(v6: リーダー+サブスレッド)
     // thread.openedの取りこぼし防止のため、UIの待ち受けを先に立ててからrunChatする
     let controller = null;
+    // プロセス警告のボード投稿先: メイン+全スレッドのBoardをコントローラ経由で遅延解決する
+    const listGuardBoards = () => {
+      const boards = [];
+      try {
+        const mainB = controller?.boardOf?.("__main__");
+        if (mainB) boards.push(mainB);
+        for (const t of controller?.listThreads?.() ?? []) {
+          const b = controller.boardOf?.(t.name);
+          if (b) boards.push(b);
+        }
+      } catch { /* コントローラ未初期化時は投稿先なし(イベントとログだけ流れる) */ }
+      return boards;
+    };
     await startUi({
       config, bus, autoStart: false,
       ...chatUiHandlers(() => controller),
     });
+    installProcessGuard(bus, {
+      notify: (line) => { try { notify("プロセス警告", line, config.ui.port); } catch { /* UI未起動時は無視 */ } },
+    });
+    wireProcessErrorToBoards(bus, { getBoards: listGuardBoards });
     controller = await runChat({ config, bus });
   }
 

@@ -49,40 +49,27 @@ test("McpHost: 起動しないサーバーはok:falseでhiveは止まらない",
   assert.equal(r.ok, false);
 });
 
-// fix#27: 子プロセス起動の非同期ENOENTがunhandledExceptionでhiveを落とさないこと。
-// 判定のみ・実サーバーを建てない(不存在コマンドは起動不可のため高速)。
-test("McpHost: 不存在コマンドの起動は例外を投げずok:false(uncaughtExceptionなしで完結)", async () => {
+test("McpHost: 不存在コマンド(非同期ENOENT)でもuncaughtExceptionで落ちずok:false相当", async () => {
+  // イシュー#27回帰: spawn自体は成功し、後から 'error' イベント(ENOENT)が飛ぶ。
+  // ハンドラ無しだとUnhandled 'error' eventでプロセスが落ちる。awaitで完結して検証する。
   const bus = new Bus();
-  const seenFailed = [];
-  bus.on("mcp.failed", (p) => seenFailed.push(p));
+  const failed = [];
+  bus.on("mcp.failed", (p) => failed.push(p));
   const host = new McpHost({
-    name: "enoent",
+    name: "noent",
     command: process.platform === "win32" ? "definitely-not-exist-xyz-123" : "definitely-not-exist-xyz-123",
     args: [],
     bus,
     timeoutMs: 5000,
   });
-  let sawUncaught = null;
-  const origHandler = process.listeners("uncaughtException").slice(-1)[0];
-  if (origHandler) process.removeListener("uncaughtException", origHandler);
-  const onUncaught = (err) => { sawUncaught = err; };
-  process.on("uncaughtException", onUncaught);
-  let r = null;
-  let threw = null;
-  try {
-    r = await host.start();
-  } catch (err) {
-    threw = err;
-  } finally {
-    process.removeListener("uncaughtException", onUncaught);
-    if (origHandler) process.addListener("uncaughtException", origHandler);
-  }
-  assert.equal(threw, null, `start()が例外を投げた: ${threw?.message ?? ""}`);
-  assert.ok(sawUncaught === null, `uncaughtExceptionが発生: ${sawUncaught?.message ?? ""}`);
-  assert.equal(r?.ok, false);
-  assert.ok(seenFailed.some((p) => p.name === "enoent"), "mcp.failedがbusへ届く");
-  // 切断状態からのrequest()はpendingに積まずに即reject(unhandled rejectionにならない)
-  await assert.rejects(() => host.request("tools/list", {}), /切断状態/);
+  const r = await host.start(); // 外へ例外を投げない
+  assert.equal(r.ok, false, "start()はok:falseを返す");
+  assert.match(r.error, /ENOENT|起動できません|not found/i);
+  const ok = await waitUntil(() => failed.length > 0, 5000);
+  assert.equal(ok, true, "busへmcp.failedが流れる");
+  assert.equal(failed[0].name, "noent");
+  // 失敗後のrequest()は切断状態として即reject(プロセスは落とさない)
+  await assert.rejects(() => host.request("initialize", {}), /切断|起動できません/);
 });
 
 test("runChat: MCPツールがエージェントから使え、cron定期実行が走る", async () => {

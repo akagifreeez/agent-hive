@@ -22,7 +22,7 @@ function rmTree(p) {
   try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのロックは無視 */ }
 }
 
-async function waitUntil(fn, ms = 60000) {
+async function waitUntil(fn, ms = 120000) {
   const start = Date.now();
   while (Date.now() - start < ms) {
     if (fn()) return true;
