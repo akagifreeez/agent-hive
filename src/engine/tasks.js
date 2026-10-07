@@ -48,6 +48,10 @@ export class TaskBlackboard {
     // 別本文で再createでき、2人のagentが同じIDを同時請求できてしまう。
     // doneは参照しないので「完了済みIDの再利用(自動再投入等)」は従来どおり許可。
     if (this.existsOpenOrClaimed(id)) return false;
+    // 完了済みIDの再起票はスキップ(blog lab実害: seed再実行でdone/のタスクがopenへ再起票され、
+    // dependsOn依存解決が永久ブロックした)。claim(未着手)の再投入は許す(自動再投入の運用維持)。
+    const doneDir = join(this.dir, "done");
+    if (readdirSync(doneDir).some((f) => f.endsWith("--" + id + ".md") || f === id + ".md")) return false;
     const f = join(this.open, `${id}.md`);
     const meta = metaLines(project, role, acceptance, dependsOn, model);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
