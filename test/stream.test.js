@@ -78,6 +78,31 @@ test("chat(stream): SSEを解析しテキスト/思考/ツール/usageを累積�
   }
 });
 
+test("chat(stream): zai/DeepSeek流reasoning_contentも思考テキストとして累積する", async () => {
+  const deltas = [];
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    return sseResponse([
+      'data: {"choices":[{"delta":{"reasoning_content":"深く"}}]}\n\n',
+      'data: {"choices":[{"delta":{"reasoning_content":"考えた"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"答え"}}]}\n\n',
+      'data: {"usage":{"prompt_tokens":5,"completion_tokens":9}}\n\n',
+      "data: [DONE]\n\n",
+    ]);
+  };
+  setModelSleep(async () => {});
+  try {
+    const model = new OpenAIModel({ baseUrl: "http://x/api/v1", apiKey: "k", model: "m" });
+    const r = await model.chat({ messages: [{ role: "user", content: "hi" }], onDelta: (d) => deltas.push(d) });
+    assert.equal(r.reasoning, "深く考えた"); // reasoning_content断片が連結される
+    assert.equal(r.content, "答え");
+    assert.deepEqual(deltas.filter((d) => d.kind === "think").map((d) => d.text), ["深く", "考えた"]);
+  } finally {
+    globalThis.fetch = origFetch;
+    setModelSleep((ms) => new Promise((r2) => setTimeout(r2, ms)));
+  }
+});
+
 test("chat(onDelta無し): 従来どおり非ストリーミングで動く", async () => {
   const origFetch = globalThis.fetch;
   const bodies = [];

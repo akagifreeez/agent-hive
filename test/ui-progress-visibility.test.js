@@ -35,3 +35,28 @@ test("UI: /notifyコマンドでデスクトップ通知をON/OFFできる", () 
 test("UI: desktopNotifyは許可済みかつONのときだけ発火する", () => {
   assert.match(html, /function desktopNotify\(title, body\) \{\s*\n\s*if \(!notifyOn \|\| typeof Notification === "undefined" \|\| Notification\.permission !== "granted"\) return;/);
 });
+
+// ---- タスク進捗チップ(ui-progress-chip): ヘッダー右上に「✓ y / x(作業中 n)」を常時表示 ----
+// y=done件数 / x=open+claimed+doneの合計 / n=claimed件数。データ源は /api/state の taskList のみ。
+test("UI: 進捗チップがヘッダー右上にあり、y/x計算と作業中ハイライトを持つ", () => {
+  assert.match(html, /<div id="progress-wrap">/);
+  assert.match(html, /<div id="progress-chip"/);
+  assert.match(html, /function progressStats\(state\) \{/);
+  assert.match(html, /done: l\.done\.length, total: l\.open\.length \+ l\.claimed\.length \+ l\.done\.length, claimed: l\.claimed\.length/);
+  assert.match(html, /chip\.textContent = "✓ " \+ s\.done \+ " \/ " \+ s\.total \+ \(s\.claimed \? "\(作業中 " \+ s\.claimed \+ "\)" : ""\)/);
+  assert.match(html, /chip\.classList\.toggle\("on", s\.claimed > 0\)/);
+  assert.match(html, /syncProgressChip\(lastState\);/);
+});
+
+test("UI: 進捗チップのクリックでパネル(作業中一覧+直近完了10件)が出る", () => {
+  assert.match(html, /function renderProgressPanel\(\) \{/);
+  assert.match(html, /\[\.\.\.l\.done\]\.reverse\(\)\.slice\(0, 10\)/);
+  assert.match(html, /\$\("progress-chip"\)\.onclick/);
+});
+
+test("UI: 進捗チップはSSE更新で即時再描画される(refreshSoon経路に乗る)", () => {
+  // renderAllはSSE refreshSoonの再描画から呼ばれ、syncProgressChipはその中で呼ばれる
+  const ra = html.indexOf("function renderAll() {");
+  const sp = html.indexOf("syncProgressChip(lastState);");
+  assert.ok(ra >= 0 && sp > ra, "renderAll内でsyncProgressChipが呼ばれる");
+});
