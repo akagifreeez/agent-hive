@@ -50,8 +50,6 @@ test("#30: done済みIDの再createは許可(現行契約・自動再投入運�
   assert.equal(existsSync(join(ws, "tasks", "open", "reuse.md")), true, "openへ再起票される");
   rmTree(ws);
 });
-  rmTree(ws);
-});
 
 test("#30: open中のIDの再createも従来どおり失敗する(後方互換)", () => {
   const ws = mktmp();
