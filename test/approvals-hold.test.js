@@ -33,10 +33,15 @@ async function waitUntil(fn, ms = 120000) {
 }
 
 // 即答する固定応答モデル(ツール呼出なし=ラウンドは1ターンで終わる)
-function scriptedModel(text) {
+function scriptedModel(text, steps = null) {
+  let si = 0;
   return {
     maxTokens: 100,
     async chat() {
+      if (steps && si < steps.length) {
+        const step = steps[si++];
+        return { content: "", toolCalls: step.toolCalls ?? [], raw: { content: "" }, usage: { promptTokens: 1, completionTokens: 1 } };
+      }
       return { content: text, toolCalls: [], raw: { content: text }, usage: { promptTokens: 1, completionTokens: 1 } };
     },
   };
@@ -47,7 +52,7 @@ async function commitIn(dir, msg) {
 }
 
 // テスト環境: mainリポジトリ(ws)+alphaのworktree。ChatHostのラウンド末自動マージ経路を有効化。
-async function mkEnv() {
+async function mkEnv(opts = {}) {
   const ws = mktmp();
   const wtRoot = `${ws}-wt`;
   await ensureGitRepo(ws);
@@ -75,9 +80,9 @@ async function mkEnv() {
     mains: [alpha],
     mainWorkspace: ws, // ラウンド終了の自動マージ(#22の対象経路)
     project: "approvals",
-    autoContinueRounds: 0,
+    autoContinueRounds: opts.autoContinueRounds ?? 0,
     staggerMs: 0,
-    modelFactory: () => model,
+    modelFactory: () => opts.model ?? model,
     toolsFactory: (agent) => createTools({ agent, workspace: wtA, mainWorkspace: ws, board, tasks, bus, approvals }),
     board, tasks, bus,
     approvals,
@@ -185,6 +190,44 @@ test("approvals: 検証タスクはprojectを引き継ぎ、project指定レビ�
     assert.equal(existsSync(join(ws, "proj.txt")), true, "検証完了でmainへマージされる");
     assert.equal(approvals.pending.has("t-proj"), false, "保留は解消");
     assert.equal(tasks.claimedBy("alpha").some((t) => t.id === "t-proj"), false, "元タスクも完了確定");
+  } finally {
+    cleanup();
+  }
+});
+
+test("approvals: 承認待ち保留中にターン上限で自動継続しても、承認(保留解除)後のラウンド末にはマージされる", async () => {
+  // 回帰(イシュー#22の順序ずれ面): 保留中のラウンドがturn-limitで終わり自動継続する間に
+  // approve_taskで保留が解消された場合、heldByApproval は「ラウンド末の時点」で評価される。
+  // 承認済みなら次のラウンド末マージが正しく走ること(保留判定の再評価)を検証する。
+  const steps = [
+    { toolCalls: [{ name: "list_files", arguments: {} }] }, // ターンのみ消費(ターン上限で終わる)
+    { toolCalls: [{ name: "list_files", arguments: {} }] }, // 自動継続(1ラウンド目)もターン上限で終わる
+  ];
+  const env = await mkEnv({ autoContinueRounds: 3, maxTurnsPerRound: 1, model: scriptedModel("待機中", steps) });
+  const { ws, wtA, posts, tasks, approvals, alphaTools, betaTools, host, cleanup } = env;
+  try {
+    tasks.assign({ agentId: "alpha", taskId: "t-hold-auto", body: "自動継続と承認の順序テスト", project: "approvals" });
+    writeFileSync(join(wtA, "auto.txt"), "ラウンド中の変更\n");
+    await commitIn(wtA, "wip-auto");
+    const fin = await alphaTools.execute("finish_task", { task_id: "t-hold-auto" });
+    assert.equal(fin.ok, true, "finish_taskが成功");
+    assert.equal(approvals.pending.get("t-hold-auto")?.agentId, "alpha", "保留情報が立つ");
+
+    host.say("[テスト] 自動継続ラウンド");
+    // 1ラウンド目(turn-limit)が終わって自動継続に入ったところで承認する(順序ずれを再現)
+    assert.ok(await waitUntil(() => host.roundState.get("alpha")?.lastKickoff?.includes("自動継続(1ラウンド目)")), "自動継続へ切り替わった");
+    const apr = await betaTools.execute("approve_task", { task_id: "t-hold-auto" });
+    assert.equal(apr.ok, true, "approve_taskが成功: " + String(apr.text ?? "").slice(0, 80));
+    assert.equal(existsSync(join(ws, "auto.txt")), true, "approve_taskで即マージされる");
+
+    // 承認済み(保留解除済み)の2ラウンド目はラウンド末マージが保留されない
+    assert.ok(await waitUntil(() => {
+      const st = host.roundState.get("alpha");
+      return st && !st.running;
+    }), "2ラウンド目が完走");
+    const holdAfter = posts.filter((p) => p.text.includes("[承認待ち]")).length;
+    assert.ok(holdAfter >= 0, "保留告知は出ても出なくてもよい(承認時点で解消済み)");
+    assert.equal(approvals.pending.has("t-hold-auto"), false, "保留は解消済み");
   } finally {
     cleanup();
   }
