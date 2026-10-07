@@ -27,7 +27,7 @@ const SMOKE_TEST_FILE = "test/exec.test.js"; // 高速(2秒前後)・依存ゼ�
  * @param {Object} o
  * @param {string} o.workspace
  * @param {import("./tasks.js").TaskBlackboard} o.tasks
- * @param {import("node:events").EventEmitter} o.bus
+ * @param {import("./board.js").Bus} o.bus
  * @param {number} [o.intervalSec]
  * @param {string|null} [o.testCommand] テストプローブのコマンド(未指定なら既定スモーク)
  * @param {{tests?: "smoke"|"full"|"off"}} [o.probes] プローブ種別(discovery.probes)
