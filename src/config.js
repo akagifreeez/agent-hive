@@ -16,8 +16,8 @@ import { legacyModelSection } from "./model/catalog.js";
  * @property {{maxTurns?: number}} loop
  * @property {{timeoutSec?: number}} runner
  * @property {{port: number, monitorPort: number, monitorHost: string}} ui UI/モニタのポート(HIVE_UI_PORT/HIVE_MONITOR_PORTで上書き可)
- * @property {{intervalSec?: number, testCommand?: string|null}} discovery 発見器(テストプローブ等)の設定
- * @property {{testMaxConcurrent?: number}} exec テスト系コマンド(npm test/node --test)のプロセス横断セマフォ上限(未設定で1。テスト以外のコマンドには影響しない)
+ * @property {{intervalSec?: number, testCommand?: string|null, probes?: {tests?: "smoke"|"full"|"off"}}} discovery 発見器(テストプローブ等)の設定。testCommand省略時は軽量スモーク(単一テスト)を回す。probes.tests="full"でフルスイート(旧挙動=テストコマンド明示と同義)、"off"で停止
+ * @property {{testMaxConcurrent?: number}} exec テスト実行系の設定。testMaxConcurrentはテスト系コマンドのプロセス横断同時実行上限(既定1=直列)。複数ワーカーの検証+発見器プローブの重なりでマシンが飽和するのを防ぐ
  * @property {{askTimeoutSec?: number}} permissions
  * @property {{maxTokensPerRun?: number}} budget 1ランあたりのトークン上限
  * @property {{thresholdPercent?: number, keepRecentToolResults?: number}} compact 圧縮の設定
@@ -58,7 +58,8 @@ export function loadConfig(configPath) {
     agents: (raw.agents ?? []).map((a) => ({ ...a, personaPath: resolve(ROOT, a.persona ?? `agents/${a.id}.md`) })),
     loop: { maxTurns: 30, ...(raw.loop ?? {}) },
     runner: { timeoutSec: 480, ...(raw.runner ?? {}) },
-    ui: { port: 7789, monitorPort: 7791, monitorHost: "0.0.0.0", ...(raw.ui ?? {}) },    discovery: { intervalSec: 30, testCommand: null, ...(raw.discovery ?? {}) },
+    ui: { port: 7789, monitorPort: 7791, monitorHost: "0.0.0.0", ...(raw.ui ?? {}) },
+    discovery: { intervalSec: 30, testCommand: null, probes: { tests: "smoke" }, ...(raw.discovery ?? {}) },
     exec: { testMaxConcurrent: 1, ...(raw.exec ?? {}) },
     permissions: {
       askTimeoutSec: 120,
