@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
-import { isTestCommand, runTestCommand, configureTestSemaphore } from "./test-semaphore.js";
+import { runTestCommand } from "./test-semaphore.js";
 
 // config.exec.testMaxConcurrent の反映用(runner起動時に呼ぶ)。空でも既定(1)へ戻す。
 export function applyTestSemaphoreConfig(execCfg) {
@@ -89,9 +89,7 @@ export async function detectShell() {
 export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null, keep = "head" }) {
   // テスト系コマンド(npm test / node --test 等)はプロセス横断セマフォで直列化する
   // (exec-test-semaphore)。非テストコマンドは従来どおり即実行(影響ゼロ)。
-  if (isTestCommand(command)) {
   return runTestCommand({ command, cwd, timeoutMs, outputLimit, env, keep }, runCommandInner);
-  }
   return runCommandInner({ command, cwd, timeoutMs, outputLimit, env, keep });
 }
 
