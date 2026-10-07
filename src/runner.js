@@ -703,6 +703,13 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
   tasks.seed(config.scenario.tasks);
   bus.emit("scenario.started", { name: config.scenario.name, tasks: config.scenario.tasks.map((t) => t.id) });
 
+  // 起動時のゾンビclaim回収(runScenario): チャット(runChat)と同じく、プロセス再起動で
+  // claimedのまま宙吊りになったタスクを解放する(2026-10-07 hive-lab-dash実害: alpha/delta
+  // 二重宙吊りでidle-claim待ちデッドロック)。seedより先に回収し、再投入と干渉しない。
+  for (const z of tasks.list().claimed) {
+    tasks.releaseOne(z.agent, z.id, "[起動時回収] 前回走行のラウンド消滅により解放しました(宙吊りclaim回収)");
+  }
+
   // v3: エージェント別worktree(作業の隔離)
   const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
   const worktreePaths = await setupWorktrees({
