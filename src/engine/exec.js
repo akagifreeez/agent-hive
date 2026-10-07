@@ -76,6 +76,7 @@ export async function detectShell() {
   return (cachedShell = "cmd");
 }
 
+
 /**
  * コマンドを実行する(outputLimitで出力を丸める)。cwd省略時はプロセスのカレント。
  * 子プロセスの環境はscrubEnvで鍵っぽい変数を落として渡す(env引数は明示割り当てとして上書き)。
@@ -97,24 +98,6 @@ export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit 
  */
 async function runCommandInner({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null, keep = "head" }) {
   const kind = await detectShell();
-  let release = null;
-  let waitedMs = 0;
-  if (isTestCommand(command)) {
-    const waitedAt = Date.now();
-    release = await acquireTestSlot(() => releaseTestSlot());
-    waitedMs = Date.now() - waitedAt;
-    if (waitedMs > timeoutMs) {
-      release();
-      return {
-        ok: false,
-        text: [
-          `同時実行制限で待機タイムアウト(${Math.round(waitedMs / 1000)}秒待機・上限${getTestMaxConcurrent()}件): テスト系コマンド(npm test等)はプロセス横断のセマフォで直列化されています。`,
-          "対処: 上限は hive.config.json の exec.testMaxConcurrent で上げられます。または他のテスト実行の完了をお待ちください。",
-          "",
-        ].join("\n"),
-      };
-    }
-  }
   const childEnv = scrubEnv(process.env, env);
   const child =
     kind === "bash"
@@ -132,22 +115,18 @@ async function runCommandInner({ command, cwd, timeoutMs = 30000, outputLimit = 
   child.stdout.on("data", append);
   child.stderr.on("data", append);
   return await new Promise((res) => {
-    const finish = (value) => {
-      if (release) release();
-      res(value);
-    };
     const timer = setTimeout(() => {
       child.kill();
-      finish({ ok: false, text: `タイムアウト(${timeoutMs}ms)で中断:\n${out.slice(0, outputLimit)}` });
+      res({ ok: false, text: `タイムアウト(${timeoutMs}ms)で中断:\n${out.slice(0, outputLimit)}` });
     }, timeoutMs);
     if (timer.unref) timer.unref();
     child.on("error", (err) => {
       clearTimeout(timer);
-      finish({ ok: false, text: `起動エラー: ${err.message}` });
+      res({ ok: false, text: `起動エラー: ${err.message}` });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      finish({ ok: code === 0, text: `exit=${code}\n${out.slice(0, outputLimit)}` });
+      res({ ok: code === 0, text: `exit=${code}\n${out.slice(0, outputLimit)}` });
     });
   });
 }

@@ -168,10 +168,11 @@ export function classifyFailures(report, knownFailures = []) {
   const knownList = Array.isArray(knownFailures) ? knownFailures : [];
   const keyOf = (file, name) => (file ? normalizeTestFile(file) + "::" + name : "*::" + name);
   const knownKeys = new Set(knownList.map((k) => keyOf(k.file, k.name)));
+  const knownNames = new Set(knownList.filter((k) => !k.file).map((k) => k.name)); // file省略=名前だけで照合(ワイルドカード)
   const known = [];
   const fresh = [];
   for (const f of report.failures) {
-    if (knownKeys.has(keyOf(f.file, f.name))) known.push(f);
+    if (knownKeys.has(keyOf(f.file, f.name)) || knownNames.has(f.name)) known.push(f);
     else fresh.push(f);
   }
   const total = report.tests > 0 ? report.tests : report.failures.length;
