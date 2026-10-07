@@ -2,7 +2,7 @@
 // 仕事そのもの。claimは「open→claimedへのrename」=同一ボリュームで原子的なので、
 // 複数エージェントが同時に請求しても二重請求が起きない。
 import { mkdirSync, readdirSync, renameSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 
 /**
  * タスク1件の契約(list()/UI/LLM注入の共通形)。実体は tasks/{open,claimed,done} のMarkdown。
@@ -32,7 +32,13 @@ export class TaskBlackboard {
   }
 
   seed(tasks) {
-    for (const t of tasks ?? []) this.create(t);
+    for (const t of tasks ?? []) {
+      // done/の完了済みidは再起票しない(blog lab実害: 再実行時にdoneタスクがopenへ
+      // 複製され、dependsOnの依存解決が「openの複製」に阻まれて後続タスクが永遠に
+      // 請求不能になる)。claimed中はcreateの既存重複判定に従う(従来どおり拒否)。
+      if (readdirSync(this.done).some((f) => f.endsWith('--' + t.id + '.md'))) continue;
+      this.create(t);
+    }
   }
 
   /**
@@ -313,7 +319,9 @@ export class TaskBlackboard {
         // 同idのopenが既にある(二重宙吊りの先着分/手動投入等)場合はrenameせず、
         // この重複実体をdone/へ掃除する(dash lab実害: alpha/delta二重宙吊りで解放時に
         // 1件だけ戻り、残り1件がclaimedのまま宙吊り続行→idle-claim待ちデッドロック)。
-        renameSync(src, join(this.done, src.split(/[\/]/).pop()));
+        // basenameはWindows安全に: split(/[\/]/)はバックスラッシュ区切りを分割できず
+        // フルパス連結→ENOENTになる実害。path.basenameを使う。
+        renameSync(src, join(this.done, basename(src)));
         this.bus?.emit("task.released", { agent: agentId, taskId });
         return true;
       }
