@@ -100,7 +100,7 @@
           { "file": "test/cli.test.js", "name": "CLI: cancel/release/reopen/auditが実サーバーに対して動く", "area": "cli", "note": "実サーバー系の負荷依存" }
         ]
       }
-    }
+    },
     "testCommand": "npm test"
   },
   "permissions": {
