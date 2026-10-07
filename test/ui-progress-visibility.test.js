@@ -81,3 +81,21 @@ test("UI: 進捗チップはSSE更新で即時再描画される(refreshSoon経�
   const sp = html.indexOf("syncProgressChip(lastState);");
   assert.ok(ra >= 0 && sp > ra, "renderAll内でsyncProgressChipが呼ばれる");
 });
+
+// SSE(task.created/claimed/finished/merge.completed)→refreshSoon→refresh→renderAll→syncProgressChip
+// の鎖を静的に固定する(チップがイベントで即時更新される構造の担保)。
+test("UI: 進捗チップはSSE 4イベントからrefreshSoon→refresh→renderAll→syncProgressChipの鎖で更新される", () => {
+  for (const ev of ["task.created", "task.claimed", "task.finished", "merge.completed"]) {
+    assert.ok(html.includes(`"${ev}"`), `SSEハンドラに${ev}が無い`);
+  }
+  // refreshSoon(デバウンス)がrefresh()を呼ぶ
+  const rs = html.indexOf("function refreshSoon() {");
+  assert.ok(rs >= 0, "refreshSoon定義が無い");
+  assert.match(html.slice(rs, rs + 200), /refresh\(\)/, "refreshSoon内でrefresh()が呼ばれない");
+  // refresh()がlastStateを取り直してrenderAllする
+  const rf = html.indexOf("async function refresh() {");
+  assert.ok(rf >= 0, "refresh定義が無い");
+  assert.match(html.slice(rf, rf + 300), /lastState = await/, "refreshがlastStateを更新しない");
+  assert.match(html.slice(rf, rf + 400), /renderAll\(\)/, "refreshがrenderAllを呼ばない");
+  // renderAllがsyncProgressChipを呼ぶ(既存テストの補完: 位置関係は上のテストで担保済み)
+});
