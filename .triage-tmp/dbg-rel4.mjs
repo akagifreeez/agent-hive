@@ -1,0 +1,20 @@
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { TaskBlackboard } from "../src/engine/tasks.js";
+import { Bus } from "../src/engine/board.js";
+
+const ws = mkdtempSync(join(tmpdir(), "hive-rel4-"));
+const tasks = new TaskBlackboard(ws, new Bus());
+console.log("done dir exists before:", existsSync(join(ws, "tasks", "done")));
+tasks.create({ id: "t3", body: "b" });
+tasks.claim({ id: "a1", role: null });
+console.log("done dir exists after create:", existsSync(join(ws, "tasks", "done")));
+mkdirSync(join(ws, "tasks", "done"), { recursive: true });
+writeFileSync(join(ws, "tasks", "claimed", "a2--t3.md"), "b\n");
+writeFileSync(join(ws, "tasks", "open", "t3.md"), "open b\n");
+const ok = tasks.releaseOne("a2", "t3", "note");
+console.log("dup-open release ->", ok);
+console.log("done:", readdirSync(join(ws, "tasks", "done")));
+console.log("claimed:", readdirSync(join(ws, "tasks", "claimed")));
+rmSync(ws, { recursive: true, force: true });

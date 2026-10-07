@@ -120,7 +120,7 @@ export function parseTap(output) {
       const block = section.slice(starts[i].at, end >= 0 ? end : undefined);
       const nameLine = block.match(/^\s*[✖xX]\s+(.+?)(?:\s*\(\d[\d.]*ms\))?\s*$/m);
       if (!nameLine) continue;
-      const errLine = block.match(/^\s{0,4}((?:[A-Za-z_$][\w$]*)?(?:Error|Exception))(?:\s*\[[A-Z_]+\])?:?\s*(.*)$/m);
+      const errLine = block.match(/^\s{0,4}([A-Za-z_$][\w$]*(?:Error|Exception)?)(?:\s*\[[A-Z_]+\])?:?\s*(.*)$/m);
       report.failures.push({
         name: nameLine[1].trim(),
         file: normalizeTestFile(starts[i].file),
