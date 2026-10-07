@@ -1,5 +1,6 @@
 // 仕事の発見器(blackboardへの自動投入)。
 // ① テストプローブ: 定期実行し、失敗→fix-test-failuresタスク生成/復旧→自動解決。
+//    既定は軽量スモーク(単一テストファイル)を回す(フルスイートは検証タスク/設定明示時だけ。perf-probe)。
 //    ただしimpl等の通常タスクが残っている間はテスト失敗を仕事化しない(未マージ起因の偽失敗防止)。
 // ② diffプローブ: `git diff reviewed main`(前回レビュー済み地点〜現main)に変化があれば
 //    review-changesタスク生成。レビュー完了でreviewedタグをmainへ前進させる。
@@ -18,7 +19,24 @@ export const DISTILL_TASK_ID = "distill-learnings";
 export const README_TASK_ID = "update-readme";
 const DISTILL_MARKER = "memory/.distilled"; // workspace起点。1行=処理済みのdoneタスクid
 
-export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCommand, exec = runCommand }) {
+// プローブ構成(discovery配下で上書き可)。既定は軽量スモーク: 高速な単一テストを
+// intervalSec毎に回してmainの健在性だけを見張る。フルスイート(probes.tests="full")は
+// 検証タスク(verify)や設定明示時だけ回す(マシン飽和対策: perf-probe-and-semaphore)。
+const SMOKE_TEST_FILE = "test/exec.test.js"; // 高速(2秒前後)・依存ゼロの実テスト
+/**
+ * @param {Object} o
+ * @param {string} o.workspace
+ * @param {import("./tasks.js").TaskBlackboard} o.tasks
+ * @param {import("./board.js").Bus} o.bus
+ * @param {number} [o.intervalSec]
+ * @param {string|null} [o.testCommand] テストプローブのコマンド(未指定なら既定スモーク)
+ * @param {{tests?: "smoke"|"full"|"off"}} [o.probes] プローブ種別(discovery.probes)
+ * @param {(o: any) => Promise<{ok: boolean, text: string}>} [o.exec]
+ */
+export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCommand, probes = null, exec = runCommand }) {
+  const mode = String(probes?.tests ?? (testCommand ? "custom" : "smoke")); // "smoke"|"full"|"custom"|"off"
+  // smoke=軽量スモーク(既定) / full=旧挙動のフルスイート / custom=testCommand明示 / off=プローブ停止
+  const command = testCommand ?? (mode === "smoke" ? `node --test ${SMOKE_TEST_FILE}` : mode === "full" ? "npm test" : null);
   let stopped = false;
   let busy = false;
 
@@ -42,8 +60,8 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
   }
 
   async function probeTests() {
-    if (!testCommand) return;
-    const r = await exec({ command: testCommand, cwd: workspace, timeoutMs: 120000, outputLimit: 3000 });
+    if (mode === "off" || !command) return;
+    const r = await exec({ command, cwd: workspace, timeoutMs: 120000, outputLimit: 3000 });
     if (r.ok) {
       if (tasks.autoResolve(FIX_TASK_ID, "自動解決: テストが通るようになった(発見器が確定)")) {
         bus.emit("discovery.resolved", { taskId: FIX_TASK_ID });
@@ -57,7 +75,7 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
     }
     tasks.create({
       id: FIX_TASK_ID,
-      body: `mainブランチでテストが失敗している。失敗出力を読み、原因を特定して修正し、テストを通せ。\n\n## 発見器が捉えた最新の失敗出力(末尾)\n\`\`\`\n${r.text.slice(-2500)}\n\`\`\`\n- 自分の作業ディレクトリで \`git merge main\` して最新を取り込んでから着手すること。\n- 修正後 \`${testCommand}\` を通し、ボードへ報告して finish_task。`,
+      body: `mainブランチでテストが失敗している。失敗出力を読み、原因を特定して修正し、テストを通せ。\n\n## 発見器が捉えた最新の失敗出力(末尾)\n\`\`\`\n${r.text.slice(-2500)}\n\`\`\`\n- 自分の作業ディレクトリで \`git merge main\` して最新を取り込んでから着手すること。\n- 修正後 \`${command}\` を通し、ボードへ報告して finish_task。`,
     });
     bus.emit("discovery.created", { taskId: FIX_TASK_ID });
   }

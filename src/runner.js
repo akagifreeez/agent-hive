@@ -10,6 +10,7 @@ import { createTools } from "./engine/tools.js";
 import { runAgentLoop } from "./engine/loop.js";
 import { PermissionGate } from "./engine/permissions.js";
 import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
+import { applyTestSemaphoreConfig } from "./engine/exec.js";
 import { setupWorktrees } from "./engine/worktree.js";
 import { respawnUnfinishedWork } from "./engine/respawn.js";
 import { runCommand } from "./engine/exec.js";
@@ -57,6 +58,17 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   // 起動時のゾンビclaim回収: プロセス再起動で走行中ラウンドは全て死んでいるため、claimedのまま
   // 残ったタスクは誰にも進められない(idle-claim待ちのデッドロック)。起動直後なので全claimedは
   // ゾンビと見なして解放する(task.releasedが出るが、この時点でラウンドは無いので無害)
+  // プロセスガードのboard可視化(long-run-resilience): index.jsのwireCrashGuardが
+  // "crash.guarded"を出すので、ここでメインボードへ[システム]投稿する(黙殺防止)。
+  // 頻度警告(process.burst相当)も同じく可視化。
+  bus.on("crash.guarded", (e) => {
+    if (e.kind === "rate.warn") return; // 頻度警告は別メッセージで流す
+    try { mainBoard.post("system", `[プロセス警告] ${e.kind} を捕捉(プロセスは生存しています): ${String(e.message).slice(0, 300)}`); } catch { /* 投稿失敗でガードを止めない */ }
+  });
+  bus.on("crash.rate", (e) => {
+    try { mainBoard.post("system", `[プロセス警告][異常頻度] ガード対象エラーがしきい値を超えました。ログ run-chat.err.log を確認してください(${String(e.body ?? "").slice(0, 150)})`); } catch { /* 同上 */ }
+  });
+
   const zombies = tasks.list().claimed;
   for (const t of zombies) {
     tasks.release(t.agent, "[起動時回収] プロセス再起動により走行中ラウンドが消滅したため解放しました");
@@ -88,10 +100,12 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     return parts.length ? parts.join("\n\n") : null;
   };
 
+  applyTestSemaphoreConfig(config.exec);
   const discovery = startDiscovery({
     workspace: config.workspace, tasks, bus,
     intervalSec: config.discovery?.intervalSec ?? 30,
     testCommand: config.discovery?.testCommand,
+    probes: config.discovery?.probes,
   });
   bus.on("merge.completed", () => void discovery.tick());
 
@@ -331,6 +345,9 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     const t = threads.get(name);
     if (!t) return { error: `スレッド ${name} は開いていません` };
     threads.delete(name);
+    // 閉じたスレッドのホストを破棄(bus購読解除+起床遮断)。これが無いと
+    // 閉鎖後も task.created/task.released でワーカーが起こされ続ける(イシュー#29)。
+    try { t.host?.dispose?.(); } catch (e) { console.error("[closeThread] dispose失敗", e); }
     writeRegistry();
     bus.emit("thread.closed", { name });
     t.board.post("system", `[スレッド終了] ${name} を閉じました。成果物とログは保持されています(再open時は履歴ごと戻ります)。`);
@@ -667,12 +684,14 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
   });
   bus.emit("worktrees.ready", { paths: Object.values(worktreePaths) });
 
+  applyTestSemaphoreConfig(config.exec);
   const discovery = startDiscovery({
     workspace: config.workspace,
     tasks,
     bus,
     intervalSec: config.discovery?.intervalSec ?? 30,
     testCommand: config.discovery?.testCommand,
+    probes: config.discovery?.probes,
   });
   // マージでmainが動くたびに即時プローブ(レビュータスクの立ち遅れ防止)
   bus.on("merge.completed", () => void discovery.tick());
