@@ -67,19 +67,6 @@ export class McpHost {
       this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
       return { ok: false, error: err.message };
     }
-<<<<<<< HEAD
-=======
-    // イシュー#27: コマンドが存在しない等はspawn自体は成功し、後から非同期のerrorイベント(ENOENT等)が
-    // 発火する。未処理のまま放置するとhiveプロセス全体が落ちるため、ここで捕捉して起動失敗として扱う
-    // (実装契約「起動失敗してもhiveは続行」を実際に満たす)。
-    this.spawnError = null;
-    this.child.on("error", (err) => {
-      this.spawnError = err;
-      this.failPending(`MCPサーバー ${this.name} の起動に失敗: ${err.message}`);
-    });
-    // stdinへの書き込み口のエラーも握り潰す(起動失敗後のEPIPE等でhiveが落ちないように)
-    this.child.stdin.on("error", () => {});
->>>>>>> 6986172 (wip: chat-round)
     let out = "";
     this.child.stdout.on("data", (d) => {
       out += d.toString();
@@ -109,7 +96,11 @@ export class McpHost {
     /** @type {any} */ (this.child.stdout).unref?.();
     /** @type {any} */ (this.child.stderr).unref?.();
     this.child.on("exit", (code) => {
-      this.failPending(`MCPサーバー ${this.name} が終了しました(code=${code})`);
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(new Error(`MCPサーバー ${this.name} が終了しました(code=${code})`));
+      }
+      this.pending.clear();
     });
 
     try {
@@ -145,17 +136,12 @@ export class McpHost {
 
   async call(name, args) {
     const local = name.slice(`mcp__${this.name}__`.length);
-    try {
-      const r = await this.request("tools/call", { name: local, arguments: args ?? {} });
-      const text = (r.content ?? [])
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
-        .join(String.fromCharCode(10));
-      return { ok: !r.isError, text: text || "(空の結果)" };
-    } catch (err) {
-      // 接続断・起動失敗・タイムアウトはツール失敗(ok:false)として返す(例外を外へ漏らさない)
-      return { ok: false, text: `MCP呼び出し失敗: ${err.message}` };
-    }
+    const r = await this.request("tools/call", { name: local, arguments: args ?? {} });
+    const text = (r.content ?? [])
+      .filter((c) => c.type === "text")
+      .map((c) => c.text)
+      .join("\n");
+    return { ok: !r.isError, text: text || "(空の結果)" };
   }
 
   request(method, params) {
@@ -177,17 +163,6 @@ export class McpHost {
     } catch {}
   }
 
-<<<<<<< HEAD
-=======
-  // 起動失敗・切断時に全pending要求を失敗させる(タイマーも解放)
-  failPending(message) {
-    for (const p of this.pending.values()) {
-      clearTimeout(p.timer);
-      p.reject(new Error(message));
-    }
-    this.pending.clear();
-  }
->>>>>>> 6986172 (wip: chat-round)
   stop() {
     try { this.child?.kill(); } catch {}
   }
