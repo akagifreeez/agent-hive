@@ -53,6 +53,8 @@ export class McpHost {
     this.nextId = 1;
     this.pending = new Map(); // id => {resolve, reject, timer}
     this.buf = "";
+    /** @type {string | null} 起動失敗(子のerrorイベント)の記録。失敗後のrequestは即座に拒否する */
+    this.childError = null;
   }
 
   async start() {
@@ -102,6 +104,20 @@ export class McpHost {
       }
       this.pending.clear();
     });
+    // #27: 起動コマンドが存在しない等の子プロセスの非同期error(ENOENT等)。ここを捕まえないと
+    // Unhandled 'error' event でhiveプロセス全体が落ちる。起動失敗してもhiveは続行する(契約)。
+    // pending要求は全てok:false系のrejectへ回し、以後のrequestも即座に失敗させる(不整合防止)。
+    this.child.on("error", (err) => {
+      this.childError = err.message;
+      this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(new Error("MCPサーバー " + this.name + " の起動に失敗: " + err.message));
+      }
+      this.pending.clear();
+    });
+    // stdinへの書き込みもEPIPEで投げることがある(error伝播を止めるだけが目的)
+    this.child.stdin?.on?.("error", () => {});
 
     try {
       await this.request("initialize", {
@@ -153,6 +169,13 @@ export class McpHost {
         reject(new Error(`MCP応答タイムアウト(${this.timeoutMs}ms): ${method}`));
       }, this.timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
+      // #27: 起動失敗済みの子への書き込みは無意味。タイムアウトまで待たせず即失敗させる
+      if (this.childError) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(new Error("MCPサーバー " + this.name + " は起動失敗済み: " + this.childError));
+        return;
+      }
       this.child.stdin.write(msg);
     });
   }
