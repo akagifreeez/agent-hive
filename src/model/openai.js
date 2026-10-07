@@ -144,17 +144,13 @@ export class OpenAIModel {
           parsed = await consumeStream(res, onDelta);
         } catch (err) {
           // ストリーム途中切断もリトライ対象(再試行は最初から)。
-<<<<<<< HEAD
-          // undiciのTypeError: terminated(Fetch.onAborted・TLS切断)はここで例外として観測されるため、
-          // 未捕捉rejectionへ抜けさせずリトライ契約へ正規化して飲み込む
+          // ストリーム途中切断もリトライ対象(再試行は最初から)。
+          // undiciの中断系(TypeError: terminated / Fetch.onAborted / ECONNRESET等)を
+          // ネットワーク系として正規化してリトライ契約へ乗せる(long-run-resilience:
+          // 2026-10-04のプロセス死対策)。中断観測の痕跡も採る(HIVE_DEBUG_FILE時)。
+          // リトライし切ったら行動化エラー(ループが次の行動を決められる形)として投げる
           if (isAbortRelated(err)) noteAborted(err);
           if (isRetryableNetworkError(err) && attempt <= RETRY_MAX_RETRIES) {
-=======
-          // undiciの中断系(TypeError: terminated / Fetch.onAborted / ECONNRESET等)を
-          // ネットワーク系として正規化(long-run-resilience: 2026-10-04のプロセス死対策)。
-          // リトライし切ったら行動化エラー(ループが次の行動を決められる形)として投げる
-          if (attempt <= RETRY_MAX_RETRIES) {
->>>>>>> agent/process-guard-impl
             await modelSleep(computeRetryDelay(attempt));
             continue;
           }
