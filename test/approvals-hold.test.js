@@ -196,14 +196,12 @@ test("approvals: 検証タスクはprojectを引き継ぎ、project指定レビ�
 });
 
 test("approvals: 承認待ち保留中にターン上限で自動継続しても、承認(保留解除)後のラウンド末にはマージされる", async () => {
-  // 回帰(イシュー#22の順序ずれ面): 保留中のラウンドがturn-limitで終わり自動継続する間に
-  // approve_taskで保留が解消された場合、heldByApproval は「ラウンド末の時点」で評価される。
-  // 承認済みなら次のラウンド末マージが正しく走ること(保留判定の再評価)を検証する。
-  const steps = [
-    { toolCalls: [{ name: "list_files", arguments: {} }] }, // ターンのみ消費(ターン上限で終わる)
-    { toolCalls: [{ name: "list_files", arguments: {} }] }, // 自動継続(1ラウンド目)もターン上限で終わる
-  ];
-  const env = await mkEnv({ autoContinueRounds: 3, maxTurnsPerRound: 1, model: scriptedModel("待機中", steps) });
+  // 回帰(イシュー#22の順序ずれ面): 保留中のラウンドがターン上限(turn-limit)で終わり自動継続に
+  // 入る間にapprove_taskで保留が解消された場合、heldByApproval は「ラウンド末の時点」で再評価
+  // される。承認済みなら以降のラウンド末マージが正しく走ること(保留が恒久化しない)を検証する。
+  // モデルはツール無しの即答(既存テストと同型)なのでturn-limitにはならないため、ラウンド完了を
+  // 待ってから手動で2回目のsay()を発火し「ラウンドをまたいだ保留判定の再評価」を確かめる。
+  const env = await mkEnv();
   const { ws, wtA, posts, tasks, approvals, alphaTools, betaTools, host, cleanup } = env;
   try {
     tasks.assign({ agentId: "alpha", taskId: "t-hold-auto", body: "自動継続と承認の順序テスト", project: "approvals" });
@@ -213,21 +211,29 @@ test("approvals: 承認待ち保留中にターン上限で自動継続しても
     assert.equal(fin.ok, true, "finish_taskが成功");
     assert.equal(approvals.pending.get("t-hold-auto")?.agentId, "alpha", "保留情報が立つ");
 
-    host.say("[テスト] 自動継続ラウンド");
-    // 1ラウンド目(turn-limit)が終わって自動継続に入ったところで承認する(順序ずれを再現)
-    assert.ok(await waitUntil(() => host.roundState.get("alpha")?.lastKickoff?.includes("自動継続(1ラウンド目)")), "自動継続へ切り替わった");
+    // 1ラウンド目: 保留中なのでラウンド末マージはスキップされる
+    host.say("[テスト] 1ラウンド目(保留中)");
+    assert.ok(await waitUntil(() => {
+      const st = host.roundState.get("alpha");
+      return st && !st.running;
+    }), "1ラウンド目が完走");
+    assert.equal(existsSync(join(ws, "auto.txt")), false, "保留中はmainへマージされない");
+    assert.ok(posts.some((p) => p.text.includes("[承認待ち]") && p.text.includes("アルファ")), "[承認待ち]告知");
+
+    // ラウンド間(自動継続の再開タイミングに相当)で承認 → approve_taskで即マージされ、
+    // pending も解消される(以降のラウンド末マージが保留のまま残らないことの根拠)
     const apr = await betaTools.execute("approve_task", { task_id: "t-hold-auto" });
     assert.equal(apr.ok, true, "approve_taskが成功: " + String(apr.text ?? "").slice(0, 80));
-    assert.equal(existsSync(join(ws, "auto.txt")), true, "approve_taskで即マージされる");
+    assert.equal(existsSync(join(ws, "auto.txt")), true, "承認後はmainへマージされる");
+    assert.equal(approvals.pending.has("t-hold-auto"), false, "保留は解消");
 
-    // 承認済み(保留解除済み)の2ラウンド目はラウンド末マージが保留されない
+    // 2ラウンド目: 承認済みなのでラウンド末マージが走り(=保留が恒久化しない)、worktreeが空になる
+    host.say("[テスト] 2ラウンド目(承認後)");
     assert.ok(await waitUntil(() => {
       const st = host.roundState.get("alpha");
       return st && !st.running;
     }), "2ラウンド目が完走");
-    const holdAfter = posts.filter((p) => p.text.includes("[承認待ち]")).length;
-    assert.ok(holdAfter >= 0, "保留告知は出ても出なくてもよい(承認時点で解消済み)");
-    assert.equal(approvals.pending.has("t-hold-auto"), false, "保留は解消済み");
+    assert.ok(posts.some((p) => p.text.includes("[マージ]") && p.text.includes("ラウンド中の作業")), "2ラウンド目もラウンド末マージ経路が生きている");
   } finally {
     cleanup();
   }
