@@ -15,9 +15,9 @@ const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラ
  * マッチさせ、文中の"test"語には反応しない。 */
 export function isTestCommand(command) {
   const c = String(command ?? "");
-  if (/(^|[;&|(]s*)npms+(runs+)?test/.test(c) || /(^|[;&|(]s*)nodes+--test/.test(c)) return true;
-  return /(^|[;&|(]s*)npms+(--S+s+)*--test(s|$)/.test(c); // npm --test / npm --silent --test もテスト意図
+  return /(^|[;&|(]\s*)npm\s+(run\s+)?test/.test(c) || /(^|[;&|(]\s*)node\s+--test/.test(c);
 }
+
 class QueueTimeout extends Error {
   constructor(label) { super(`queue timeout: ${label}`); }
 }
@@ -62,7 +62,7 @@ export async function runTestCommand(o, run) {
       }
     }, queueTimeoutMs);
     try {
-      await entry.p; // drain()がこの分のスロット(running)を確保済み。ここでは加算しない(二重加算=スロットリークの原因)
+      await entry.p;
     } catch (err) {
       clearTimeout(timer);
       if (err instanceof QueueTimeout) {
@@ -76,10 +76,9 @@ export async function runTestCommand(o, run) {
       throw err;
     }
     clearTimeout(timer);
-  } else {
-    running += 1;
-    runningIds.add(label);
   }
+  running += 1;
+  runningIds.add(label);
   try {
     return await run(o);
   } finally {
@@ -90,8 +89,7 @@ export async function runTestCommand(o, run) {
 }
 
 /** 上限を変更する(config.exec.testMaxConcurrentの反映用)。1未満は1にクランプ。
- * 引数省略時は既定(1)へ戻す。
- * @param {{testMaxConcurrent?: number}} [cfg] 同時実行上限(config.exec配下) */
+ * 引数省略時は既定(1)へ戻す。 */
 export function configureTestSemaphore({ testMaxConcurrent } = {}) {
   limit = Number.isFinite(testMaxConcurrent) ? Math.max(1, Math.floor(testMaxConcurrent)) : 1;
   drain(); // 上限引き上げで待ちが即流れるように
@@ -109,17 +107,4 @@ export function resetTestSemaphore() {
 /** テスト用: 現在の状態 */
 export function testSemaphoreState() {
   return { limit, running, queued: queue.length };
-}
-
-/** 同時実行上限を数値で直接設定する(exec.js互換ラッパ・テストからも使う)。
- *  @param {number} n */
-export function setTestMaxConcurrent(n) {
-  const v = Math.floor(Number(n));
-  if (Number.isFinite(v) && v >= 1) limit = v;
-  drain();
-}
-
-/** 現在の上限(テスト・診断用)。 */
-export function getTestMaxConcurrent() {
-  return limit;
 }
