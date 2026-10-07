@@ -15,9 +15,19 @@ const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラ
  * マッチさせ、文中の"test"語には反応しない。 */
 export function isTestCommand(command) {
   const c = String(command ?? "");
-  if (/(^|[;&|(]s*)npms+(runs+)?test/.test(c) || /(^|[;&|(]s*)nodes+--test/.test(c)) return true;
-  return /(^|[;&|(]s*)npms+(--S+s+)*--test(s|$)/.test(c); // npm --test / npm --silent --test もテスト意図
+  // npm test系: npm[オプション群] (run[オプション群])? test(:接尾)? / npm --test
+  //   - オプションはハイフン始まりのトークン群(--silent 等)
+  //   - "echo npm test" のような文中参照もテスト実行の意図として保守的に捕捉する
+  //   - 末尾の境界は  で判定(後続が "testx" 等の語なら弾く)
+  const opt = "(?:\s+-{1,2}[^\s]+)*"; // npm/node直後に続けるオプション群(0個以上)
+  const npmTest = new RegExp(
+    "(^|[;&|(]\s*)npm" + opt + "\s+(?:run" + opt + "\s+)?test(?::[A-Za-z0-9._-]+)?(?:\s|$)"
+    + "|(^|[;&|(]\s*)npm" + opt + "\s+--test(?:\s|$)"
+  ).test(c);
+  const nodeTest = new RegExp("(^|[;&|(]\s*)node" + opt + "\s+--test(?:\s|$)").test(c);
+  return npmTest || nodeTest;
 }
+
 class QueueTimeout extends Error {
   constructor(label) { super(`queue timeout: ${label}`); }
 }
@@ -50,7 +60,10 @@ function drain() {
  * @param {(o: any) => Promise<{ok: boolean, text: string}>} run 実行本体(=runCommand)。DI可能
  * @returns {Promise<{ok: boolean, text: string}>} */
 export async function runTestCommand(o, run) {
-  const queueTimeoutMs = o.queueTimeoutMs ?? 600000; // 既定10分
+  // 待ちタイムアウトは「待ち時間」で判定する(テスト本体のtimeoutMsは実行時間の予算)。
+  // 明示がなければ timeoutMs を待ち上限に転用する(呼び出し側のタイムアウト意図を尊重:
+  // timeoutMs=500で待たせたら500ms待ちで諦める、が直感どおりの挙動)。
+  const queueTimeoutMs = o.queueTimeoutMs ?? (Number.isFinite(o.timeoutMs) ? o.timeoutMs : 600000);
   const label = o.label ?? String(o.command ?? "").slice(0, 80);
   if (!isFree()) {
     const entry = enqueue(label);
