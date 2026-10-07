@@ -75,7 +75,7 @@ export class McpHost {
     this.spawnError = null;
     this.child.on("error", (err) => {
       this.spawnError = err;
-      this.failPending(`MCPサーバー ${this.name} の起動に失敗: ${err.message}`);
+      this.failPending(`MCPサーバー ${this.name} は起動できません: ${err.message}`);
     });
     // stdinへの書き込み口のエラーも握り潰す(起動失敗後のEPIPE等でhiveが落ちないように)
     this.child.stdin.on("error", () => {});
