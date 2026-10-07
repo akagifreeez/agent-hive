@@ -48,9 +48,9 @@ test("UI: 進捗チップがヘッダー右上にあり、y/x計算と作業中�
   assert.match(html, /syncProgressChip\(lastState\);/);
 });
 
-test("UI: 進捗チップのクリックでパネル(作業中一覧+直近完了10件)が出る", () => {
+test("UI: 進捗チップのクリックでパネル(作業中一覧+直近完了15件+他N件)が出る", () => {
   assert.match(html, /function renderProgressPanel\(\) \{/);
-  assert.match(html, /\[\.\.\.l\.done\]\.reverse\(\)\.slice\(0, 10\)/);
+  assert.match(html, /\[\.\.\.l\.done\]\.reverse\(\)\.slice\(0, 15\)/);
   assert.match(html, /\$\("progress-chip"\)\.onclick/);
 });
 
