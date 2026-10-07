@@ -49,6 +49,42 @@ test("McpHost: 起動しないサーバーはok:falseでhiveは止まらない",
   assert.equal(r.ok, false);
 });
 
+// fix#27: 子プロセス起動の非同期ENOENTがunhandledExceptionでhiveを落とさないこと。
+// 判定のみ・実サーバーを建てない(不存在コマンドは起動不可のため高速)。
+test("McpHost: 不存在コマンドの起動は例外を投げずok:false(uncaughtExceptionなしで完結)", async () => {
+  const bus = new Bus();
+  const seenFailed = [];
+  bus.on("mcp.failed", (p) => seenFailed.push(p));
+  const host = new McpHost({
+    name: "enoent",
+    command: process.platform === "win32" ? "definitely-not-exist-xyz-123" : "definitely-not-exist-xyz-123",
+    args: [],
+    bus,
+    timeoutMs: 5000,
+  });
+  let sawUncaught = null;
+  const origHandler = process.listeners("uncaughtException").slice(-1)[0];
+  if (origHandler) process.removeListener("uncaughtException", origHandler);
+  const onUncaught = (err) => { sawUncaught = err; };
+  process.on("uncaughtException", onUncaught);
+  let r = null;
+  let threw = null;
+  try {
+    r = await host.start();
+  } catch (err) {
+    threw = err;
+  } finally {
+    process.removeListener("uncaughtException", onUncaught);
+    if (origHandler) process.addListener("uncaughtException", origHandler);
+  }
+  assert.equal(threw, null, `start()が例外を投げた: ${threw?.message ?? ""}`);
+  assert.ok(sawUncaught === null, `uncaughtExceptionが発生: ${sawUncaught?.message ?? ""}`);
+  assert.equal(r?.ok, false);
+  assert.ok(seenFailed.some((p) => p.name === "enoent"), "mcp.failedがbusへ届く");
+  // 切断状態からのrequest()はpendingに積まずに即reject(unhandled rejectionにならない)
+  await assert.rejects(() => host.request("tools/list", {}), /切断状態/);
+});
+
 test("runChat: MCPツールがエージェントから使え、cron定期実行が走る", async () => {
   const ws = mktmp();
   const boardPosts = [];

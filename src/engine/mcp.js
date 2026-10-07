@@ -67,6 +67,18 @@ export class McpHost {
       this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
       return { ok: false, error: err.message };
     }
+    // 子プロセス自体の起動失敗(ENOENT等)の非同期errorでhiveが落ちないようにする(fix#27)
+    this.child.on("error", (err) => {
+      this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(err);
+      }
+      this.pending.clear();
+      this.child = null; // 切断状態へ。以後のrequest()は即reject
+    });
+    // stdinのEPIPE等でUnhandled 'error'にならないように握りつぶす
+    this.child.stdin?.on("error", () => {});
     let out = "";
     this.child.stdout.on("data", (d) => {
       out += d.toString();
@@ -116,7 +128,7 @@ export class McpHost {
       return { ok: true, tools: this.tools.length };
     } catch (err) {
       this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
-      try { this.child.kill(); } catch {}
+      try { this.child?.kill(); } catch {}
       return { ok: false, error: err.message };
     }
   }
@@ -145,6 +157,10 @@ export class McpHost {
   }
 
   request(method, params) {
+    if (!this.child) {
+      // 起動失敗・終了済みなど切断状態ではpendingに積まず即reject(fix#27)
+      return Promise.reject(new Error(`MCPサーバー ${this.name} は切断状態です(起動失敗または終了済み)`));
+    }
     const id = this.nextId++;
     const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
     return new Promise((resolve, reject) => {
@@ -153,13 +169,24 @@ export class McpHost {
         reject(new Error(`MCP応答タイムアウト(${this.timeoutMs}ms): ${method}`));
       }, this.timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
-      this.child.stdin.write(msg);
+      try {
+        if (!this.child.stdin || this.child.stdin.destroyed) {
+          throw new Error(`MCPサーバー ${this.name} のstdinは書き込み不可です`);
+        }
+        this.child.stdin.write(msg);
+      } catch (err) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(err);
+      }
     });
   }
 
   notify(method) {
     try {
-      this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method }) + "\n");
+      if (this.child?.stdin && !this.child.stdin.destroyed) {
+        this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method }) + "\n");
+      }
     } catch {}
   }
 
