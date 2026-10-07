@@ -43,7 +43,7 @@ test("#27: 起動失敗済みホストのcallはok:falseのツール結果を返
   const bus = new Bus();
   const host = new McpHost({ name: "missing3", command: missingCommand, args: [], bus, timeoutMs: 3000 });
   await host.start();
-  // callは内部でrequestを拒否するため、ツール実行側のcatchでok:falseへ正規化される契約
-  await assert.rejects(() => host.call("mcp__missing3__x", {}), /起動失敗/);
+  // callはrequestのrejectを{ok:false, text}へ正規化する契約(typedef・mcp.test.jsと一致)。rejectはしない
+  const out = await host.call("mcp__missing3__x", {});  assert.equal(out.ok, false, "callはok:falseへ正規化");  assert.match(String(out.text), /起動失敗/, "失敗理由がtextに載る");
   host.stop();
 });
