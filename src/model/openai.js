@@ -242,8 +242,13 @@ function readChunkWithIdleTimeout(reader) {
     timer = setTimeout(() => reject(new Error(`ストリームが${Math.round(idle / 1000)}秒間無出力です(stall)`)), idle);
   });
   const readP = reader.read();
-  // read側がrejectしてもタイマーを解放する(放置するとプロセスが終了しない)
-  readP.finally(() => clearTimeout(timer));
+  // read側がrejectしてもタイマーを解放する(放置するとプロセスが終了しない)。
+  // finally()の派生Promise自体がrejectすると誰も処理しない拒否(unhandledRejection→
+  // プロセス死)になるため、thenの両分岐で潰す(long-run-resilience)。
+  readP.then(
+    () => clearTimeout(timer),
+    () => clearTimeout(timer),
+  );
   return Promise.race([readP, timeout]);
 }
 
