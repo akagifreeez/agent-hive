@@ -100,7 +100,7 @@ export function routingDecision(opts = {}, state = { lastPromptTokens: 0, qualit
   // ④ いま渡るメッセージ列の概算が閾値超(実測が無い初回等)
   if (estimateTokens(opts.messages) >= cfg.heavyPromptTokens) return { heavy: true, reason: "prompt" };
   // ③ 品質問題の兆候(空応答/モデルエラーの連続)
-  if (state.qualityStrikes >= cfg.heavyQualityStrikes) return { heavy: true, reason: "quality" };
+  if (state.qualityStrikes + 1 >= cfg.heavyQualityStrikes) return { heavy: true, reason: "quality" };
   // ⑤ ツール定義が多数
   const nTools = typeof opts.tools === "number" ? opts.tools : (Array.isArray(opts.tools) ? opts.tools.length : 0);
   if (nTools > cfg.heavyTools) return { heavy: true, reason: "tools" };
