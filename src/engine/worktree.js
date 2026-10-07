@@ -163,7 +163,7 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
 
     if (!commitStep.ok && !/nothing to commit/i.test(commitStep.text)) {
       // イシュー#28: コミット失敗(pre-commitフックexit 1等)を見逃すと、成果が未コミットのまま
-      // 「マージ済み」と誤認する。失敗をok:falseで返し、mainへのマージを中止する。
+      // 「マージ済み」と誤認する。
       return { ok: false, text: "worktree側のコミットに失敗しました(pre-commitフック等)。成果はmainへ取り込まれていません。gitの出力:" + commitStep.text.slice(0, 800) };
     }
     // 1.5) ブランチ側ガード: このマージで運ばれるファイルにマーカーが入っていれば拒否し、
