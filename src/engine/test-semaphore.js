@@ -109,3 +109,16 @@ export function resetTestSemaphore() {
 export function testSemaphoreState() {
   return { limit, running, queued: queue.length };
 }
+
+/** 同時実行上限を数値で直接設定する(exec.js互換ラッパ・テストからも使う)。
+ *  @param {number} n */
+export function setTestMaxConcurrent(n) {
+  const v = Math.floor(Number(n));
+  if (Number.isFinite(v) && v >= 1) limit = v;
+  drain();
+}
+
+/** 現在の上限(テスト・診断用)。 */
+export function getTestMaxConcurrent() {
+  return limit;
+}
