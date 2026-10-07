@@ -1,0 +1,14 @@
+import { readFileSync } from "node:fs";
+import { parseTap, classifyFailures } from "../src/engine/test-triage.js";
+const NL = String.fromCharCode(10);
+const src = readFileSync("test/test-triage.test.js", "utf8");
+const m = src.match(/const REAL_SUMMARY_TAIL = \[([\s\S]*?)\]\.join\(NL\);/);
+const arrSrc = m[1].replace(/BS \+/g, JSON.stringify(String.fromCharCode(92)) + " + ").replace(/NL/g, JSON.stringify(NL));
+const FIXTURE = eval("[" + arrSrc + "]").join(NL);
+const r = parseTap("exit=1" + NL + FIXTURE);
+const known = r.failures.slice(0, 5).map((f) => ({ file: f.file, name: f.name, area: "tdd-wip" }));
+const cls = classifyFailures(r, known);
+console.log("known:", cls.known.length, "fresh:", cls.fresh.length);
+console.log("summary:", cls.summary);
+for (const k of cls.known) console.log(" K:", k.name.slice(0, 25));
+for (const f of cls.fresh) console.log(" F:", f.name.slice(0, 25));

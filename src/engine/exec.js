@@ -1,8 +1,17 @@
 // シェル実行の共用層。ツールのbashも発見器のプローブもこれを使う。
 // WindowsではGit Bashを自動検出してPOSIXコマンドを受けられるようにする。
+// さらにテスト系コマンド(npm test / node --test)にはプロセス横断セマフォを掛け、
+// 複数ワーカーと発見器プローブが重なってもテストの子プロセスが百オーダ同時起動して
+// マシンが飽和するのを防ぐ(exec.testMaxConcurrentで上限を上書き可)。
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
+import { isTestCommand, runTestCommand, configureTestSemaphore } from "./test-semaphore.js";
+
+// config.exec.testMaxConcurrent の反映用(runner起動時に呼ぶ)。空でも既定(1)へ戻す。
+export function applyTestSemaphoreConfig(execCfg) {
+  return configureTestSemaphore(execCfg ?? {});
+}
 
 let cachedShell = null;
 let bashCommand = "bash";
@@ -67,13 +76,29 @@ export async function detectShell() {
   return (cachedShell = "cmd");
 }
 
+
 /**
  * コマンドを実行する(outputLimitで出力を丸める)。cwd省略時はプロセスのカレント。
  * 子プロセスの環境はscrubEnvで鍵っぽい変数を落として渡す(env引数は明示割り当てとして上書き)。
+ * テスト系コマンド(npm test / node --test)はプロセス横断セマフォで同時実行が上限までに抑えられ、
+ * 上限超過の待ちがテスト待ちタイムアウトを過ぎたら教師文面つきで失敗を返す。
  * @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number}} o
+ * @param {string} [keep="head"] 出力の丸め方向。"head"=先頭から保持(従来動作・既定)|"tail"=末尾を保持(テストサマリ等・失敗節が末尾に出る形式向け)
  * @returns {Promise<{ok: boolean, text: string}>}
  */
-export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null }) {
+export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null, keep = "head" }) {
+  // テスト系コマンド(npm test / node --test 等)はプロセス横断セマフォで直列化する
+  // (exec-test-semaphore)。非テストコマンドは従来どおり即実行(影響ゼロ)。
+  if (isTestCommand(command)) {
+  return runTestCommand({ command, cwd, timeoutMs, outputLimit, env, keep }, runCommandInner);
+  }
+  return runCommandInner({ command, cwd, timeoutMs, outputLimit, env, keep });
+}
+
+/** @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number}} o
+ * @returns {Promise<{ok: boolean, text: string}>}
+ */
+async function runCommandInner({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null, keep = "head" }) {
   const kind = await detectShell();
   const childEnv = scrubEnv(process.env, env);
   const child =
@@ -82,7 +107,12 @@ export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit 
       : spawn(command, { shell: true, cwd, windowsHide: true, env: childEnv });
   let out = "";
   const append = (d) => {
-    if (out.length < outputLimit) out += d.toString();
+    if (keep === "tail") {
+      out += d.toString();
+      if (out.length > outputLimit) out = out.slice(out.length - outputLimit);
+    } else if (out.length < outputLimit) {
+      out += d.toString();
+    }
   };
   child.stdout.on("data", append);
   child.stderr.on("data", append);
@@ -91,6 +121,7 @@ export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit 
       child.kill();
       res({ ok: false, text: `タイムアウト(${timeoutMs}ms)で中断:\n${out.slice(0, outputLimit)}` });
     }, timeoutMs);
+    if (timer.unref) timer.unref();
     child.on("error", (err) => {
       clearTimeout(timer);
       res({ ok: false, text: `起動エラー: ${err.message}` });
