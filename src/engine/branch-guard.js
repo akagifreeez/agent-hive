@@ -16,7 +16,7 @@ import { runCommand } from "./exec.js";
  *   2. 未コミット変更がある → 勝手に捨てない。復帰せず status を添えて中止(手動確認)
  *   3. クリーン → checkout main(復帰)。mainが無いリポジトリ等は何もしない
  *
- * 判定不能(git不在等)は既存契約どおり起動/マージを止めない。@returns {Promise<{ok: boolean, checkedOut?: string, abort?: boolean, reason?: string}>}
+ * 判定不能(git不在等)は既存契約どおり起動/マージを止めない。
  * @param {Object} o
  * @param {string} o.mainWorkspace mainワークスペース(gitリポジトリ)
  * @param {Function} [o.exec] コマンド実行(既定runCommand。テストで差し替え)

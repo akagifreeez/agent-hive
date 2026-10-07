@@ -12,6 +12,7 @@ import { PermissionGate } from "./engine/permissions.js";
 import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
 import { applyTestSemaphoreConfig } from "./engine/exec.js";
 import { setupWorktrees } from "./engine/worktree.js";
+import { ensureMainCheckout } from "./engine/branch-guard.js";
 import { respawnUnfinishedWork } from "./engine/respawn.js";
 import { runCommand } from "./engine/exec.js";
 import { UsageLedger } from "./engine/usage.js";
