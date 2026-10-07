@@ -12,6 +12,9 @@ import { runTestCommand, configureTestSemaphore } from "./test-semaphore.js";
 export function applyTestSemaphoreConfig(execCfg) {
   return configureTestSemaphore(execCfg ?? {});
 }
+// 旧名エイリアス(移行期): マージで新旧どちらのindex.jsが来ても繋がるようにする。
+// 数値を渡された場合はconfigureTestSemaphore側で既定(1)扱いになる。
+export const applyTestMaxConcurrent = applyTestSemaphoreConfig;
 
 let cachedShell = null;
 let bashCommand = "bash";
