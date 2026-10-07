@@ -32,7 +32,13 @@ export class TaskBlackboard {
   }
 
   seed(tasks) {
-    for (const t of tasks ?? []) this.create(t);
+    for (const t of tasks ?? []) {
+      // done/の完了済みidは再起票しない(blog lab実害: 再実行時にdoneタスクがopenへ
+      // 複製され、dependsOnの依存解決が「openの複製」に阻まれて後続タスクが永遠に
+      // 請求不能になる)。claimed中はcreateの既存重複判定に従う(従来どおり拒否)。
+      if (readdirSync(this.done).some((f) => f.endsWith('--' + t.id + '.md'))) continue;
+      this.create(t);
+    }
   }
 
   /**
