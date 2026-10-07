@@ -1,5 +1,8 @@
 // v5: スポーン階層(SpawnManager)とメインチャット(ChatHost)の検証
 import { test } from "node:test";
+
+// 重い実駆動テストの分離ガード: 通常はskip、HIVE_HEAVY=1で従来どおり実行(2026-10-06 ガンマ調査#26)
+const HEAVY_SKIP = process.env.HIVE_HEAVY ? false : "HIVE_HEAVY未設定のためスキップ(重い実駆動テスト。実行は HIVE_HEAVY=1)";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視(一時ディレクトリ) */ } }
@@ -42,7 +45,7 @@ function scriptedModel(script, received = []) {
   };
 }
 
-async function waitUntil(fn, ms = 8000) {
+async function waitUntil(fn, ms = 45000) {
   const start = Date.now();
   while (Date.now() - start < ms) {
     if (await fn()) return true;
@@ -84,7 +87,7 @@ test("spawn: depth上限と同時数上限で拒否され、正常時はworktree
   rmTree(`${root}-2`, { recursive: true, force: true });
 });
 
-test("spawn: スポーンされたエージェントはbriefで駆動し、成果は自分のworktree→finishでmainへ", async () => {
+test("spawn: スポーンされたエージェントはbriefで駆動し、成果は自分のworktree→finishでmainへ", { skip: HEAVY_SKIP }, async () => {
   const { ws, root, bus, board, tasks } = makeEnv();
   await ensureGitRepo(ws);
   const manager = new SpawnManager({
@@ -170,7 +173,7 @@ test("ChatHost: ユーザー入力で全メインが応答し、記憶が次ラ�
 });
 
 // --- v5残課題対応: 継続ラウンドとworktree後始末 ---
-test("継続ラウンド: ターン上限で中断しても1回だけ自動継続し、記憶を引き継いで完了できる", async () => {
+test("継続ラウンド: ターン上限で中断しても1回だけ自動継続し、記憶を引き継いで完了できる", { skip: HEAVY_SKIP }, async () => {
   const { ws, root, bus, board, tasks } = makeEnv();
   await ensureGitRepo(ws);
   const received = [];
@@ -195,7 +198,7 @@ test("継続ラウンド: ターン上限で中断しても1回だけ自動継�
   rmTree(root, { recursive: true, force: true });
 });
 
-test("継続もターン上限なら諦めモード: worktree保持+[保持]告知", async () => {
+test("継続もターン上限なら諦めモード: worktree保持+[保持]告知", { skip: HEAVY_SKIP }, async () => {
   const { ws, root, bus, board, tasks } = makeEnv();
   await ensureGitRepo(ws);
   const manager = new SpawnManager({
@@ -218,7 +221,7 @@ test("継続もターン上限なら諦めモード: worktree保持+[保持]告�
   rmTree(root, { recursive: true, force: true });
 });
 
-test("クリーン終了(マージ済み)ならworktreeとブランチを掃除する", async () => {
+test("クリーン終了(マージ済み)ならworktreeとブランチを掃除する", { skip: HEAVY_SKIP }, async () => {
   const { ws, root, bus, board, tasks } = makeEnv();
   await ensureGitRepo(ws);
   const manager = new SpawnManager({

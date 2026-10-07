@@ -36,6 +36,27 @@ export function normalizeCommand(cmd, { sort = false } = {}) {
   return out.join(" ");
 }
 
+
+// シェルの実行単位への分割: 複合コマンド(; && & || パイプ 改行)を実行単位ごとに切る。
+// クォート内の区切りは考慮しない(過剰分割は「承認要求が増える」安全側に倒れるため、confirm判定には十分)。
+// 正規表現を使わず文字コードで走査する(59=';' 38='&' 124='|' 10=LF 13=CR)。
+export function splitExecUnits(cmd) {
+  const text = String(cmd ?? "");
+  const units = [];
+  let cur = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 59 || c === 38 || c === 124 || c === 10 || c === 13) {
+      units.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += text[i];
+  }
+  units.push(cur);
+  return units.map((u) => u.trim()).filter(Boolean);
+}
+
 // confirm用の引数正規化: 連結オプション(-9 / -f 等)を分割して照合する。
 // 例: `curl -sS -m 5 http://...` の -sS はそのままでも、`kill -9` の -9 は `kill - 9` に分裂させて
 // 「kill 」前方一致 + オプション除外の照合を素通りさせない。
@@ -50,6 +71,69 @@ function normalizeConfirmArgv(cmd) {
     }
   }
   return out.join(" ");
+}
+
+/**
+ * #24: シェルコマンドを実行単位へ分割する。
+ * 区切りは ; && || | と改行。クォート(「"」「'」)内の区切り文字は分割しない。
+ * エスケープ処理や括弧・サブシェルまで完全に解析するものではない(確認目的の分割)。
+ * @param {string} cmd
+ * @returns {string[]}
+ */
+export function splitShellSegments(cmd) {
+  const s = String(cmd ?? "");
+  const out = [];
+  let cur = "";
+  let quote = null; // null | '"' | "'"
+  let prev = "";
+  for (const ch of s) {
+    if (quote) {
+      cur += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      cur += ch;
+      prev = ch;
+      continue;
+    }
+    if (ch === "\n") {
+      out.push(cur);
+      cur = "";
+      prev = "";
+      continue;
+    }
+    if (ch === ";") {
+      out.push(cur);
+      cur = "";
+      prev = "";
+      continue;
+    }
+    if ((ch === "&" && prev === "&") || (ch === "|" && prev === "|")) {
+      out.push(cur);
+      cur = "";
+      prev = "";
+      continue;
+    }
+    if (ch === "|" && prev !== "|") {
+      out.push(cur);
+      cur = "";
+      prev = "";
+      continue;
+    }
+    if (ch === "&" && prev !== "&") {
+      out.push(cur);
+      cur = "";
+      prev = "";
+      continue;
+    }
+    cur += ch;
+    prev = ch;
+    continue;
+  }
+  out.push(cur);
+  return out.map((seg) => seg.trim()).filter(Boolean);
 }
 
 export class PermissionGate {
@@ -92,13 +176,28 @@ export class PermissionGate {
 
     // confirm 段: curl/wget(送信の足がかり)や kill/taskkill(プロセス停止)は、
     // auto モードであっても自動承認しない(必ず承認要求を出して人の判断を待つ)。
+    // #24: 複合コマンド対応 — 実行単位区切り(; && || | 改行)で分割し、
+    // 各実行単位ごとに confirm 判定を行う。1つでも confirm 対象が含まれれば
+    // 全体を承認要求扱いにする(2番目以降の curl/kill 等の素通りを塞ぐ)。
     const argv = normalizeConfirmArgv(command);
     const argvTokens = argv.split(" ");
-    const hitConfirm = this.confirm.find((p) => {
-      // 先頭トークン一致(部分一致の誤爆「echo killing」等を避ける)。複数語パターンは前置詞一致
-      const pt = String(p).trim().split(/\s+/);
-      return pt.every((w, i) => argvTokens[i] === w);
-    });
+    const segments = splitShellSegments(command);
+    const hitConfirm = (() => {
+      for (const seg of segments) {
+        const segTokens = normalizeConfirmArgv(seg).split(" ").filter(Boolean);
+        const p = this.confirm.find((pat) => {
+          // 実行単位の先頭トークン一致(部分一致の誤爆「echo killing」等を避ける)。複数語パターンは前置詞一致
+          const pt = String(pat).trim().split(/\s+/);
+          return pt.every((w, i) => segTokens[i] === w);
+        });
+        if (p) return p;
+      }
+      // 従来経路(全体の先頭トークン照合)も併用: 区切り未検出の単一コマンド等の後方互換
+      return this.confirm.find((pat) => {
+        const pt = String(pat).trim().split(/\s+/);
+        return pt.every((w, i) => argvTokens[i] === w);
+      });
+    })();
     if (hitConfirm) {
       const verdict2 = await this.requestApproval(command, hitConfirm);
       if (verdict2 === "approve") {

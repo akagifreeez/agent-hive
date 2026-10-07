@@ -7,7 +7,7 @@
         "baseUrl": "https://api.z.ai/api/coding/paas/v4",
         "api": "openai-completions",
         "auth": { "env": "ZAI_API_KEY", "file": "../../zai.key" },
-        "params": { "temperature": 0.7, "maxTokens": 4000, "timeoutMs": 180000, "reasoningEffort": "low", "webSearch": true },
+        "params": { "temperature": 0.7, "maxTokens": 4000, "timeoutMs": 180000, "reasoningEffort": "high", "webSearch": true },
         "models": [
           { "id": "glm-5.3-flash", "name": "GLM-5.3-Flash", "reasoning": true, "contextWindow": 200000, "maxTokens": 4000 },
           { "id": "glm-5.3", "name": "GLM-5.3", "reasoning": true, "contextWindow": 200000, "maxTokens": 4000 }
@@ -27,7 +27,7 @@
   },
   "hierarchy": {
     "maxDepth": 2,
-    "maxConcurrent": 12
+    "maxConcurrent": 35
   },
   "chat": {
     "lead": "lead",
@@ -42,39 +42,40 @@
       "gamma"
     ],
     "maxTurnsPerRound": 12,
-    "autoContinueRounds": 3,
+    "autoContinueRounds": 6,
     "requireSeparateApprove": true,
     "idleClaimWaitSec": 45,
     "autoscale": true,
     "autoscaleIntervalSec": 30,
     "maxWorkersPerThread": 4
   },
-  "agents": [
-    {
-      "id": "alpha",
-      "displayName": "アルファ",
-      "role": "impl",
-      "persona": "agents/alpha.md"
-    },
-    {
-      "id": "delta",
-      "displayName": "デルタ",
-      "role": "impl",
-      "persona": "agents/delta.md"
-    },
-    {
-      "id": "beta",
-      "displayName": "ベータ",
-      "role": "review",
-      "persona": "agents/beta.md"
-    },
-    {
-      "id": "gamma",
-      "displayName": "ガンマ",
-      "role": "lead",
-      "persona": "agents/gamma.md"
-    }
-  ],
+    "agents": [
+      {
+        "id": "alpha",
+        "displayName": "アルファ",
+        "role": "impl",
+        "persona": "agents/alpha.md"
+      },
+      {
+        "id": "delta",
+        "displayName": "デルタ",
+        "role": "impl",
+        "persona": "agents/delta.md"
+      },
+      {
+        "id": "beta",
+        "displayName": "ベータ(検証・Flash)",
+        "role": "review",
+        "persona": "agents/beta.md",
+        "model": "zai/glm-5.3-flash"
+      },
+      {
+        "id": "gamma",
+        "displayName": "ガンマ",
+        "role": "lead",
+        "persona": "agents/gamma.md"
+      }
+    ],
   "loop": {
     "maxTurns": 40
   },

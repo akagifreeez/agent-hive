@@ -6,7 +6,9 @@ import { resolve, join, dirname, sep } from "node:path";
 import { runCommand, detectShell } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
 import { readMeta, detectTaskOverlap } from "./tasks.js";
+import { noteRejection } from "./model-policy.js";
 import { readSkill } from "./skills.js";
+import { browserFetch, browserExtract, browserSubmit } from "./browser.js";
 
 const READ_LIMIT = 120 * 1024;
 const BASH_OUTPUT_LIMIT = 8 * 1024;
@@ -21,7 +23,7 @@ const BASH_OUTPUT_LIMIT = 8 * 1024;
  * @property {boolean} [claimMiss] 請求ミスのときtrue(idle退場判定で連続回数を数える)
  */
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null, approvals = null }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null, approvals = null, modelPolicy = null }) {
 
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
@@ -60,6 +62,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           body: { type: "string", description: "具体的な指示(何を/どう確認するか/完了条件)" },
           acceptance: { type: "string", description: "受け入れ基準。完了とみなす客観的な条件を1文で(例: npm testが通り、境界の両側を検証している)" },
           depends_on: { type: "array", items: { type: "string" }, description: "先行タスクidの配列。全てdoneになるまでこのタスクは請求できない" },
+          model: { type: "string", description: "[リーダー専用・任意] このタスクだけ代替モデルref(provider/modelまたはベアID)を使う。基本は既定モデルのまま(相当な理由があるときだけ)" },
         },
         required: ["task_id", "body"],
         additionalProperties: false,
@@ -75,6 +78,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           role: { type: "string", description: "ロール(impl/review/lead等)" },
           project: { type: "string", description: "文脈(プロジェクト)名。労働者が追加のタスクを請求するときの絞込に使われる" },
           brief: { type: "string", description: "初期ブリーフ。目標・完了条件・このタスク固有の指示のみ。共有素材は労働者が gather_context で読む" },
+          model: { type: "string", description: "この作業員のモデル指定(ModelRef)。リーダー専用・任意。未指定なら既定モデル" },
         },
         required: ["brief"],
         additionalProperties: false,
@@ -152,6 +156,47 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           project: { type: "string", description: "文脈(プロジェクト)名で絞込(done/openのみ有効)" },
         },
         required: ["source"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "browser_fetch",
+      description: "内蔵ブラウザでURLを取得し、ページ構造(タイトル/見出し/リンク/フォーム/本文)を返す。絶対URL必須。レンダリング不要のHTTPレベル取得。",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string", description: "取得するURL(http://またはhttps://の絶対URL)" } },
+        required: ["url"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "browser_extract",
+      description: "ページ取得(またはHTML直接)→セレクタ抽出を1呼び出しで行う。selectorはタグ名・#id・.classに対応(未指定は全文)。",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "取得するURL(html指定時は省略可)" },
+          html: { type: "string", description: "解析対象のHTML(指定時はurl取得を省略)" },
+          base_url: { type: "string", description: "html指定時の基準URL" },
+          selector: { type: "string", description: "抽出する要素(タグ名/#id/.class、省略で全文)" },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "browser_submit",
+      description: "フォームを組立てて送信する(取得→入力→送信のHTTPレベル操作)。html+base_urlからフォーム抽出し、valuesで埋めてPOST/GET。selectorで送信対象要素を検証(誤送信防止)。レンダリング必須の実操作はMCP(Playwright等)で拡張。",
+      parameters: {
+        type: "object",
+        properties: {
+          html: { type: "string", description: "フォームを含むページHTML(browser_fetchのraw等)" },
+          base_url: { type: "string", description: "そのページのURL(相対action解決の基準・絶対URL必須)" },
+          values: { type: "object", description: "入力する値 {フィールド名: 値}。未指定フィールドは現値維持" },
+          selector: { type: "string", description: "送信前に存在を検証する要素(タグ名またはフィールド名)。一致が無ければ送らない" },
+          form_index: { type: "number", description: "複数フォーム時の対象(1始まり・省略で最初)" },
+          follow_redirects: { type: "boolean", description: "リダイレクト追従(既定true)" },
+        },
+        required: ["html", "base_url"],
         additionalProperties: false,
       },
     },
@@ -352,6 +397,34 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (!tasks.claimedBy(agent.id).some((t) => t.id === taskId)) {
           return { ok: false, text: "そのタスクは請求していません(task_idを確認)。" };
         }
+        // 検証タスク(verify-*)の完了: これ以上の検証タスクを起票しない(無限連鎖防止)。
+        // 元タスクが保留中なら実装者≠検証者を確認してマージ+完了確定する。
+        if (mainWorkspace && taskId.startsWith("verify-")) {
+          const originalId = taskId.replace(/^verify-/, "");
+          const pending = approvals?.pending.get(originalId) ?? null;
+          if (pending && pending.agentId === agent.id) {
+            return { ok: false, text: `自分が実装したタスク ${originalId} の検証は、実装者以外が行う必要があります(検証タスクは保留のまま残ります)。` };
+          }
+          const verifyDone = tasks.finish(agent, taskId);
+          if (!pending) {
+            return { ok: true, text: verifyDone ? `検証タスク ${taskId} を完了にしました(元タスクの保留情報が無いためマージは行いません)。` : "完了確定に失敗しました。" };
+          }
+          const implementer = { id: pending.agentId, displayName: pending.agentId };
+          const m = await mergeAgentWork({ mainWorkspace, worktreePath: pending.worktreePath, agent: implementer, taskId: originalId });
+          if (m.conflict) {
+            const rej = noteRejection(mainWorkspace, originalId, modelPolicy);
+            if (rej.notice) board.post("system", rej.notice);
+            return { ok: false, text: `マージが競合しています。実装者(${pending.agentId})に \`git merge main\` での解決を依頼してください。\n${m.text.slice(0, 600)}` };
+          }
+          if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
+          approvals.pending.delete(originalId);
+          const implDone = tasks.finish({ id: pending.agentId }, originalId);
+          bus.emit("merge.completed", { agent: pending.agentId, taskId: originalId, stat: m.stat ?? "", patch: m.patch ?? "", summary: m.summary ?? "" });
+          board.post("system", `[承認] ${agent.displayName}(${agent.id}) がタスク ${originalId}(${pending.agentId}実装)を検証し、main へマージしました。`);
+          return { ok: true, text: implDone
+            ? `検証完了。タスク ${originalId} を承認してマージしました。`
+            : `検証完了。タスク ${originalId} をマージしました(元タスクの完了確定は既に済みの可能性があります)。` };
+        }
         // worktree運用時はmainへ自動マージしてから完了確定
         if (mainWorkspace) {
           // 実装者≠検証者の強制(approvals.require): マージを保留し、実装者以外の検証タスクを起票する。
@@ -365,7 +438,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
                 id: verifyId,
                 role: reviewer.role,
                 project: claimedTask?.project ?? "",
-                body: `検証: タスク ${taskId}(${agent.id} 実装)の差分をレビューしてください。\n動作確認(テスト実行など)を行い、問題なければ approve_task (task_id: "${taskId}") で承認してください。承認後、成果が main へマージされます。`,
+                body: `検証: タスク ${taskId}(${agent.id} 実装)の差分をレビューしてください。\n動作確認(テスト実行など)を行い、問題なければ finish_task (task_id: "${verifyId}") で検証完了としてください。承認後、成果が main へマージされます。`,
                 createdBy: agent.id,
               });
               approvals.pending.set(taskId, { agentId: agent.id, worktreePath: workspace });
@@ -406,6 +479,8 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const implementer = { id: pending.agentId, displayName: pending.agentId };
         const m = await mergeAgentWork({ mainWorkspace, worktreePath: pending.worktreePath, agent: implementer, taskId: approveId });
         if (m.conflict) {
+          const rej = noteRejection(mainWorkspace, approveId, modelPolicy);
+          if (rej.notice) board.post("system", rej.notice);
           return { ok: false, text: `マージが競合しています。実装者(${pending.agentId})に \`git merge main\` での解決を依頼してください。\n${m.text.slice(0, 600)}` };
         }
         if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
@@ -423,7 +498,12 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           return { ok: false, text: "task_idは英小文字数字とハイフンで付けてください。" };
         }
         const dependsOn = Array.isArray(args.depends_on) ? args.depends_on.map((s) => String(s ?? "").trim()).filter(Boolean) : [];
-        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "", dependsOn, createdBy: agent.id });
+        // 代替モデル指定(#12): 基本は既定モデル。リーダー(スレッド開設権持ち)だけ特例で指定可
+        const modelArg = String(args.model ?? "").trim() || null;
+        if (modelArg && !threadOpener) {
+          return { ok: false, text: "model指定はリーダー専用です(基本は既定モデルを使います。代替は相当な理由があるときだけ)。" };
+        }
+        const created = tasks.create({ id, role: args.role ? String(args.role) : null, project: args.project ? String(args.project) : "", body: String(args.body ?? ""), acceptance: args.acceptance ? String(args.acceptance) : "", dependsOn, createdBy: agent.id, model: modelArg });
         if (!created) return { ok: false, text: `task_id ${id} は既に存在します。` };
         // 重複検知: 未着手/作業中の既存タスクと共有ファイルがあれば警告を添える(ブロックはしない)
         const l = tasks.list();
@@ -440,7 +520,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           .join("\n");
         return {
           ok: true,
-          text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""}${dependsOn.length ? ` / 依存: ${dependsOn.join(",")}` : ""})。` + (warn ? "\n\n" + warn : ""),
+          text: `タスク ${id} をボードへ投入しました(role: ${args.role ?? "誰でも"}${args.project ? ` / project: ${args.project}` : ""}${args.acceptance ? " / 受け入れ基準つき" : ""}${dependsOn.length ? ` / 依存: ${dependsOn.join(",")}` : ""}${modelArg ? ` / model: ${modelArg}` : ""})。` + (warn ? "\n\n" + warn : ""),
         };
       }
       case "spawn_agent": {
@@ -452,6 +532,7 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           role: args.role ? String(args.role) : undefined,
           project: args.project ? String(args.project) : "",
           brief: String(args.brief ?? ""),
+          model: String(args.model ?? "").trim() || null,
         });
         if (r.error) return { ok: false, text: `スポーンできません: ${r.error}` };
         return { ok: true, text: `サブエージェント ${r.id}(${r.displayName}) をスポーンしました。進捗はボードに流れます。` };
@@ -538,6 +619,35 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const r = await threadCloser({ project: projectName });
         if (r.error) return { ok: false, text: `スレッドを閉じられません: ${r.error}` };
         return { ok: true, text: `スレッド ${projectName} を閉じました。成果物とログは保持されています。` };
+      }
+      case "browser_fetch": {
+        const r = await browserFetch(String(args.url ?? ""));
+        if (!r.ok) return { ok: false, text: r.text };
+        const lines = [];
+        lines.push("[" + r.status + "] " + r.page.url);
+        lines.push("タイトル: " + (r.page.title || "(なし)"));
+        lines.push("");
+        lines.push("見出し: " + (r.page.headings.join(" / ") || "(なし)"));
+        lines.push("");
+        lines.push("リンク:");
+        for (const l of r.page.links.slice(0, 20)) lines.push("- " + l.text + " → " + l.href);
+        lines.push("");
+        lines.push("フォーム " + r.page.forms.length + "件:");
+        for (const f of r.page.forms) lines.push("- [" + f.index + "] " + f.method + " " + f.action + " (" + f.fields.length + "fields)");
+        lines.push("");
+        lines.push("=== 本文 ===");
+        lines.push(r.page.text);
+        return { ok: true, text: lines.join("\n").slice(0, 8000) };
+      }
+      case "browser_extract": {
+        const er = await browserExtract(args);
+        if (!er.ok) return { ok: false, text: er.text };
+        return { ok: true, text: ("[" + er.url + "]" + "\n" + "selector: " + (er.selector || "(全文)") + "\n" + er.text).slice(0, 8000) };
+      }
+      case "browser_submit": {
+        const values = args.values && typeof args.values === "object" ? args.values : {};
+        const sr = await browserSubmit({ html: args.html, base_url: args.base_url, values, selector: args.selector, form_index: args.form_index, follow_redirects: args.follow_redirects });
+        return { ok: sr.ok, text: sr.text.slice(0, 8000) };
       }
       case "web_fetch": {
         const url = String(args.url ?? "").trim();
