@@ -6,12 +6,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  isTestCommand,
   runCommand,
+} from "../src/engine/exec.js";
+import {
+  isTestCommand,
   setTestMaxConcurrent,
   getTestMaxConcurrent,
   resetTestSemaphore,
-} from "../src/engine/exec.js";
+} from "../src/engine/test-semaphore.js";
 
 // 並列テストファイル同士でセマフォ状態を持ち越さない。各テストの終了時に必ず戻す。
 // (同一ファイル内では各テストが直列に動く前提。node:testの並列concurrencyは無効)

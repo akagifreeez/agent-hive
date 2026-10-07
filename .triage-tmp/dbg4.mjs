@@ -1,14 +1,40 @@
-import { readFileSync } from "node:fs";
-import { parseTap, classifyFailures } from "../src/engine/test-triage.js";
-const NL = String.fromCharCode(10);
-const src = readFileSync("test/test-triage.test.js", "utf8");
-const m = src.match(/const REAL_SUMMARY_TAIL = \[([\s\S]*?)\]\.join\(NL\);/);
-const arrSrc = m[1].replace(/BS \+/g, JSON.stringify(String.fromCharCode(92)) + " + ").replace(/NL/g, JSON.stringify(NL));
-const FIXTURE = eval("[" + arrSrc + "]").join(NL);
-const r = parseTap("exit=1" + NL + FIXTURE);
-const known = r.failures.slice(0, 5).map((f) => ({ file: f.file, name: f.name, area: "tdd-wip" }));
-const cls = classifyFailures(r, known);
-console.log("known:", cls.known.length, "fresh:", cls.fresh.length);
-console.log("summary:", cls.summary);
-for (const k of cls.known) console.log(" K:", k.name.slice(0, 25));
-for (const f of cls.fresh) console.log(" F:", f.name.slice(0, 25));
+// 仮説検証: readChunkWithIdleTimeoutのPromise.raceで、2回目呼び出しのtimeoutが前のレースに影響?
+// 実際の consumeStream + readChunkWithIdleTimeout の組み合わせを最小再現
+const streamIdleTimeoutMs = () => 10_000;
+function readChunkWithIdleTimeout(reader) {
+  const idle = streamIdleTimeoutMs();
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("stall")), idle);
+  });
+  const readP = reader.read();
+  readP.finally(() => clearTimeout(timer));
+  return Promise.race([readP, timeout]);
+}
+async function consumeStream(res) {
+  const reader = res.body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await readChunkWithIdleTimeout(reader);
+      if (done) break;
+      console.log("chunk", value?.length);
+    }
+  } finally {
+    try { await reader.cancel(); } catch {}
+  }
+  return "done";
+}
+const encoder = new TextEncoder();
+let sent = 0;
+const chunks = ['data: a\n\n', "data: [DONE]\n\n"];
+const res = { body: { getReader: () => ({ read: async () => {
+  if (sent < chunks.length) return { done: false, value: encoder.encode(chunks[sent++]) };
+  throw null; // ← テストがthrowするのはnull
+} }) } };
+try {
+  const r = await consumeStream(res);
+  console.log("RESULT", r);
+} catch (e) {
+  console.log("THROWN:", JSON.stringify(e?.message ?? e));
+}
+process.exit(0);
