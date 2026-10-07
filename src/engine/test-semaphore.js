@@ -19,7 +19,7 @@ export function isTestCommand(command) {
   //   - オプションはハイフン始まりのトークン群(--silent 等)
   //   - "echo npm test" のような文中参照もテスト実行の意図として保守的に捕捉する
   //   - 語境界は \b で判定(testx 等は弾く)。正規表現リテラル直書き(生成コード経由のエスケープ崩れを避ける)
-  const npmTest = /(^|[;&|(]\s*|\s)npm(?:\s+-{1,2}[^\s]+)*\s+(?:run(?:\s+-{1,2}[^\s]+)*\s+)?test(?::[A-Za-z0-9._-]+)?(?:\s|$)|(^|[;&|(]\s*)npm(?:\s+-{1,2}[^\s]+)*\s+--test(?:\s|$)/.test(c);
+  const npmTest = /(^|[;&|(]\s*)npm(?:\s+-{1,2}[^\s]+)*\s+(?:run(?:\s+-{1,2}[^\s]+)*\s+)?test(?::[A-Za-z0-9._-]+)?(?:\s|$)|(^|[;&|(]\s*)npm(?:\s+-{1,2}[^\s]+)*\s+--test(?:\s|$)/.test(c);
   const nodeTest = /(^|[;&|(]\s*)node(?:\s+--[^\s]+)*\s+--test(?:\s|$)/.test(c);
   return npmTest || nodeTest;
 }
