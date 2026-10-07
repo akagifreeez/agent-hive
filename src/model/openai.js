@@ -23,6 +23,11 @@ function isAbortRelated(err) {
   return ABORT_MSG_RE.test(message) || ABORT_MSG_RE.test(causeMsg) || /abort(ed|ion)?/i.test(message) || err.name === "AbortError";
 }
 // リトライ可否の一本道: 中断/瞬断系(タイムアウト・接続断・body中断)は可、それ以外は不可
+function isRetryableNetworkError(err) {
+  if (!err) return false;
+  const code = String(err.code ?? err.cause?.code ?? "");
+  return ABORT_CODE_RE.test(code) || isAbortRelated(err);
+}
 // stream系の汎用Error(stall監視のreject等・code無し)も切断の可能性がある。
 // 中断語(stall/terminated/aborted/timeout)を含むメッセージはリトライ契約へ乗せる。
 function isRetryableStreamError(err) {
