@@ -44,8 +44,11 @@ export class TaskBlackboard {
   // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
   // acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
   create({ id, role, body, project = "", acceptance = "", dependsOn = [], createdBy = null, model = null }) {
+    // 一意性はopenとclaimedの両方で守る(イシュー#30)。openだけだと請求中のIDを
+    // 別本文で再createでき、2人のagentが同じIDを同時請求できてしまう。
+    // doneは参照しないので「完了済みIDの再利用(自動再投入等)」は従来どおり許可。
+    if (this.existsOpenOrClaimed(id)) return false;
     const f = join(this.open, `${id}.md`);
-    if (existsSync(f)) return false;
     const meta = metaLines(project, role, acceptance, dependsOn, model);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
     if (createdBy) this.createdBy.set(id, createdBy);
@@ -55,6 +58,11 @@ export class TaskBlackboard {
 
   // スポーンなどで最初から請求済みとしてタスクを投入する(ブリーフ=そのエージェントの担当)
   assign({ agentId, taskId, body, project = "", model = null }) {
+    // 同じIDがopenに残っている/他者請求中なら二重請求になるので拒否(イシュー#30)。
+    // 自分自身の同ID再assignは最後のexistsSyncで false(冪等)。
+    if (existsSync(join(this.open, `${taskId}.md`))) return false;
+    const held = readdirSync(this.claimed).some((n) => n !== `${agentId}--${taskId}.md` && (n === `${taskId}.md` || n.endsWith(`--${taskId}.md`)));
+    if (held) return false;
     const f = join(this.claimed, `${agentId}--${taskId}.md`);
     if (existsSync(f)) return false;
     const meta = metaLines(project, null, "", [], model);
@@ -290,6 +298,7 @@ export class TaskBlackboard {
     const src = join(this.claimed, `${agentId}--${taskId}.md`);
     const dst = join(this.open, `${taskId}.md`);
     try {
+      if (!existsSync(src)) return true; // 既に無い=解放済みとして成功(べき等)
       if (note) appendNote(src, note);
       if (existsSync(dst)) return false; // 同idのopenが既にある(手動投入等)場合は壊さない
       renameSync(src, dst);
