@@ -1990,7 +1990,7 @@ function renderProgressPanel() {
   for (const t of doneShow) panel.appendChild(mk("pc-row pc-done", t.id, t.summary ?? "", "@" + (t.agent ?? "?")));
   if (doneDesc.length > doneShow.length) {
     const more = document.createElement("div"); more.className = "pc-none"; // 省略表記(完了タスクの残り)
-    more.textContent = "他 " + (doneDesc.length - doneShow.length) + " 件";
+    more.textContent = "他" + (doneDesc.length - doneShow.length) + "件";
     panel.appendChild(more);
   }
 }
