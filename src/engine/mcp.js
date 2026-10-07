@@ -52,6 +52,7 @@ export class McpHost {
     this.tools = [];
     this.nextId = 1;
     this.pending = new Map(); // id => {resolve, reject, timer}
+    this.spawnError = null; // 起動時の非同期エラー(ENOENT等)。テスト・診断用に記録する
     this.buf = "";
   }
 
@@ -91,6 +92,16 @@ export class McpHost {
       }
     });
     this.child.stderr.on("data", () => {}); // サーバーのログは捨てる
+    // イシュー#27: spawnの非同期error(ENOENT等)を捕捉する。未処理のまま放置すると
+    // Unhandled error eventでhiveプロセス全体が落ちる。ここでは失敗を記録し、
+    // pending要求を全てrejectして、以後のrequestは切断状態として即座に失敗させる。
+    this.child.on("error", (err) => {
+      this.spawnError = err;
+      this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
+      this.failPending(new Error(`MCPサーバー ${this.name} を起動できません: ${err.message}`));
+    });
+    this.child.stdin?.on("error", () => {}); // EPIPE等を握りつぶす(子はもう死んでいる)
+
     // 子のstdioパイプがイベントループを握ってプロセスが終わらなくならないようにする
     this.child.unref?.();
     /** @type {any} */ (this.child.stdout).unref?.();
@@ -144,9 +155,23 @@ export class McpHost {
     return { ok: !r.isError, text: text || "(空の結果)" };
   }
 
+  // 切断状態の子プロセスに積まれたpending要求を全てrejectする(exit/error共通)
+  failPending(err) {
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(err);
+    }
+    this.pending.clear();
+  }
+
   request(method, params) {
     const id = this.nextId++;
     const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
+    // 切断状態(child無し/spawn済みだがerror確定)なら即座に失敗させる
+    if (!this.child || this.child.stdin?.destroyed || this.spawnError) {
+      const e = this.spawnError ?? new Error(`MCPサーバー ${this.name} に接続できません(切断状態)`);
+      return Promise.reject(e);
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
