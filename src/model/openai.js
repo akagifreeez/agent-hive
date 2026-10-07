@@ -109,9 +109,9 @@ export class OpenAIModel {
         // ネットワーク系(タイムアウト含む)はリトライ可(ZCode: NetworkError)。
         // undiciのTypeError: terminated(中断系)も瞬断として同じリトライ経路へ正規化する
         if (isAbortRelated(err)) noteAborted(err);
-          // 中断/瞬断系に加え、コードを持たない汎用Errorもstall/切断の可能性があるため
-          // メッセージ照合でリトライ契約へ乗せる(v6.6 stall復旧の回帰。2026-10-07 gamma)
-          if ((isRetryableNetworkError(err) || isRetryableStreamError(err)) && attempt <= RETRY_MAX_RETRIES) {
+        // 中断/瞬断系に加え、コードを持たない汎用Errorもstall/切断の可能性があるため
+        // メッセージ照合でリトライ契約へ乗せる(v6.6 stall復旧の回帰。2026-10-07 gamma)
+        if ((isRetryableNetworkError(err) || isRetryableStreamError(err)) && attempt <= RETRY_MAX_RETRIES) {
           await modelSleep(computeRetryDelay(attempt));
           continue;
         }
