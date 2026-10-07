@@ -71,7 +71,6 @@ export class ChatHost {
       this.landedThisRound.set(m.id, false); // 着地フラグの初期値(進捗ゲート)
     }
     // ボード上の@表示名でメインを起こす(横つながりの入口)
-<<<<<<< HEAD
     this._subscriptions.push(bus.on("board", (p) => this.handleBoardPost(p)));
     // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
     // これがないと全員退出後の発見器起票タスクが誰にも消化されない。
@@ -97,33 +96,6 @@ export class ChatHost {
       try { off?.(); } catch { /* 解除失敗は無視(既に外れている) */ }
     }
     this._subscriptions = [];
-=======
-    this.unsubs.push(bus.on("board", (p) => this.handleBoardPost(p)));
-    // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
-    // これがないと全員退出後の発見器起票タスクが誰にも消化されない。
-    this.unsubs.push(bus.on("task.created", (p) => this.handleTaskCreated(p)));
-    // 進捗ゲート(自動継続の着地検出): タスク完了とラウンド末mainマージを着地として記録する。
-    // landedThisRoundはwake()でリセットし、ラウンド中の実績だけを次判定に使う。
-    this.unsubs.push(bus.on("task.finished", (p) => this.noteLanding(p.agent)));
-    // テスト起点: ChatHost外(ユニットテスト等)から着地を直接報せる入口(進捗ゲートの観測点)。
-    this.unsubs.push(bus.on("agent.merged", (p) => this.noteLanding(p.agent)));
-    // create_task(新しい仕事の発生)も着地として扱う: 「次にやることが生まれた」のは進捗。
-    // これが無いと「探索ラウンドで新タスクを起票→次ラウンドで着手」の正当な循環が止まる。
-    this.unsubs.push(bus.on("task.created", (p) => this.noteLanding(null)));
-    // 解放(退場した担当者のタスクがopenへ戻る)でも同様に起こす。
-    this.unsubs.push(bus.on("task.released", (p) => this.handleTaskReleased(p)));
-  }
-
-  // 破棄(イシュー#29): スレッド閉鎖後にこのホストがbus購読で起こされ続け、
-  // 閉じたスレッドのワーカーへ「新着タスク/解放」の再循環が流れるのを断つ。
-  // 購読解除+以降のwake/sayを握り潰す。タスク・ボード・セッションデータは壊さない。
-  dispose() {
-    this.disposed = true;
-    for (const off of this.unsubs) {
-      try { off(); } catch { /* 二重解除は無視 */ }
-    }
-    this.unsubs.length = 0;
->>>>>>> main
   }
 
   // 新タスク投入時の起床: 自分のprojectのタスク、または全スレッド共通の自動仕事(fix/review/distill)のみ

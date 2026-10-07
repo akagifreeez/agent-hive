@@ -116,18 +116,7 @@ export class McpHost {
     this.child.unref?.();
     /** @type {any} */ (this.child.stdout).unref?.();
     /** @type {any} */ (this.child.stderr).unref?.();
-<<<<<<< HEAD
-    // 非同期起動失敗(ENOENT等)を捕捉する。spawn()自体は同期例外を投げないため、
-    // このハンドラがないとUnhandled 'error' eventでプロセス全体が落ちる(#27)
-    this.child.on("error", (err) => {
-      this.spawnError = err;
-      this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
-      this.failPending("MCPサーバー " + this.name + " の起動に失敗しました: " + err.message);
-      this.child = null;
-    });
-=======
     this.connected = true; // 'error'イベントでfalseへ(起動失敗・早期終了の切断状態)
->>>>>>> main
     this.child.on("exit", (code) => {
       this.failPending(`MCPサーバー ${this.name} が終了しました(code=${code})`);
     });
@@ -202,15 +191,6 @@ export class McpHost {
         reject(new Error(`MCP応答タイムアウト(${this.timeoutMs}ms): ${method}`));
       }, this.timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
-<<<<<<< HEAD
-      if (!this.child || !this.child.stdin || this.child.stdin.destroyed) {
-        this.pending.delete(id);
-        clearTimeout(timer);
-        reject(new Error("MCPサーバー " + this.name + " に接続できません(切断状態)"));
-        return;
-      }
-      this.child.stdin.write(msg);
-=======
       // #27: 起動失敗済みの子への書き込みは無意味。タイムアウトまで待たせず即失敗させる
       if (this.childError) {
         this.pending.delete(id);
@@ -226,7 +206,6 @@ export class McpHost {
         clearTimeout(timer);
         reject(new Error("MCPサーバー " + this.name + " への書き込みに失敗: " + err.message));
       }
->>>>>>> main
     });
   }
 
