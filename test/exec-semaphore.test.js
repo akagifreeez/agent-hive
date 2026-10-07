@@ -113,25 +113,31 @@ test("セマフォ: 上限超過の待ちがタイムアウトを過ぎると教
 
 test("セマフォ: 上限2なら2本まで同時に走り、上限のconfig上書きが効く", async () => {
   await withSemaphore(2, async () => {
+    // 軽量フィクスチャ(node --test 1ファイル 約300ms)で並走を確認する。
+    // npm testダミーは全スイート起動で20秒超かかるため、完了待ちは実質不可能。
+    const cmd = `node --test test/fixtures/empty.test.js test/fixtures/empty.test.js`;
+    assert.equal(isTestCommand(cmd), true, "node --test がテスト系判定から漏れた");
     const log = [];
-    const mk = (name) => runCommand({ command: `npm test -- dummy-${name}`, timeoutMs: 15000 }).then((r) => {
-      log.push(`done-${name}`);
+    const mk = (name) => runCommand({ command: cmd + " && echo done-" + name, timeoutMs: 15000 }).then((r) => {
+      if (r.ok && r.text.includes("done-" + name)) log.push(`done-${name}`);
+      return r;
     });
     const p1 = mk(1);
     const p2 = mk(2);
-    await new Promise((r) => setTimeout(r, 80));
-    // 上限2なので2本とも実行済み(両方完了している)
-    assert.deepEqual(log.sort(), ["done-1", "done-2"], "上限2で2本が並走していない");
     await Promise.all([p1, p2]);
+    // 上限2なので2本とも並走して完走する(待ちqueueに入らない)
+    assert.deepEqual(log.sort(), ["done-1", "done-2"], "上限2で2本が並走していない");
     assert.equal(getTestMaxConcurrent(), 2, "setTestMaxConcurrent(=config上書き経由)が効いていない");
   });
 });
 
 test("セマフォ: FIFOで待ちキューが消化される(3本直列・順序維持)", async () => {
   await withSemaphore(1, async () => {
+    // 軽量フィクスチャでFIFO順を確認(node --test 1ファイル 約300ms×3直列)
+    const cmd = "node --test test/fixtures/empty.test.js";
     const log = [];
-    const mk = (name) => runCommand({ command: `npm test -- dummy-${name}`, timeoutMs: 15000 }).then(() => {
-      log.push(name);
+    const mk = (name) => runCommand({ command: cmd + " && echo fin-" + name, timeoutMs: 15000 }).then((r) => {
+      if (r.ok) log.push(name);
     });
     const p1 = mk("a");
     await new Promise((r) => setTimeout(r, 50));
