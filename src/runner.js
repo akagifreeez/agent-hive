@@ -10,6 +10,7 @@ import { createTools } from "./engine/tools.js";
 import { runAgentLoop } from "./engine/loop.js";
 import { PermissionGate } from "./engine/permissions.js";
 import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
+import { applyTestSemaphoreConfig } from "./engine/exec.js";
 import { setupWorktrees } from "./engine/worktree.js";
 import { respawnUnfinishedWork } from "./engine/respawn.js";
 import { runCommand } from "./engine/exec.js";
@@ -88,6 +89,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     return parts.length ? parts.join("\n\n") : null;
   };
 
+  applyTestSemaphoreConfig(config.exec);
   const discovery = startDiscovery({
     workspace: config.workspace, tasks, bus,
     intervalSec: config.discovery?.intervalSec ?? 30,
@@ -671,6 +673,7 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
   });
   bus.emit("worktrees.ready", { paths: Object.values(worktreePaths) });
 
+  applyTestSemaphoreConfig(config.exec);
   const discovery = startDiscovery({
     workspace: config.workspace,
     tasks,
