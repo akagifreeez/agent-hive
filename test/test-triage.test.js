@@ -70,7 +70,8 @@ test("extractErrorType / deriveArea: エラー種別とエリアを推定する"
   assert.equal(extractErrorType("TypeError: t0"), "TypeError");
   assert.equal(extractErrorType("何もない"), "Error");
   assert.equal(deriveArea("test/crash-guard.test.js", "x", "Error"), "crash-guard");
-  assert.equal(deriveArea("test/x.test.js", "onEvent/onPostフック経由でbusに流れ", "TypeError"), "hooks");
+  assert.equal(deriveArea("test/hooks.test.js", "何かのテスト", "Error"), "hooks");
+  assert.equal(deriveArea("test/long-run-resilience.test.js", "onEvent/onPostフック経由でbusに流れ、board投稿に使える", "TypeError"), "long-run-resilience");
   assert.equal(deriveArea("test/x.test.js", "承認フロー競合経路: 差し戻し記録", "AssertionError"), "approval-conflict");
   assert.equal(deriveArea("test/retry.test.js", "chat(stream): stall検知でリトライ", "Error"), "stream-stall");
   assert.equal(deriveArea("test/cli.test.js", "CLI: 何か", "AssertionError"), "cli");
@@ -85,7 +86,7 @@ test("parseTap: 実ログ形式(verboseサマリ+failing tests節)から8失敗�
   assert.equal(r.failures.length, 8);
   const files = r.failures.map((f) => f.file);
   assert.ok(files.includes("test/cli.test.js"));
-  assert.equal(files.filter((f) => f === "test/long-run-resilience.test.js").length, 4);
+  assert.equal(files.filter((f) => f === "test/long-run-resilience.test.js").length, 5);
   assert.ok(files.includes("test/model-policy.test.js"));
   assert.ok(files.includes("test/retry.test.js"));
   const names = r.failures.map((f) => f.name);
