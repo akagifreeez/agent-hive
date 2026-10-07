@@ -317,7 +317,7 @@
   #progress-chip:hover { color: var(--label); border-color: var(--line-strong); }
   #progress-chip.on { color: var(--accent); border-color: var(--accent); background: var(--accent-fill); }
   #progress-wrap { position: relative; display: inline-flex; margin-left: 10px; flex-shrink: 0; }
-  #progress-panel { display: none; position: absolute; top: 100%; right: 0; z-index: 60; width: min(460px, 90vw); max-height: 60vh; overflow: auto; background: var(--bg-elevated); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow-overlay); padding: 8px 10px; font-size: 12px; }
+  #progress-panel { display: none; position: absolute; top: 100%; right: 0; z-index: 60; width: min(460px, 90vw); max-width: 460px; max-height: 60vh; overflow: auto; overflow-y: auto; background: var(--bg-elevated); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow-overlay); padding: 8px 10px; font-size: 12px; }
   #progress-panel .pc-sec { font-weight: 600; color: var(--label); margin: 6px 0 4px; }
   #progress-panel .pc-none { color: var(--label-tertiary); padding: 2px 0 6px; }
   #progress-panel .pc-row { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; border-bottom: 1px solid var(--separator); min-width: 0; }
