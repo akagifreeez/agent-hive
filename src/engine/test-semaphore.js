@@ -18,13 +18,13 @@ const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラ
  */
 export function isTestCommand(command) {
   const c = String(command ?? "");
-  const start = "(^|[;&|(]\s*)";
+  const start = "(^|[;&|(]\\s*)";
   return new RegExp(start + "npm\\s+(run\\s+)?test\\b").test(c)
     || new RegExp(start + "npm\\s+(--[^\\s|;&()]+\\s+)*--test(\\s|$)").test(c)
     || new RegExp(start + "npm\\s+(--[^\\s|;&()]+\\s+)*(run\\s+)?(--[^\\s|;&()]+\\s+)*(run\\s+)?test\\b").test(c)
     || new RegExp(start + "npm\\s+(run\\s+)?test\\s+[\\w:@/.\\-\\[\\]*]").test(c)
     || new RegExp(start + "node\\s+--test").test(c)
-    || /npms+(runs+)?test/.test(c); // 文字列中の参照もテスト実行意図として保守的に捕捉
+    || /\bnpm\s+(run\s+)?test\b/.test(c); // 文字列中の参照もテスト実行意図として保守的に捕捉
 }
 
 // ---- セマフォ本体(モジュール単一 = プロセス横断で共有) ----
@@ -66,6 +66,8 @@ function drain() {
  * @returns {Promise<{ok: boolean, text: string}>} */
 export async function runTestCommand(o, run) {
   const queueTimeoutMs = o.queueTimeoutMs ?? 600000; // 既定10分
+  const cmdMs = Number(o.timeoutMs) > 0 ? Number(o.timeoutMs) : Infinity;
+  const waitLimitMs = Math.min(queueTimeoutMs, cmdMs); // 待ちもコマンドタイムアウトに従う(即時諦め)
   const label = o.label ?? String(o.command ?? "").slice(0, 80);
   if (!isFree()) {
     const entry = enqueue(label);
@@ -75,7 +77,7 @@ export async function runTestCommand(o, run) {
         queue.splice(i, 1);
         entry.reject(new QueueTimeout(label));
       }
-    }, queueTimeoutMs);
+    }, waitLimitMs);
     try {
       await entry.p; // drain()がこの分のスロット(running)を確保済み。ここでは加算しない(二重加算=スロットリークの原因)
     } catch (err) {
