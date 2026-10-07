@@ -131,6 +131,13 @@ function releaseTestSlot() {
   if (next) next();
 }
 
+/** テスト実行セマフォの上限をconfig値で上書きする。null/undefined/不正値は既定(1)維持。
+ *  @param {number|null} [n] hive.config.json の exec.testMaxConcurrent */
+export function applyTestMaxConcurrent(n) {
+  if (n === null || n === undefined) return;
+  setTestMaxConcurrent(n);
+}
+
 /**
  * コマンドを実行する(outputLimitで出力を丸める)。cwd省略時はプロセスのカレント。
  * 子プロセスの環境はscrubEnvで鍵っぽい変数を落として渡す(env引数は明示割り当てとして上書き)。
