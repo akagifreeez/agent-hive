@@ -77,9 +77,10 @@ export async function detectShell() {
 // タイムアウトやフレーキーの主因になっていた。テストだけ直列化(上限N)して防ぐ。
 // 上限は setTestMaxConcurrent() で注入(hive.config.json の exec.testMaxConcurrent)。
 const TEST_COMMAND_RE = new RegExp(
-  "(^|[\s&;|])npm\\s+(?:-{1,2}[\\w.-]+\\s+)*(?:test(?::[A-Za-z0-9._-]+)?|--test)(?![\\w-])" +
-  "|(^|[\s&;|])npm\\s+(?:-{1,2}[\\w.-]+\\s+)*(?:run|exec)\\s+(?:-{1,2}[\\w.-]+\\s+)*test(?::[A-Za-z0-9._-]+)?(?![\\w-])" +
-  "|(^|[\s&;|])node\\s+(?:-{1,2}[^\\s]+\\s+)*--test(?![\\w-])");
+  "(^|[\\s&;|])npm\\s+(?:-{1,2}[\\w.-]+\\s+)*(?:test(?::[A-Za-z0-9._-]+)?|--test)(?![\\w-])" +
+  "|(^|[\\s&;|])npm\\s+(?:-{1,2}[\\w.-]+\\s+)*(?:run|exec)\\s+(?:-{1,2}[\\w.-]+\\s+)*test(?::[A-Za-z0-9._-]+)?(?![\\w-])" +
+  "|(^|[\\s&;|])node\\s+(?:-{1,2}[^\\s]+\\s+)*--test(?![\\w-])");
+ // npm test/npm --test/npm run|exec ... test(:xxx) と node --test にマッチ(行頭・空白・& ; | 直後の起動セグメント)
  // npm test/npm --test/npm run|exec ... test(:xxx) と node --test にマッチ(行頭・空白・& ; | 直後の起動セグメント)
 
 // プロセス横断の実行中カウントとFIFO待ちキュー(モジュール単一インスタンスが全呼び出しで共有)
