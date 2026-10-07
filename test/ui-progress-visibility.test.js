@@ -60,3 +60,12 @@ test("UI: 進捗チップはSSE更新で即時再描画される(refreshSoon経�
   const sp = html.indexOf("syncProgressChip(lastState);");
   assert.ok(ra >= 0 && sp > ra, "renderAll内でsyncProgressChipが呼ばれる");
 });
+
+test("UI: 進捗チップ更新の起点SSEイベント(task.created/claimed/finished/merge.completed)が固定されている", () => {
+  // refreshSoon再描画の対象イベント配列に4種が入っていること(チップ即時更新の根拠)
+  const list = html.match(/\[\s*"agent\.turn"[\s\S]*?\.includes\(type\)/);
+  assert.ok(list, "SSE再描画対象イベントの配列がある");
+  for (const ev of ["task.created", "task.claimed", "task.finished", "merge.completed"]) {
+    assert.ok(list[0].includes("" + ev + ""), ev + " が再描画対象に入っている");
+  }
+});
