@@ -19,7 +19,7 @@ import { modelStateInfo, resolveDefaultSpec, probeModel, startOpenAIAuth } from 
 import { buildCatalog } from "../model/catalog.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
-import { aggregateUsage, localDateKey, aggregateCacheHits } from "../engine/usage.js";
+import { aggregateUsage, localDateKey, aggregateCacheHits, CACHE_HIT_LOW_THRESHOLD } from "../engine/usage.js";
 import { summarizeSessionDir } from "../engine/session-report.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -1325,7 +1325,7 @@ function persistUsage(workspace, entry) {
 /**
  * @param {string} workspace
  * @param {{agent?: string|null, fromTurn?: number|string|null, toTurn?: number|string|null, file?: string|null}} [opts] fromTurn/toTurnは文字列(URLクエリ)での指定も受け付ける(内部でNumber化)
- * @returns {{series: Array<{agent: string, points: Array<{ts: string, turn: number, prompt: number, completion: number, reasoning: number, totalTokens: number, tokPerSec: number|null}>, totalTokens: number, tokPerSec: number|null, lastTokPerSec: number|null}>, total: {turns: number, totalTokens: number, byAgent: Record<string, number>, tokPerSec: number|null}, lastTs: string|null, cacheHits: ReturnType<typeof aggregateCacheHits>}}
+ * @returns {{series: Array<{agent: string, points: Array<{ts: string, turn: number, prompt: number, completion: number, reasoning: number, totalTokens: number, tokPerSec: number|null}>, totalTokens: number, tokPerSec: number|null, lastTokPerSec: number|null}>, total: {turns: number, totalTokens: number, byAgent: Record<string, number>, tokPerSec: number|null}, lastTs: string|null, cacheHits: ReturnType<typeof aggregateCacheHits>, cacheHitLowThreshold: number}}
  */
 export function analyzeUsageTrace(workspace, opts = {}) {
   const cacheHitRows = [];
@@ -1394,7 +1394,7 @@ export function analyzeUsageTrace(workspace, opts = {}) {
     if (r.ms > 0) { msSum += r.ms; completionSum += r.completion; }
     if (!lastTs || r.ts > lastTs) lastTs = r.ts;
   }
-  return { series, cacheHits: aggregateCacheHits(cacheHitRows), total: { turns, totalTokens, byAgent: byAgentTotal, tokPerSec: msSum > 0 ? completionSum / (msSum / 1000) : null }, lastTs };
+  return { series, cacheHits: aggregateCacheHits(cacheHitRows), cacheHitLowThreshold: CACHE_HIT_LOW_THRESHOLD, total: { turns, totalTokens, byAgent: byAgentTotal, tokPerSec: msSum > 0 ? completionSum / (msSum / 1000) : null }, lastTs };
 }
 
 // /api/audit: state/audit.jsonl(+1世代前 audit-1.jsonl)の末尾limit件を新着順で返す。

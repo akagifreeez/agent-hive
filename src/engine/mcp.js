@@ -215,6 +215,14 @@ export class McpHost {
     } catch {}
   }
 
+  // 起動失敗・切断時に全pending要求を失敗させる(タイマーも解放)
+  failPending(message) {
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(new Error(message));
+    }
+    this.pending.clear();
+  }
   stop() {
     try { this.child?.kill(); } catch {}
   }
