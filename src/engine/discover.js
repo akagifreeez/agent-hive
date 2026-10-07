@@ -35,7 +35,8 @@ const SMOKE_TEST_FILE = "test/exec.test.js"; // 高速(2秒前後)・依存ゼ�
  */
 export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCommand, probes = null, exec = runCommand }) {
   const mode = String(probes?.tests ?? (testCommand ? "custom" : "smoke")); // "smoke"|"full"|"custom"|"off"
-  const command = testCommand ?? (mode === "smoke" ? `node --test ${SMOKE_TEST_FILE}` : null);
+  // smoke=軽量スモーク(既定) / full=旧挙動のフルスイート / custom=testCommand明示 / off=プローブ停止
+  const command = testCommand ?? (mode === "smoke" ? `node --test ${SMOKE_TEST_FILE}` : mode === "full" ? "npm test" : null);
   let stopped = false;
   let busy = false;
 

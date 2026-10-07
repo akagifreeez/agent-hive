@@ -102,7 +102,8 @@ test("プローブ既定はスモーク(フルスイートを回さない)・ful
   // 既定(probes未指定): スモークコマンドが使われ、フルスイートは回さない
   const d = startDiscovery({ workspace: ws, tasks, bus, intervalSec: 3600, exec: fakeExec });
   await d.tick();
-  assert.equal(ran.length, 1);
+  const testRuns = () => ran.filter((c) => !c.startsWith("git ")).length;
+  assert.equal(testRuns(), 1);
   assert.match(ran[0], /node --test /);
   assert.equal(ran[0].includes("npm test"), false);
   d.stop();
@@ -110,8 +111,8 @@ test("プローブ既定はスモーク(フルスイートを回さない)・ful
   ran.length = 0;
   const d2 = startDiscovery({ workspace: ws, tasks, bus, intervalSec: 3600, probes: { tests: "full" }, exec: fakeExec });
   await d2.tick();
-  assert.equal(ran.length, 1);
-  assert.equal(ran[0], "npm test");
+  assert.equal(testRuns(), 1);
+  assert.equal(ran.find((c) => !c.startsWith("git ")), "npm test");
   d2.stop();
   rmTree(ws);
 });
