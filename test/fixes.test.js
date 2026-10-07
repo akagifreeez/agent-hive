@@ -122,8 +122,7 @@ test("releaseOne: 指定1件だけopenへ戻す。openに同名があれば壊�
   assert.match(readFileSync(join(ws, "tasks/open/t1.md"), "utf8"), /UIから解放/);
   assert.equal(tasks.snapshot().claimed.length, 1); // t2はstill claimed
   // openに同名が既にある場合は失敗(上書きしない)
-  writeFileSync(join(ws, "tasks/open/t2.md"), "手動で投入済み
-"); // イシュー#30以降: create()は請求中IDの再createを拒否
+  writeFileSync(join(ws, "tasks/open/t2.md"), "手動で投入済み\n"); // イシュー#30以降: create()は請求中IDの再createを拒否するため直接書き込み
   assert.equal(tasks.releaseOne("alpha", "t2", "note"), false);
   assert.equal(readFileSync(join(ws, "tasks/open/t2.md"), "utf8").includes("手動で投入済み"), true);
   rmTree(ws);
