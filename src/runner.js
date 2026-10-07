@@ -12,6 +12,7 @@ import { PermissionGate } from "./engine/permissions.js";
 import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
 import { applyTestSemaphoreConfig } from "./engine/exec.js";
 import { setupWorktrees } from "./engine/worktree.js";
+import { ensureMainCheckout } from "./engine/branch-guard.js";
 import { respawnUnfinishedWork } from "./engine/respawn.js";
 import { runCommand } from "./engine/exec.js";
 import { UsageLedger } from "./engine/usage.js";
@@ -55,9 +56,35 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   }
   await ensureGitRepo(config.workspace);
 
+  // 漂流チェック(runChat): チャット起動時も同様にmainワークスペースのチェックアウトを検査。
+  // 漂流+中断マージの残骸はゾンビ回収・ラウンド開始より先に片付ける(判定不能時は何もしない)。
+  try {
+    const gc = await ensureMainCheckout({ mainWorkspace: config.workspace });
+    if (gc.branch && gc.branch !== "main") {
+      const driftMsg = gc.ok
+        ? "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされていました。mainへ復帰しました。"
+        : "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされており、自動復帰できませんでした: " + (gc.reason ?? "");
+      mainBoard.post("system", driftMsg);
+      bus.emit("scenario.warn", { message: driftMsg });
+    }
+  } catch (err) {
+    bus.emit("scenario.warn", { message: "起動時ブランチチェックに失敗(起動は続行): " + (err instanceof Error ? err.message : err) });
+  }
+
   // 起動時のゾンビclaim回収: プロセス再起動で走行中ラウンドは全て死んでいるため、claimedのまま
   // 残ったタスクは誰にも進められない(idle-claim待ちのデッドロック)。起動直後なので全claimedは
   // ゾンビと見なして解放する(task.releasedが出るが、この時点でラウンドは無いので無害)
+  // プロセスガードのboard可視化(long-run-resilience): index.jsのwireCrashGuardが
+  // "crash.guarded"を出すので、ここでメインボードへ[システム]投稿する(黙殺防止)。
+  // 頻度警告(process.burst相当)も同じく可視化。
+  bus.on("crash.guarded", (e) => {
+    if (e.kind === "rate.warn") return; // 頻度警告は別メッセージで流す
+    try { mainBoard.post("system", `[プロセス警告] ${e.kind} を捕捉(プロセスは生存しています): ${String(e.message).slice(0, 300)}`); } catch { /* 投稿失敗でガードを止めない */ }
+  });
+  bus.on("crash.rate", (e) => {
+    try { mainBoard.post("system", `[プロセス警告][異常頻度] ガード対象エラーがしきい値を超えました。ログ run-chat.err.log を確認してください(${String(e.body ?? "").slice(0, 150)})`); } catch { /* 同上 */ }
+  });
+
   const zombies = tasks.list().claimed;
   for (const t of zombies) {
     tasks.release(t.agent, "[起動時回収] プロセス再起動により走行中ラウンドが消滅したため解放しました");
@@ -334,6 +361,9 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     const t = threads.get(name);
     if (!t) return { error: `スレッド ${name} は開いていません` };
     threads.delete(name);
+    // 閉じたスレッドのホストを破棄(bus購読解除+起床遮断)。これが無いと
+    // 閉鎖後も task.created/task.released でワーカーが起こされ続ける(イシュー#29)。
+    try { t.host?.dispose?.(); } catch (e) { console.error("[closeThread] dispose失敗", e); }
     writeRegistry();
     bus.emit("thread.closed", { name });
     t.board.post("system", `[スレッド終了] ${name} を閉じました。成果物とログは保持されています(再open時は履歴ごと戻ります)。`);
@@ -552,6 +582,13 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     setThreadFolder,
     setThreadPaused,
     listThreads: () => [...threads.keys()],
+    // プロセス警告の投稿先解決(long-run-resilience): スレッド名→そのスレッドのBoard。
+    // __main__はメインボード。開いていないスレッドはnull
+    boardOf: (threadName) => {
+      const name = String(threadName ?? "").trim();
+      if (name === mainBoard.name) return mainBoard;
+      return threads.get(name)?.board ?? null;
+    },
     runDiscussion: (req) => {
       // モデル横断ディスカッション: 接続済みプロバイダの代表モデル同士を1つのボードで議論させる。
       // host無しのBoard単体スレッド(タスク請求なし)なので、発言分のトークンだけで完結する
@@ -654,8 +691,31 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
     writeFileSync(p, f.content);
   }
   await ensureGitRepo(config.workspace);
+
+  // 起動時ブランチ漂流チェック(self-improve-lab-lessons): mainワークスペースのチェックアウトが
+  // agent/<id>等へ漂流していたら安全にmainへ復帰し、逸脱をボードへ警告(2026-10-07朝の本番実害)。
+  // 判定不能(git不在等)は起動を止めない(既存契約)。
+  try {
+    const gc = await ensureMainCheckout({ mainWorkspace: config.workspace });
+    if (gc.branch && gc.branch !== "main") {
+      const driftMsg = gc.ok
+        ? "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされていました。mainへ復帰しました。"
+        : "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされており、自動復帰できませんでした: " + (gc.reason ?? "");
+      board.post("system", driftMsg);
+      bus.emit("scenario.warn", { message: driftMsg });
+    }
+  } catch (err) {
+    bus.emit("scenario.warn", { message: "起動時ブランチチェックに失敗(起動は続行): " + (err instanceof Error ? err.message : err) });
+  }
   tasks.seed(config.scenario.tasks);
   bus.emit("scenario.started", { name: config.scenario.name, tasks: config.scenario.tasks.map((t) => t.id) });
+
+  // 起動時のゾンビclaim回収(runScenario): チャット(runChat)と同じく、プロセス再起動で
+  // claimedのまま宙吊りになったタスクを解放する(2026-10-07 hive-lab-dash実害: alpha/delta
+  // 二重宙吊りでidle-claim待ちデッドロック)。seedより先に回収し、再投入と干渉しない。
+  for (const z of tasks.list().claimed) {
+    tasks.releaseOne(z.agent, z.id, "[起動時回収] 前回走行のラウンド消滅により解放しました(宙吊りclaim回収)");
+  }
 
   // v3: エージェント別worktree(作業の隔離)
   const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
