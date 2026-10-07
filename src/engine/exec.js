@@ -77,21 +77,22 @@ export async function detectShell() {
  * コマンドを実行する(outputLimitで出力を丸める)。cwd省略時はプロセスのカレント。
  * 子プロセスの環境はscrubEnvで鍵っぽい変数を落として渡す(env引数は明示割り当てとして上書き)。
  * @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number}} o
+ * @param {string} [keep="head"] 出力の丸め方向。"head"=先頭から保持(従来動作・既定)|"tail"=末尾を保持(テストサマリ等・失敗節が末尾に出る形式向け)
  * @returns {Promise<{ok: boolean, text: string}>}
  */
-export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null }) {
+export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null, keep = "head" }) {
   // テスト系コマンド(npm test / node --test 等)はプロセス横断セマフォで直列化する
   // (exec-test-semaphore)。非テストコマンドは従来どおり即実行(影響ゼロ)。
   if (isTestCommand(command)) {
-    return runTestCommand({ command, cwd, timeoutMs, outputLimit, env }, runCommandInner);
+  return runTestCommand({ command, cwd, timeoutMs, outputLimit, env, keep }, runCommandInner);
   }
-  return runCommandInner({ command, cwd, timeoutMs, outputLimit, env });
+  return runCommandInner({ command, cwd, timeoutMs, outputLimit, env, keep });
 }
 
 /** @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number}} o
  * @returns {Promise<{ok: boolean, text: string}>}
  */
-async function runCommandInner({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null }) {
+async function runCommandInner({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null, keep = "head" }) {
   const kind = await detectShell();
   const childEnv = scrubEnv(process.env, env);
   const child =
@@ -100,7 +101,12 @@ async function runCommandInner({ command, cwd, timeoutMs = 30000, outputLimit = 
       : spawn(command, { shell: true, cwd, windowsHide: true, env: childEnv });
   let out = "";
   const append = (d) => {
-    if (out.length < outputLimit) out += d.toString();
+    if (keep === "tail") {
+      out += d.toString();
+      if (out.length > outputLimit) out = out.slice(out.length - outputLimit);
+    } else if (out.length < outputLimit) {
+      out += d.toString();
+    }
   };
   child.stdout.on("data", append);
   child.stderr.on("data", append);
