@@ -80,8 +80,9 @@ export function loadSession(workspace, name) {
   mkdirSync(src, { recursive: true });
   try {
     const wanted = new Set(readdirSync(dstDir));
-    for (const f of wanted) {
-      copyFileSync(join(dstDir, f), join(src, f));
+    for (const e of readdirSync(dstDir, { withFileTypes: true })) {
+      if (e.isDirectory()) cpSync(join(dstDir, e.name), join(src, e.name), { recursive: true });
+      else copyFileSync(join(dstDir, e.name), join(src, e.name));
     }
     // 集合一致: スナップショットに無い対象内ファイルを削除(別セッションの履歴混入防止)
     for (const e of readdirSync(src, { withFileTypes: true })) {
