@@ -50,7 +50,7 @@ function mkHost({ project = "dispose-t" } = {}) {
     toolsFactory: (a) => createTools({ agent: a, workspace: ws, mainWorkspace: null, board, tasks, bus }),
     board, tasks, bus,
   });
-  return { host, board, tasks, bus, calls, agent, ws };
+  return { host, board, tasks, bus, calls, agent, ws, cleanup: () => rmSync(ws, { recursive: true, force: true }) };
 }
 
 test("dispose: bus購読が全解除され、task.created/releasedで起こされない", async () => {
@@ -67,7 +67,7 @@ test("dispose: bus購読が全解除され、task.created/releasedで起こさ�
 
     const after = { board: listenersBefore("board"), created: listenersBefore("task.created"), finished: listenersBefore("task.finished"), merged: listenersBefore("agent.merged"), released: listenersBefore("task.released") };
     assert.equal(after.board, before.board - 1, "board購読が解除される");
-    assert.equal(after.created, before.created - 1, "task.created購読が解除される(起床+着地の2本)");
+    assert.equal(after.created, before.created - 2, "task.created購読が解除される(起床+着地の2本)");
     assert.equal(after.finished, before.finished - 1, "task.finished購読が解除される");
     assert.equal(after.merged, before.merged - 1, "agent.merged購読が解除される");
     assert.equal(after.released, before.released - 1, "task.released購読が解除される");
