@@ -380,7 +380,7 @@ function translateHttpError(status, text = "") {
 const STREAM_ABORT_HINTS = ["terminated", "aborted", "aborterror", "econnreset", "epipe", "econnaborted", "fetch failed", "network", "socket", "premature close", "other side closed"];
 
 /**
- * 中断系エラーかを判定する(メッセージ+cause連鎖を laughed探査)。
+ * 中断系エラーかを判定する(メッセージ+cause連鎖をさかのぼって探査)。
  * @param {unknown} err
  * @returns {boolean}
  */
