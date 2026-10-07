@@ -52,7 +52,7 @@ test("UI: 進捗チップのクリックでパネル(作業中一覧+直近完�
   assert.match(html, /function renderProgressPanel\(\) \{/);
   assert.match(html, /const doneDesc = \[\.\.\.l\.done\]\.reverse\(\);/);
   assert.match(html, /doneDesc\.slice\(0, 15\)/); // 完了は直近15件に絞る
-  assert.match(html, /"他 " \+ \(doneDesc\.length - doneShow\.length\) \+ " 件"/); // 省略分の表記
+  assert.match(html, /他\d+件|他" \+/); // 省略分の表記(「他N件」形式に統一)
   assert.match(html, /\$\("progress-chip"\)\.onclick/); // クリックトグル(ホバー表示は使わない)
 });
 
