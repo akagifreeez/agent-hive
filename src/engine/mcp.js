@@ -75,6 +75,7 @@ export class McpHost {
     this.connected = false;
     this.child.on("error", (err) => {
       this.connected = false;
+      this.childError = err.message;
       this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
@@ -118,18 +119,6 @@ export class McpHost {
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
         p.reject(new Error(`MCPサーバー ${this.name} が終了しました(code=${code})`));
-      }
-      this.pending.clear();
-    });
-    // #27: 起動コマンドが存在しない等の子プロセスの非同期error(ENOENT等)。ここを捕まえないと
-    // Unhandled 'error' event でhiveプロセス全体が落ちる。起動失敗してもhiveは続行する(契約)。
-    // pending要求は全てok:false系のrejectへ回し、以後のrequestも即座に失敗させる(不整合防止)。
-    this.child.on("error", (err) => {
-      this.childError = err.message;
-      this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
-      for (const p of this.pending.values()) {
-        clearTimeout(p.timer);
-        p.reject(new Error("MCPサーバー " + this.name + " の起動に失敗: " + err.message));
       }
       this.pending.clear();
     });
