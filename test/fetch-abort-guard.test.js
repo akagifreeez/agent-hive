@@ -39,13 +39,24 @@ test("isStreamAbortError: undici中断系(TypeError: terminated/fetch failed+cau
   assert.equal(isStreamAbortError(new Error("APIキーが拒否されました(401)")), false, "非中断系は誤検出しない");
 });
 
-/** 通常のJSON応答(リトライ後の正常系ダミー) */
-function okJsonResponse(content = "復帰") {
+/** 正常なSSE応答(リトライ後の正常系ダミー) */
+function okSseResponse(content = "復帰") {
+  const enc = new TextEncoder();
+  let reads = 0;
   return {
     ok: true,
     status: 200,
     headers: { get: () => null },
-    json: async () => ({ choices: [{ message: { content, tool_calls: [] } }], usage: { prompt_tokens: 3, completion_tokens: 2 } }),
+    body: {
+      getReader: () => ({
+        read: async () => {
+          reads++;
+          if (reads === 1) return { done: false, value: enc.encode(`data: {"choices":[{"delta":{"content":${JSON.stringify(content)}}}]}\n\n`) };
+          if (reads === 2) return { done: false, value: enc.encode(`data: {"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n`) };
+          return { done: true, value: undefined };
+        },
+      }),
+    },
   };
 }
 
@@ -57,13 +68,14 @@ test("ストリーム途中切断ダミー: 未達リトライなら成功へ復
   globalThis.fetch = async (url, opts) => {
     calls.push(1);
     if (calls.length === 1) return brokenSseResponse(2, termin); // 1チャンク読んだ後に切断
-    return okJsonResponse("復帰");
+    return okSseResponse("復帰"); // リトライ後もストリーミング(onDelta渡し)で一貫させる
   };
   try {
     const deltas = [];
     const r = await MODEL().chat({ messages: [{ role: "user", content: "hi" }], onDelta: (d) => deltas.push(d) });
     assert.equal(calls.length, 2, "切断後に1回リトライして計2呼出");
     assert.equal(r.content, "復帰", "リトライで正常応答へ復帰する");
+    assert.ok(deltas.some((d) => d.kind === "say" && d.text === "復帰"), "復帰後の断片がonDeltaへ流れる");
   } finally {
     globalThis.fetch = origFetch;
   }
@@ -77,7 +89,7 @@ test("ストリーム途中切断ダミー: リトライし切ったら行動化
   globalThis.fetch = async () => { calls++; return brokenSseResponse(1, termin); };
   try {
     await assert.rejects(
-      () => MODEL().chat({ messages: [{ role: "user", content: "hi" }], onDelta: null }),
+      () => MODEL().chat({ messages: [{ role: "user", content: "hi" }], onDelta: () => {} }),
       (err) => {
         assert.match(err.message, /ストリームが切断されました/, "行動化できる文面へ正規化される");
         assert.match(err.message, /リトライ10回/, "リトライし切ったことが分かる");
