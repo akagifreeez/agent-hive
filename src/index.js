@@ -5,7 +5,11 @@ import { Bus } from "./engine/board.js";
 import { startUi } from "./ui/server.js";
 import { chatUiHandlers } from "./ui/chat-wiring.js";
 import { wireConsoleLog } from "./log.js";
-import { wireCliNotify, wireStallNotify } from "./notify.js";
+import { wireCliNotify, wireStallNotify, printNotifyLine } from "./notify.js";
+import { wireCrashGuard } from "./engine/crash-guard.js";
+
+// プロセスガードのログ先(ワークスペース直下。*.logはgitignore済み)
+const GUARD_LOG_FILE = "run-chat.err.log";
 
 function usage() {
   console.log(`agent-hive — 複数エージェントが同一ワークスペースで同時作業するハーネス
@@ -18,6 +22,15 @@ function usage() {
 }
 
 async function main() {
+  // プロセス生存ガード(long-run-resilience): 未捕捉rejection/例外を捕捉してプロセスを落とさない。
+  // 黙殺しない: ログ(run-chat.err.log)へスタック全文+目立つコンソール通知1行。
+  // board[システム]投稿はBus生成後、crash.guardedイベント経由でrunner.runChat側が受け持つ。
+  // 1時間20件超の「異常頻度」警告はcrash-guard内蔵のカウンタが担う。
+  const crashGuard = wireCrashGuard({
+    logFile: GUARD_LOG_FILE,
+    onNotify: (n) => { try { printNotifyLine(n); } catch { /* 通知失敗でガードを止めない */ } },
+  });
+  void crashGuard; // 起動中は常に配線(プロセス寿命と同じ)
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) return usage();
   const config = loadConfig(args.includes("--config") ? args[args.indexOf("--config") + 1] : undefined);

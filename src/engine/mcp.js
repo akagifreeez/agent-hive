@@ -69,6 +69,23 @@ export class McpHost {
       this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
       return { ok: false, error: err.message };
     }
+    // 子プロセスの非同期起動失敗(ENOENT等)はspawn()自体は成功し、後から 'error' イベントで
+    // 飛んでくる。ハンドラが無いとUnhandled 'error' eventでhive全体が落ちる(イシュー#27)。
+    // → ここで捕捉してbus通知+pending全reject+切断状態へ。以後のrequest()は即rejectする。
+    this.connected = false;
+    /** @type {Array<{name: string, description?: string, inputSchema?: any}>} */
+    this.child.on("error", (err) => {
+      this.connected = false;
+      this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(new Error(`MCPサーバー ${this.name} が起動できません: ${err.message}`));
+      }
+      this.pending.clear();
+      try { this.child?.kill(); } catch { /* 既に死んでいる */ }
+    });
+    // stdinのEPIPE等も未捕捉だとプロセス死の種になるので同様に飲み込む
+    /** @type {any} */ (this.child.stdin)?.on?.("error", () => { /* EPIPE等。 'error'側で失敗通知する */ });
     let out = "";
     this.child.stdout.on("data", (d) => {
       out += d.toString();
