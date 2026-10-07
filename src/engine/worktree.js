@@ -126,6 +126,7 @@ export function statSummary(statText) {
  * @property {string} [summary]
  * @property {boolean} [autoMerged] 競合からの自動再マージで成功した
  * @property {boolean} [marker] 競合マーカーガードに拒否された
+ * @property {boolean} [commitFailed] worktree側のgit add/commitに失敗した(fix#28)
  */
 /**
  * @param {Object} o
@@ -155,11 +156,21 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
       return { ok: false, marker: true, text: `mainに競合マーカーが残っています(${files})。マージを中止しました。先にmain側のマーカーを解消してください。` };
     }
     // 1) worktree側の未コミット変更を確定(変更がなければno-op)
-    await exec({
+    // fix#28: add/commitの失敗(pre-commitフックのexit 1等)を無視してマージへ進めない。
+    // `git diff --cached --quiet || git commit ...` 形式のため、コミット不要(no-op)は
+    // exit 0、コミット実施も exit 0、コミット失敗のみ非ゼロになる。
+    const cm = await exec({
       command: `git add -A && (git diff --cached --quiet || git -c user.name=${agent.id} -c user.email=${agent.id}@hive.local commit -m 'wip: ${taskId}')`,
       cwd: worktreePath,
       outputLimit: 2000,
     });
+    if (!cm.ok) {
+      return {
+        ok: false,
+        commitFailed: true,
+        text: `worktree側のコミットに失敗しました(pre-commitフック等)。成果はmainへ取り込まれていません。worktree内で失敗原因を解消してから再度 finish_task してください。\n\ngitの出力:\n${cm.text.slice(0, 1200)}`,
+      };
+    }
     // 1.5) ブランチ側ガード: このマージで運ばれるファイルにマーカーが入っていれば拒否し、
     //      作業者へ返送する(マーカー入りの確定をmainに作らない)
     const dirty = await exec({ command: `git diff --name-only main...agent/${agent.id}`, cwd: mainWorkspace, outputLimit: 4000 });
