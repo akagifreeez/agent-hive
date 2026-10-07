@@ -50,7 +50,7 @@
       "beta",
       "gamma"
     ],
-    "maxTurnsPerRound": 12,
+    "maxTurnsPerRound": 20,
     "autoContinueRounds": 6,
     "requireSeparateApprove": true,
     "idleClaimWaitSec": 45,
