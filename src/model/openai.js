@@ -115,12 +115,15 @@ export class OpenAIModel {
         try {
           parsed = await consumeStream(res, onDelta);
         } catch (err) {
-          // ストリーム途中切断もリトライ対象(再試行は最初から)
+          // ストリーム途中切断もリトライ対象(再試行は最初から)。
+          // undiciの中断系(TypeError: terminated / Fetch.onAborted / ECONNRESET等)を
+          // ネットワーク系として正規化(long-run-resilience: 2026-10-04のプロセス死対策)。
+          // リトライし切ったら行動化エラー(ループが次の行動を決められる形)として投げる
           if (attempt <= RETRY_MAX_RETRIES) {
             await modelSleep(computeRetryDelay(attempt));
             continue;
           }
-          throw new Error(`ストリームが途切れました: ${err.message}`);
+          throw new Error(translateStreamAbortError(err));
         }
         msg = { content: parsed.content || null, tool_calls: parsed.rawToolCalls, reasoning: parsed.reasoning ?? undefined };
         usage = parsed.usage;
@@ -368,4 +371,39 @@ function translateHttpError(status, text = "") {
   if (status === 404) return `モデルまたはURLが見つかりません(404)。model/baseUrlを確認。${short}`;
   if (status === 429) return `レート制限(429)。時間を置くかモデルを見直し。${short}`;
   return `モデルAPIエラー(${status}): ${short}`;
+}
+
+// ストリーム中断系エラーの正規化(long-run-resilience)。
+// undici(内蔵fetch)の切断は種々の形で出る: TypeError: terminated(Fetch.onAborted)、
+// TypeError: fetch failed(causeにECONNRESET/EPIPE等)、AbortError(タイムアウト)。
+// どれもネットワーク系として分類し、行動化できる1文にまとめる(プロセスは落とさない)。
+const STREAM_ABORT_HINTS = ["terminated", "aborted", "aborterror", "econnreset", "epipe", "econnaborted", "fetch failed", "network", "socket", "premature close", "other side closed"];
+
+/**
+ * 中断系エラーかを判定する(メッセージ+cause連鎖を laughed探査)。
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isStreamAbortError(err) {
+  let cur = err;
+  for (let depth = 0; cur && depth < 5; depth++) {
+    const msg = String(cur.message ?? cur).toLowerCase();
+    if (STREAM_ABORT_HINTS.some((h) => msg.includes(h))) return true;
+    if (cur.name && String(cur.name).toLowerCase() === "aborterror") return true;
+    cur = /** @type {any} */ (cur).cause;
+  }
+  return false;
+}
+
+/**
+ * ストリーム中断をリトライし切ったときの行動化エラー文面。
+ * @param {unknown} err
+ * @returns {string}
+ */
+export function translateStreamAbortError(err) {
+  const detail = String(err?.message ?? err).slice(0, 200);
+  if (isStreamAbortError(err)) {
+    return `ストリームが切断されました(ネットワーク瞬断の可能性)。リトライ${RETRY_MAX_RETRIES}回で不調。モデル呼び出しを諦めて次の行動を決めてください(待機/他タスク/ボード報告): ${detail}`;
+  }
+  return `ストリームが途切れました: ${detail}`;
 }
