@@ -2,6 +2,7 @@
 // 残る間はラウンド終了の自動マージを保留し([承認待ち]告知)、承認後(approve_task)にだけ
 // mainへ取り込まれることを検証する。実ChatHost+実git(worktree)方式。
 // 注: 旧版(48e7a8e)は未定義ヘルパー/未定義識別子で実行不可だったため、現行APIに合わせて再実装した。
+// 待ちポーリングは120秒: 実駆動54秒(無負荷)のラウンド完了待ちがあり、60秒は並行負荷で不足しうる(2026-10 hooks#28と同型)。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
