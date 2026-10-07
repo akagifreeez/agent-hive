@@ -110,15 +110,17 @@ export class McpHost {
       }
     });
     this.child.stderr.on("data", () => {}); // サーバーのログは捨てる
-    // stdin側のEPIPE等もUnhandled 'error' eventの火種になるため握りつぶす(write側はrequestでガード)
-    this.child.stdin.on("error", () => {});
     // 子のstdioパイプがイベントループを握ってプロセスが終わらなくならないようにする
     this.child.unref?.();
     /** @type {any} */ (this.child.stdout).unref?.();
     /** @type {any} */ (this.child.stderr).unref?.();
     this.connected = true; // 'error'イベントでfalseへ(起動失敗・早期終了の切断状態)
     this.child.on("exit", (code) => {
-      this.failPending(`MCPサーバー ${this.name} が終了しました(code=${code})`);
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(new Error(`MCPサーバー ${this.name} が終了しました(code=${code})`));
+      }
+      this.pending.clear();
     });
     // stdinへの書き込みもEPIPEで投げることがある(error伝播を止めるだけが目的)
     this.child.stdin?.on?.("error", () => {});
@@ -156,26 +158,12 @@ export class McpHost {
 
   async call(name, args) {
     const local = name.slice(`mcp__${this.name}__`.length);
-    let r;
-    try {
-      r = await this.request("tools/call", { name: local, arguments: args ?? {} });
-    } catch (err) {
-      return { ok: false, text: "MCP呼び出しに失敗しました: " + err.message };
-    }
+    const r = await this.request("tools/call", { name: local, arguments: args ?? {} });
     const text = (r.content ?? [])
       .filter((c) => c.type === "text")
       .map((c) => c.text)
       .join("\n");
     return { ok: !r.isError, text: text || "(空の結果)" };
-  }
-
-  // pending中の全要求をrejectして切断状態へ(起動失敗・終了の共通経路)
-  failPending(message) {
-    for (const p of this.pending.values()) {
-      clearTimeout(p.timer);
-      p.reject(new Error(message));
-    }
-    this.pending.clear();
   }
 
   request(method, params) {
@@ -215,14 +203,6 @@ export class McpHost {
     } catch {}
   }
 
-  // 起動失敗・切断時に全pending要求を失敗させる(タイマーも解放)
-  failPending(message) {
-    for (const p of this.pending.values()) {
-      clearTimeout(p.timer);
-      p.reject(new Error(message));
-    }
-    this.pending.clear();
-  }
   stop() {
     try { this.child?.kill(); } catch {}
   }
