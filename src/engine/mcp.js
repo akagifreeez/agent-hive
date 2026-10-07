@@ -69,18 +69,6 @@ export class McpHost {
       this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
       return { ok: false, error: err.message };
     }
-<<<<<<< HEAD
-    // イシュー#27: コマンドが存在しない等はspawn自体は成功し、後から非同期のerrorイベント(ENOENT等)が
-    // 発火する。未処理のまま放置するとhiveプロセス全体が落ちるため、ここで捕捉して起動失敗として扱う
-    // (実装契約「起動失敗してもhiveは続行」を実際に満たす)。
-    this.spawnError = null;
-    this.child.on("error", (err) => {
-      this.spawnError = err;
-      this.failPending(`MCPサーバー ${this.name} の起動に失敗: ${err.message}`);
-    });
-    // stdinへの書き込み口のエラーも握り潰す(起動失敗後のEPIPE等でhiveが落ちないように)
-    this.child.stdin.on("error", () => {});
-=======
     // 子プロセスの非同期起動失敗(ENOENT等)はspawn()自体は成功し、後から 'error' イベントで
     // 飛んでくる。ハンドラが無いとUnhandled 'error' eventでhive全体が落ちる(イシュー#27)。
     // → ここで捕捉してbus通知+pending全reject+切断状態へ。以後のrequest()は即rejectする。
@@ -98,7 +86,6 @@ export class McpHost {
     });
     // stdinのEPIPE等も未捕捉だとプロセス死の種になるので同様に飲み込む
     /** @type {any} */ (this.child.stdin)?.on?.("error", () => { /* EPIPE等。 'error'側で失敗通知する */ });
->>>>>>> main
     let out = "";
     this.child.stdout.on("data", (d) => {
       out += d.toString();
@@ -183,14 +170,9 @@ export class McpHost {
   request(method, params) {
     const id = this.nextId++;
     const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
-<<<<<<< HEAD
-    if (!this.child || this.spawnError) {
-      return Promise.reject(new Error(`MCPサーバー ${this.name} は接続できません`));
-=======
     if (this.connected === false) {
       // 起動失敗(ENOENT等)後の切断状態。pendingに積んでも応答は来ないので即reject
       return Promise.reject(new Error(`MCPサーバー ${this.name} は切断されています(start失敗済み)`));
->>>>>>> main
     }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
