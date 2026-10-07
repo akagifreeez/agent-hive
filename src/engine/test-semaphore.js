@@ -15,10 +15,6 @@ const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラ
  * マッチさせ、文中の"test"語には反応しない。 */
 export function isTestCommand(command) {
   const c = String(command ?? "");
-<<<<<<< HEAD
-  if (/(^|[;&|(\s*)npm\s+(run\s+)?test/.test(c) || /(^|[;&|(\s*)node\s+--test/.test(c)) return true;
-  return /(^|[;&|(\s*)npm\s+(--\S+\s+)*--test(\s|$)/.test(c); // npm --test / npm --silent --test もテスト意図
-=======
   // npm test系: npm[オプション群] (run[オプション群])? test(:接尾)? / npm --test
   //   - オプションはハイフン始まりのトークン群(--silent 等)
   //   - "echo npm test" のような文中参照もテスト実行の意図として保守的に捕捉する
@@ -30,7 +26,6 @@ export function isTestCommand(command) {
   ).test(c);
   const nodeTest = new RegExp("(^|[;&|(]\s*)node" + opt + "\s+--test(?:\s|$)").test(c);
   return npmTest || nodeTest;
->>>>>>> main
 }
 
 class QueueTimeout extends Error {
