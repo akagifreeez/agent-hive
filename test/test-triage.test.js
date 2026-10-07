@@ -70,7 +70,8 @@ test("extractErrorType / deriveArea: エラー種別とエリアを推定する"
   assert.equal(extractErrorType("TypeError: t0"), "TypeError");
   assert.equal(extractErrorType("何もない"), "Error");
   assert.equal(deriveArea("test/crash-guard.test.js", "x", "Error"), "crash-guard");
-  assert.equal(deriveArea("test/x.test.js", "onEvent/onPostフック経由でbusに流れ", "TypeError"), "hooks");
+  assert.equal(deriveArea("test/hooks.test.js", "何かのテスト", "Error"), "hooks");
+  assert.equal(deriveArea("test/long-run-resilience.test.js", "onEvent/onPostフック経由でbusに流れ、board投稿に使える", "TypeError"), "long-run-resilience");
   assert.equal(deriveArea("test/x.test.js", "承認フロー競合経路: 差し戻し記録", "AssertionError"), "approval-conflict");
   assert.equal(deriveArea("test/retry.test.js", "chat(stream): stall検知でリトライ", "Error"), "stream-stall");
   assert.equal(deriveArea("test/cli.test.js", "CLI: 何か", "AssertionError"), "cli");
@@ -85,7 +86,7 @@ test("parseTap: 実ログ形式(verboseサマリ+failing tests節)から8失敗�
   assert.equal(r.failures.length, 8);
   const files = r.failures.map((f) => f.file);
   assert.ok(files.includes("test/cli.test.js"));
-  assert.equal(files.filter((f) => f === "test/long-run-resilience.test.js").length, 4);
+  assert.equal(files.filter((f) => f === "test/long-run-resilience.test.js").length, 5);
   assert.ok(files.includes("test/model-policy.test.js"));
   assert.ok(files.includes("test/retry.test.js"));
   const names = r.failures.map((f) => f.name);
@@ -165,6 +166,15 @@ test("buildFixCandidates: エリア別に集約し、単一ファイルなら絞
   assert.equal(single[0].id, "fix-triage-cli");
   assert.ok(single[0].body.includes("node --test test/cli.test.js"), "単一ファイルは絞り込みコマンド");
 });
+// プローブ別に応答を返すfakeExec(smoke→失敗は返さない・diff→差分なし・triage→フィクスチャ)
+function makeProbeAwareExec(fixtures) {
+  return async (o) => {
+    const c = String(o.command ?? "");
+    if (c.includes("--name-status")) return { ok: true, text: "exit=0" + NL };
+    if (c.startsWith("node --test")) return { ok: true, text: "exit=0" + NL + "# pass 1" + NL };
+    return fixtures.triage ?? { ok: true, text: "exit=0" + NL };
+  };
+}
 
 test("発見器統合: probes.triageで新規失敗だけがfix候補タスクとして起票される", async () => {
   const ws = mkdtempSync(join(tmpdir(), "hive-triage-"));
@@ -178,49 +188,45 @@ test("発見器統合: probes.triageで新規失敗だけがfix候補タスク�
     const known = full.failures
       .filter((f) => f.name.includes("ガード"))
       .map((f) => ({ file: f.file, name: f.name, area: "crash-guard" }));
-    const fakeExec = async (o) => {
-      assert.equal(o.keep, "tail", "トリアージ実行は末尾保持(失敗節保護)");
-      return { ok: false, text: "exit=1" + NL + REAL_SUMMARY_TAIL };
-    };
     const d = startDiscovery({
       workspace: ws, tasks, bus, intervalSec: 3600,
       probes: { triage: { mode: "on", knownFailures: known } },
-      exec: fakeExec,
+      exec: makeProbeAwareExec({ triage: { ok: false, text: "exit=1" + NL + REAL_SUMMARY_TAIL } }),
     });
     await d.tick();
-    assert.equal(created.length, 5, "8失敗-既知2件=新規6件をエリア集約で5候補: got " + created.join(","));
+    assert.equal(created.length, 4, "新規6件をエリア集約して4候補: got " + created.join(","));
     assert.ok(created.every((id) => id.startsWith("fix-triage-")));
     assert.ok(!created.includes("fix-triage-crash-guard"), "既知のガード系は起票しない");
     const body = readFileSync(join(ws, "tasks", "open", created[0] + ".md"), "utf8");
     assert.ok(body.includes("## 失敗テスト"));
     await d.tick();
-    assert.equal(created.length, 5, "重複起票なし");
+    assert.equal(created.length, 4, "重複起票なし");
     d.stop();
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }
 });
 
-test("発見器統合: 全緑なら何も起票せず、全て既知なら起票しない", async () => {
+test("発見器統合: 全緑なら起票せず、全て既知でも起票しない", async () => {
   const ws = mkdtempSync(join(tmpdir(), "hive-triage-"));
   try {
     const bus = new Bus();
     const tasks = new TaskBlackboard(ws, bus);
     const created = [];
     bus.on("discovery.created", ({ taskId }) => created.push(taskId));
-    const fakeExec = async () => ({ ok: true, text: "exit=0" + NL + "ℹ tests 10" + NL + "ℹ pass 10" + NL + "ℹ fail 0" });
     const d = startDiscovery({
       workspace: ws, tasks, bus, intervalSec: 3600,
       probes: { triage: { mode: "on" } },
-      exec: fakeExec,
+      exec: makeProbeAwareExec({ triage: { ok: true, text: "exit=0" + NL + "ℹ tests 10" + NL + "ℹ pass 10" + NL + "ℹ fail 0" } }),
     });
     await d.tick();
     assert.equal(created.length, 0);
+    // 全失敗が既知リストに載っていれば起票しない(TDD途中領域の静観)
     const full = parseTap("exit=1" + NL + REAL_SUMMARY_TAIL);
     const d2 = startDiscovery({
       workspace: ws, tasks, bus, intervalSec: 3600,
       probes: { triage: { mode: "on", knownFailures: full.failures.map((f) => ({ file: f.file, name: f.name })) } },
-      exec: async () => ({ ok: false, text: "exit=1" + NL + REAL_SUMMARY_TAIL }),
+      exec: makeProbeAwareExec({ triage: { ok: false, text: "exit=1" + NL + REAL_SUMMARY_TAIL } }),
     });
     await d2.tick();
     assert.equal(created.length, 0, "全て既知なら新規ゼロ・起票なし");
@@ -235,12 +241,17 @@ test("発見器統合: 既定(off)ではトリアージプローブは動かな�
   try {
     const bus = new Bus();
     const tasks = new TaskBlackboard(ws, bus);
-    let calls = 0;
-    const d = startDiscovery({
-      workspace: ws, tasks, bus, intervalSec: 3600, exec: async () => { calls++; return { ok: true, text: "exit=0" }; },
-    });
+    let triageCalls = 0;
+    const exec = async (o) => {
+      const c = String(o.command ?? "");
+      if (c.includes("--name-status")) return { ok: true, text: "exit=0" + NL };
+      if (c.startsWith("node --test")) return { ok: true, text: "exit=0" + NL + "# pass 1" + NL };
+      triageCalls++;
+      return { ok: true, text: "exit=0" + NL };
+    };
+    const d = startDiscovery({ workspace: ws, tasks, bus, intervalSec: 3600, exec });
     await d.tick();
-    assert.equal(calls, 1, "smokeプローブのみ");
+    assert.equal(triageCalls, 0, "triageプローブは発火しない");
     d.stop();
   } finally {
     rmSync(ws, { recursive: true, force: true });

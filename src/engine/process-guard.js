@@ -79,13 +79,15 @@ export function installProcessGuard(bus = null, opts = {}) {
     }
   };
 
+  const onUncaught = (err) => onUnhandled(err, "uncaughtException");
+
   process.on("unhandledRejection", onUnhandled);
-  process.on("uncaughtException", (err) => onUnhandled(err, "uncaughtException"));
+  process.on("uncaughtException", onUncaught);
 
   return {
     unwire() {
       process.off("unhandledRejection", onUnhandled);
-      process.off("uncaughtException", (err) => onUnhandled(err, "uncaughtException"));
+      process.off("uncaughtException", onUncaught);
       hits.length = 0;
     },
     count() { return hits.length; },
