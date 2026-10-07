@@ -1,21 +1,30 @@
-// テスト系コマンドのプロセス横断セマフォ(exec-test-semaphore)。
-// 複数ワーカーの検証npm test+発見器プローブが重なるとnodeテストプロセスが百オーダー
-// 同時起動しマシンが飽和する(テストフレーキーの既知教訓の主因)。テスト系コマンド
-// (npm test / npm run test / node --test にマッチ)をFIFOセマフォで直列化する。
-// テスト以外のコマンド・他モジュールには影響しない。依存ゼロ(純node)。
+/**
+ * テスト系コマンド(npm test / npm run test / node --test)の直列化セマフォ。
+ * 重いテストを並列投入してフレーキーを誘発しないための同時実行制御。
+ * 依存はsrc/engine/proc.js(実行本体)のみ。
+ * @module engine/test-semaphore
+ */
+import { runCommand } from "./proc.js";
 
-// ---- セマフォ本体(モジュール単一=プロセス横断で共有) ----
-let limit = 1; // 同時実行上限(既定1)。configureTestSemaphore()で上書き可
-let running = 0;
-const queue = []; // FIFO待ちキュー
-const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラベル)
+/** 現在実行中のラベル集合(デバッグ/テスト用) @type {Set<string>} */
+const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラベル。待機タイムアウト文面で使う)
 
-/** テスト系コマンド判定。runCommandのcommand文字列を見る。
+/**
+ * テスト実行コマンドか否か(セマフォ適用の判定)。
  * 起動セグメント(行頭または && ; | ( の直後)に始まるnpm test系・node --testにだけ
- * マッチさせ、文中の"test"語には反応しない。 */
+ * マッチさせ、文中の"test"語には反応しない。npmフラグ(--silent等)も語レベルで読み飛ばし、
+ * npm test / npm --test / npm run test[:xx] [-- extra] をテスト意図として捕捉する。
+ * @param {string} command コマンドライン
+ * @returns {boolean} テスト実行の意図とみなせるならtrue
+ */
 export function isTestCommand(command) {
   const c = String(command ?? "");
-  return /(^|[;&|(]\s*)npm\s+(run\s+)?test/.test(c) || /(^|[;&|(]\s*)node\s+--test/.test(c);
+  const start = "(^|[;&|(]\s*)";
+  return new RegExp(start + "npm\s+(run\s+)?test\b").test(c)
+    || new RegExp(start + "npm\s+(--[^\s|;&()]+\s+)*--test(\s|$)").test(c)
+    || new RegExp(start + "npm\s+(--[^\s|;&()]+\s+)*(run\s+)?(--[^\s|;&()]+\s+)*(run\s+)?test\b").test(c)
+    || new RegExp(start + "npm\s+(run\s+)?test\s+[\w:@/.\-\[\]*]").test(c)
+    || new RegExp(start + "node\s+--test").test(c);
 }
 
 class QueueTimeout extends Error {
@@ -62,7 +71,7 @@ export async function runTestCommand(o, run) {
       }
     }, queueTimeoutMs);
     try {
-      await entry.p;
+      await entry.p; // drain()がこの分のスロット(running)を確保済み。ここでは加算しない(二重加算=スロットリークの原因)
     } catch (err) {
       clearTimeout(timer);
       if (err instanceof QueueTimeout) {
@@ -76,9 +85,10 @@ export async function runTestCommand(o, run) {
       throw err;
     }
     clearTimeout(timer);
+  } else {
+    running += 1;
+    runningIds.add(label);
   }
-  running += 1;
-  runningIds.add(label);
   try {
     return await run(o);
   } finally {
@@ -89,7 +99,8 @@ export async function runTestCommand(o, run) {
 }
 
 /** 上限を変更する(config.exec.testMaxConcurrentの反映用)。1未満は1にクランプ。
- * 引数省略時は既定(1)へ戻す。 */
+ * 引数省略時は既定(1)へ戻す。
+ * @param {{testMaxConcurrent?: number}} [cfg] 同時実行上限(config.exec配下) */
 export function configureTestSemaphore({ testMaxConcurrent } = {}) {
   limit = Number.isFinite(testMaxConcurrent) ? Math.max(1, Math.floor(testMaxConcurrent)) : 1;
   drain(); // 上限引き上げで待ちが即流れるように
@@ -107,4 +118,12 @@ export function resetTestSemaphore() {
 /** テスト用: 現在の状態 */
 export function testSemaphoreState() {
   return { limit, running, queued: queue.length };
+}
+
+/** 同時実行上限を数値で直接設定する(exec.js互換ラッパ・テストからも使う)。
+ *  @param {number} n */
+export function setTestMaxConcurrent(n) {
+  const v = Math.floor(Number(n));
+  if (Number.isFinite(v) && v >= 1) limit = v;
+  drain();
 }
