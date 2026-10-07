@@ -6,7 +6,7 @@
 //   session-logへ流れる。記録はループ契約(loop.js)で行い、このクラスは記録しない
 // - FallbackModelと共存する: Router → (選択されたモデル=FallbackModelならその中身) の順
 // - 依存ゼロ(node内蔵のみ)
-import { estimateTokens, defaultRouterConfig } from "./router-config.js";
+import { estimateTokens, defaultRouterConfig, routingDecision } from "./router-config.js";
 
 /**
  * ターン毎ルーティングラッパー。chat()を呼ぶたびに routingDecision() で判定し、
@@ -20,14 +20,17 @@ export class RouterModel {
    *   primary: 軽量側(既定=flash)のモデル実体。strong: 重量側(glm-5.3)のモデル実体。
    *   routing: {enabled, heavyPromptTokens, roles, heavyIds, heavyModelId} 形の正規化済設定
    *   (normalizeRoutingConfig()の出力)。enabled=falseなら全てprimaryへ委譲する(回帰)。
+   *   role: 呼出元エージェントのロール(impl/review/verify/lead等)。review/verify等の
+   *   heavyRolesに一致すると品質重視でstrong側へ振る。未指定なら判定から除外される。
    *   onRoute: 判定時に呼ばれるフック({selected, reason, ...})。テスト/ログ配線用。
    */
-  constructor({ primary, strong, routing, onRoute = null }) {
+  constructor({ primary, strong, routing, role = null, onRoute = null }) {
     if (!primary) throw new Error("RouterModel: primaryモデルがありません");
     if (!strong) throw new Error("RouterModel: strongモデルがありません");
     this.primary = primary;
     this.strong = strong;
     this.routing = routing ?? defaultRouterConfig();
+    this.role = typeof role === "string" && role ? role.toLowerCase() : null;
     this.onRoute = typeof onRoute === "function" ? onRoute : null;
     // 直近の品質シグナル(空応答/モデルエラー)の連続回数。重い側へ振る判断に使う
     this.qualityStrikes = 0;
@@ -42,11 +45,7 @@ export class RouterModel {
     let lastErr = null;
     for (const m of chain) {
       try {
-        const r = await m.chat(opts);
-        // 選択先がFallbackModelの場合も同様に配下で失敗した分を拾うため、
-        // 成功したらqualityStrikesをリセットする
-        this.qualityStrikes = 0;
-        return r;
+        return await m.chat(opts);
       } catch (err) {
         lastErr = err;
       }
@@ -66,7 +65,16 @@ export class RouterModel {
   }
 
   async chat(opts = {}) {
-    const { model: selected, reason } = this.decide(opts);
+    // 判定: 追加のLLM呼出なし。chat()実引数(メッセージ列・ツール数)と直近状態のみで決める
+    const d = routingDecision(
+      { messages: opts.messages, tools: opts.tools, role: opts.role ?? this.role },
+      { lastPromptTokens: this.lastPromptTokens, qualityStrikes: this.qualityStrikes },
+      this.routing,
+    );
+    const selected = d.heavy ? this.strong : this.primary;
+    const reason = d.reason;
+    this.lastDecision = { selected: d.heavy ? "5.3" : "flash", reason };
+    this.onRoute?.({ selected: this.lastDecision.selected, reason });
     this.pendingModel = selected;
     try {
       const res = await this.delegate(selected, opts);
@@ -80,7 +88,8 @@ export class RouterModel {
       }
       // usage報告があれば次ターンの重さ判定の種にする
       if (res?.usage?.promptTokens) this.lastPromptTokens = res.usage.promptTokens;
-      return { ...res, router: { selected: selected === this.strong ? "5.3" : "flash", reason, via: selected.model ?? null } };
+      // 判定根拠を応答へ添える(ループ側のusage-trace/session-logへ流れる。resの他キーは壊さない)
+      return { ...res, router: { selected: this.lastDecision.selected, reason, via: selected.model ?? null } };
       // モデルエラーも重い側への引き上げ兆候(次ターン判定に使う)。エラー自体は握りつぶさない
     } catch (err) {
       this.qualityStrikes++;
