@@ -155,11 +155,18 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
       return { ok: false, marker: true, text: `mainに競合マーカーが残っています(${files})。マージを中止しました。先にmain側のマーカーを解消してください。` };
     }
     // 1) worktree側の未コミット変更を確定(変更がなければno-op)
-    await exec({
+    const commitStep = await exec({
       command: `git add -A && (git diff --cached --quiet || git -c user.name=${agent.id} -c user.email=${agent.id}@hive.local commit -m 'wip: ${taskId}')`,
       cwd: worktreePath,
       outputLimit: 2000,
     });
+
+    if (!commitStep.ok && !/nothing to commit/i.test(commitStep.text)) {
+      // イシュー#28: コミット失敗(pre-commitフックexit 1等)を見逃すと、成果が未コミットのまま
+      // 「マージ済み」と誤認する。失敗をok:falseで返し、mainへのマージを中止する。
+      return { ok: false, text: "worktree側のコミットに失敗しました(pre-commitフック等)。成果はmainへ取り込まれていません。gitの出力:
+" + commitStep.text.slice(0, 800) + "" };
+    }
     // 1.5) ブランチ側ガード: このマージで運ばれるファイルにマーカーが入っていれば拒否し、
     //      作業者へ返送する(マーカー入りの確定をmainに作らない)
     const dirty = await exec({ command: `git diff --name-only main...agent/${agent.id}`, cwd: mainWorkspace, outputLimit: 4000 });
