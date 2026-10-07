@@ -51,7 +51,7 @@ test("unsubscribe: 閉じたスレッドのHostはその後のボード投稿で
   const { host, calls } = mkHost(ws, bus, board, tasks);
 
   // 購読が生きている間は@メンションで起こされる(前提確認)
-  board.post("you", "@アルファ 生きていますか");
+  board.post("beta-9", "@アルファ 生きていますか");
   assert.ok(await waitUntil(() => calls() > 0), "購読中は起こされる");
   const before = calls();
   assert.ok(before > 0);
@@ -61,7 +61,7 @@ test("unsubscribe: 閉じたスレッドのHostはその後のボード投稿で
   host.unsubscribe(); // 二重呼び出しは安全(no-op)
 
   // クローズ後のボード投稿・タスク投入・解放では起こされない
-  board.post("you", "@アルファ ゴースト起床はしない");
+  board.post("beta-9", "@アルファ ゴースト起床はしない");
   tasks.create({ id: "unsub-task-1", project: "unsub", body: "閉じた後の新規タスク" });
   tasks.create({ id: "t2", project: "unsub", body: "解放起床の種" });
   const taker = { id: "impl-x", role: "impl" };
