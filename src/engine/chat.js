@@ -63,25 +63,34 @@ export class ChatHost {
     this.landingSignal = landingSignal; // null可(未指定時はイベント購読のみ)
     this.landedThisRound = new Map(); // id => 直前ラウンドに着地(タスクdone/マージ完了)があったか(進捗ゲート用)
     this.approvals = approvals; // 承認フロー(null可=無効。ラウンド末マージの保留判定)
+    this.busSubs = []; // bus購読の解除ハンドル(イシュー#29: closeThreadで解除し閉じたHostの再起床を防ぐ)
     for (const m of mains) {
       this.seen.set(m.id, board.lastId());
       this.landedThisRound.set(m.id, false); // 着地フラグの初期値(進捗ゲート)
     }
     // ボード上の@表示名でメインを起こす(横つながりの入口)
-    bus.on("board", (p) => this.handleBoardPost(p));
+    this.busSubs.push(bus.on("board", (p) => this.handleBoardPost(p)));
     // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
     // これがないと全員退出後の発見器起票タスクが誰にも消化されない。
-    bus.on("task.created", (p) => this.handleTaskCreated(p));
+    this.busSubs.push(bus.on("task.created", (p) => this.handleTaskCreated(p)));
     // 進捗ゲート(自動継続の着地検出): タスク完了とラウンド末mainマージを着地として記録する。
     // landedThisRoundはwake()でリセットし、ラウンド中の実績だけを次判定に使う。
-    bus.on("task.finished", (p) => this.noteLanding(p.agent));
+    this.busSubs.push(bus.on("task.finished", (p) => this.noteLanding(p.agent)));
     // テスト起点: ChatHost外(ユニットテスト等)から着地を直接報せる入口(進捗ゲートの観測点)。
-    bus.on("agent.merged", (p) => this.noteLanding(p.agent));
+    this.busSubs.push(bus.on("agent.merged", (p) => this.noteLanding(p.agent)));
     // create_task(新しい仕事の発生)も着地として扱う: 「次にやることが生まれた」のは進捗。
     // これが無いと「探索ラウンドで新タスクを起票→次ラウンドで着手」の正当な循環が止まる。
-    bus.on("task.created", (p) => this.noteLanding(null));
+    this.busSubs.push(bus.on("task.created", (p) => this.noteLanding(null)));
     // 解放(退場した担当者のタスクがopenへ戻る)でも同様に起こす。
-    bus.on("task.released", (p) => this.handleTaskReleased(p));
+    this.busSubs.push(bus.on("task.released", (p) => this.handleTaskReleased(p)));
+  }
+
+  /** bus購読を全て解除する(イシュー#29: closeThreadから呼ぶ)。以後のboard/taskイベントで
+   * 閉じたHostのハンドラが動かなくなり、閉じたスレッドのメンバーが再起床しない。 */
+  unsubscribe() {
+    for (const off of this.busSubs.splice(0)) {
+      try { off(); } catch { /* 二重解除でも続行 */ }
+    }
   }
 
   // 新タスク投入時の起床: 自分のprojectのタスク、または全スレッド共通の自動仕事(fix/review/distill)のみ
