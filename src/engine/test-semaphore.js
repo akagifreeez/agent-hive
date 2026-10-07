@@ -15,12 +15,9 @@ const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラ
  * マッチさせ、文中の"test"語には反応しない。 */
 export function isTestCommand(command) {
   const c = String(command ?? "");
-  if (/(^|[;&|(]s*)npms+(runs+)?test/.test(c) || /(^|[;&|(]s*)nodes+--test/.test(c)) return true;
-  return /(^|[;&|(]s*)npms+(--S+s+)*--test(s|$)/.test(c); // npm --test / npm --silent --test もテスト意図
-}
-export function isTestCommand(command) {
-  const c = String(command ?? "");
-  return /(^|[;&|(]\s*)npm\s+(run\s+)?test/.test(c) || /(^|[;&|(]\s*)node\s+--test/.test(c);
+  const rxs = ["(^|[;&|(]\\s*)npm\\s+(run\\s+)?test","(^|[;&|(]\\s*)node\\s+--test","(^|[;&|(]\\s*)npm\\s+(--\\S+\\s+)*--test(\\s|$)"];
+  if (new RegExp(rxs[0]).test(c) || new RegExp(rxs[1]).test(c)) return true;
+  return new RegExp(rxs[2]).test(c); // npm --test / npm --silent --test もテスト意図
 }
 
 class QueueTimeout extends Error {
