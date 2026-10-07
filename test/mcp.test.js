@@ -49,6 +49,22 @@ test("McpHost: 起動しないサーバーはok:falseでhiveは止まらない",
   assert.equal(r.ok, false);
 });
 
+test("McpHost: 存在しないコマンド(ENOENT)でもuncaughtExceptionで落ちずok:false(#27)", async () => {
+  const bus = new Bus();
+  const failed = [];
+  bus.on("mcp.failed", (e) => failed.push(e));
+  const host = new McpHost({ name: "ghost", command: "definitely-not-exist-xyz-123", args: [], bus, timeoutMs: 5000 });
+  const r = await host.start(); // throwしないことが重要(未処理のerrorイベントで落ちない)
+  assert.equal(r.ok, false);
+  assert.match(String(r.error), /ENOENT/);
+  assert.ok(failed.length >= 1, "mcp.failed が通知される");
+  // 起動失敗後のrequestは即reject(切断状態・タイムアウト待ちにならない)
+  await assert.rejects(() => host.request("tools/list", {}), /接続できません|起動に失敗/);
+  // call もok:falseへ変換されて外に例外を投げない
+  const c = await host.call("mcp__ghost__echo", {});
+  assert.equal(c.ok, false);
+});
+
 test("runChat: MCPツールがエージェントから使え、cron定期実行が走る", async () => {
   const ws = mktmp();
   const boardPosts = [];
