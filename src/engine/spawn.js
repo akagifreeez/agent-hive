@@ -43,8 +43,10 @@ export class SpawnManager {
     hooks = null, // ライフサイクルフック
     idleClaimWaitSec = 0, // 請求ミス時に新着タスクを待つ秒数(トークン消費ゼロの待ち行)
     approvals = null, // 実装者≠検証者の強制(#3)用の共有コンテキスト
+    modelPolicy = null, // モデル選択ポリシー(readModelPolicy(config)の結果)
   }) {
     this.approvals = approvals;
+    this.modelPolicy = modelPolicy;
     this.mainWorkspace = mainWorkspace;
     this.worktreeRoot = worktreeRoot;
     this.board = board;
@@ -145,6 +147,7 @@ export class SpawnManager {
       mcpHosts: this.mcpHosts,
       hooks: this.hooks,
       idleClaimWaitSec: this.idleClaimWaitSec,
+      modelPolicy: this.modelPolicy,
     });
     const shellKind = await tools.detectShell();
     const mem = this.memoryFn?.() ?? "";

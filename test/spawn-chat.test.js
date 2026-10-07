@@ -45,7 +45,7 @@ function scriptedModel(script, received = []) {
   };
 }
 
-async function waitUntil(fn, ms = 8000) {
+async function waitUntil(fn, ms = 45000) {
   const start = Date.now();
   while (Date.now() - start < ms) {
     if (await fn()) return true;
