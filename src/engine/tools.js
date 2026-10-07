@@ -416,11 +416,6 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
             if (rej.notice) board.post("system", rej.notice);
             return { ok: false, text: `マージが競合しています。実装者(${pending.agentId})に \`git merge main\` での解決を依頼してください。\n${m.text.slice(0, 600)}` };
           }
-          if (m.commitFailed) {
-            const rej = noteRejection(mainWorkspace, originalId, modelPolicy);
-            if (rej.notice) board.post("system", rej.notice);
-            return { ok: false, text: `実装者(${pending.agentId})のworktreeでコミットに失敗しています。実装者に失敗原因の解消と再度の finish_task を依頼してください。\n${m.text.slice(0, 600)}` };
-          }
           if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
           approvals.pending.delete(originalId);
           const implDone = tasks.finish({ id: pending.agentId }, originalId);
@@ -459,13 +454,6 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
             return {
               ok: false,
               text: `マージが競合しました。あなたの作業ディレクトリで \`git merge main\` を実行し、競合ファイルを編集して解決 → \`git add -A && git commit\` → 再度 finish_task してください。\n\ngitの出力:\n${m.text.slice(0, 1500)}`,
-            };
-          }
-          if (m.commitFailed) {
-            bus.emit("merge.conflict", { agent: agent.id, taskId });
-            return {
-              ok: false,
-              text: `worktree側のコミットに失敗しました(pre-commitフック等)。成果はmainへ取り込まれていません。失敗原因を解消してから再度 finish_task してください。\n\ngitの出力:\n${m.text.slice(0, 1200)}`,
             };
           }
           if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
