@@ -30,3 +30,7 @@ test("McpHost: 起動失敗後のrequest/callは安全に失敗する(ok:false�
   assert.equal(out.ok, false, "callはok:false(例外を握ってツール失敗として扱える)");
   assert.match(out.text ?? "", /接続できません/);
 });
+<<<<<<< HEAD
+=======
+
+>>>>>>> main
