@@ -75,7 +75,7 @@ export async function runTestCommand(o, run) {
       }
     }, queueTimeoutMs);
     try {
-      await entry.p;
+      await entry.p; // drain()がこの分のスロット(running)を確保済み。ここでは加算しない(二重加算=スロットリークの原因)
     } catch (err) {
       clearTimeout(timer);
       if (err instanceof QueueTimeout) {
@@ -89,9 +89,10 @@ export async function runTestCommand(o, run) {
       throw err;
     }
     clearTimeout(timer);
+  } else {
+    running += 1;
+    runningIds.add(label);
   }
-  running += 1;
-  runningIds.add(label);
   try {
     return await run(o);
   } finally {
@@ -102,7 +103,8 @@ export async function runTestCommand(o, run) {
 }
 
 /** 上限を変更する(config.exec.testMaxConcurrentの反映用)。1未満は1にクランプ。
- * 引数省略時は既定(1)へ戻す。 */
+ * 引数省略時は既定(1)へ戻す。
+ * @param {{testMaxConcurrent?: number}} [cfg] 同時実行上限(config.exec配下) */
 export function configureTestSemaphore({ testMaxConcurrent } = {}) {
   limit = Number.isFinite(testMaxConcurrent) ? Math.max(1, Math.floor(testMaxConcurrent)) : 1;
   drain(); // 上限引き上げで待ちが即流れるように
