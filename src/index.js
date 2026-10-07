@@ -5,8 +5,11 @@ import { Bus } from "./engine/board.js";
 import { startUi } from "./ui/server.js";
 import { chatUiHandlers } from "./ui/chat-wiring.js";
 import { wireConsoleLog } from "./log.js";
-import { wireCliNotify, wireStallNotify } from "./notify.js";
-import { installProcessGuard } from "./engine/process-guard.js";
+import { wireCliNotify, wireStallNotify, printNotifyLine } from "./notify.js";
+import { wireCrashGuard } from "./engine/crash-guard.js";
+
+// プロセスガードのログ先(ワークスペース直下。*.logはgitignore済み)
+const GUARD_LOG_FILE = "run-chat.err.log";
 
 function usage() {
   console.log(`agent-hive — 複数エージェントが同一ワークスペースで同時作業するハーネス
@@ -19,27 +22,15 @@ function usage() {
 }
 
 async function main() {
-  // プロセス生存ガード(long-run-resilience): 未捕捉rejection/例外で落ちない。
-  // 黙殺しない: ログ(run-chat.err.log)へスタック全文+コンソール+board[システム]投稿+notify経路。
-  // boardはまだ無いので最初はコンソールのみで開始し、Bus生成後に結線し直す。
-  let mainBusRef = null;
-  let notifyRef = null;
-  const guard = installProcessGuard(null, {
-    logFile: GUARD_LOG_DEFAULT,
-    log: (line) => console.error(line),
-    notify: (line) => { try { notifyRef?.(line); } catch { /* 通知失敗でガードを止めない */ } },
+  // プロセス生存ガード(long-run-resilience): 未捕捉rejection/例外を捕捉してプロセスを落とさない。
+  // 黙殺しない: ログ(run-chat.err.log)へスタック全文+目立つコンソール通知1行。
+  // board[システム]投稿はBus生成後、crash.guardedイベント経由でrunner.runChat側が受け持つ。
+  // 1時間20件超の「異常頻度」警告はcrash-guard内蔵のカウンタが担う。
+  const crashGuard = wireCrashGuard({
+    logFile: GUARD_LOG_FILE,
+    onNotify: (n) => { try { printNotifyLine(n); } catch { /* 通知失敗でガードを止めない */ } },
   });
-  // Bus生成後: board[システム]投稿とnotify配線を後付けで結ぶ(process.errorを監視)
-  const offWireLater = () => {
-    if (!mainBusRef) return;
-    mainBusRef.on("process.error", (p) => {
-      try { mainBusRef?.__mainBoardRef?.post("system", `[プロセス警告] ${p.kind} を捕捉(プロセスは生存しています): ${String(p.message).slice(0, 300)}`); } catch { /* 投稿失敗は無視 */ }
-    });
-    mainBusRef.on("process.burst", (p) => {
-      try { mainBusRef?.__mainBoardRef?.post("system", `[プロセス警告] 異常頻度: 1時間に${p.count}件(しきい値${p.threshold}件超)。run-chat.err.log を確認してください`); } catch { /* 同上 */ }
-    });
-  };
-  offWireLater();
+  void crashGuard; // 起動中は常に配線(プロセス寿命と同じ)
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) return usage();
   const config = loadConfig(args.includes("--config") ? args[args.indexOf("--config") + 1] : undefined);

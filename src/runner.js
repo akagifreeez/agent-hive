@@ -57,6 +57,17 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   // 起動時のゾンビclaim回収: プロセス再起動で走行中ラウンドは全て死んでいるため、claimedのまま
   // 残ったタスクは誰にも進められない(idle-claim待ちのデッドロック)。起動直後なので全claimedは
   // ゾンビと見なして解放する(task.releasedが出るが、この時点でラウンドは無いので無害)
+  // プロセスガードのboard可視化(long-run-resilience): index.jsのwireCrashGuardが
+  // "crash.guarded"を出すので、ここでメインボードへ[システム]投稿する(黙殺防止)。
+  // 頻度警告(process.burst相当)も同じく可視化。
+  bus.on("crash.guarded", (e) => {
+    if (e.kind === "rate.warn") return; // 頻度警告は別メッセージで流す
+    try { mainBoard.post("system", `[プロセス警告] ${e.kind} を捕捉(プロセスは生存しています): ${String(e.message).slice(0, 300)}`); } catch { /* 投稿失敗でガードを止めない */ }
+  });
+  bus.on("crash.rate", (e) => {
+    try { mainBoard.post("system", `[プロセス警告][異常頻度] ガード対象エラーがしきい値を超えました。ログ run-chat.err.log を確認してください(${String(e.body ?? "").slice(0, 150)})`); } catch { /* 同上 */ }
+  });
+
   const zombies = tasks.list().claimed;
   for (const t of zombies) {
     tasks.release(t.agent, "[起動時回収] プロセス再起動により走行中ラウンドが消滅したため解放しました");
