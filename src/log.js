@@ -15,9 +15,11 @@ export function wireConsoleLog(bus) {
   bus.on("permission.denied", (p) => console.warn(`🚫 ${p.agent} のコマンドが拒否`));
   bus.on("usage.summary", (u) => {
     const t = u.totals;
-    console.log(`💰 usage合計: ${t.calls}回 / prompt ${t.promptTokens} / completion ${t.completionTokens} (思考 ${t.reasoningTokens}) / cost $${t.costUsd.toFixed(4)}`);
+    // 生成速度(平均tok/s): ledgerがmsを累積している場合だけ出す(旧データ・未計測は空)
+    const tpsOf = (e) => (Number(e?.msSum ?? 0) > 0 ? ` / 平均 ${e.avgTokPerSec?.toFixed(1) ?? "?"}tok/s` : "");
+    console.log(`💰 usage合計: ${t.calls}回 / prompt ${t.promptTokens} / completion ${t.completionTokens} (思考 ${t.reasoningTokens}) / cost $${t.costUsd.toFixed(4)}${tpsOf(t)}`);
     for (const [id, e] of Object.entries(u.byAgent)) {
-      console.log(`   ${id}: ${e.calls}回 / in ${e.promptTokens} / out ${e.completionTokens} (思考 ${e.reasoningTokens}) / $${e.costUsd.toFixed(4)}`);
+      console.log(`   ${id}: ${e.calls}回 / in ${e.promptTokens} / out ${e.completionTokens} (思考 ${e.reasoningTokens}) / $${e.costUsd.toFixed(4)}${tpsOf(e)}`);
     }
   });
   bus.on("compact.auto", (p) => console.log(`🗜 ${p.agent}: autocompact発動 (${p.tokensBefore} tokens / 閾値 ${p.threshold})`));

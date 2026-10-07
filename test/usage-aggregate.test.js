@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bus } from "../src/engine/board.js";
 import { startUi } from "../src/ui/server.js";
-import { aggregateUsage } from "../src/engine/usage.js";
+import { aggregateUsage, localDateKey } from "../src/engine/usage.js";
 import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
 
 tokenedFetchOn();
@@ -42,11 +42,14 @@ async function setup() {
 
 test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレッドの集計を作る", () => {
   const now = new Date();
-  // 実装(usage.js)はUTC基準(toISOString)で日付を付けるため、テストもUTCで組み立てて決定的にする。
-  // ローカル時刻(setHours)で作るとJST 0-9時などUTCと日付がずれる帯で期待が壊れる(2026-09-30 実害)。
-  const utcBase = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const todayUTC = new Date(utcBase).toISOString().slice(0, 10);
-  const d = (offsetDays, hour) => new Date(utcBase - offsetDays * 86400000 + hour * 3600000).toISOString();
+  // 日付はUTC基準で作る(toISOStringの日付境界と揃える。ローカル深夜0時前後でも安定)
+  // 日付はローカル基準で作る(集計がローカル日付キーのため。実装と同じ基準で安定)
+  const d = (offsetDays, hour) => {
+    const t = new Date(now);
+    t.setDate(t.getDate() - offsetDays);
+    t.setHours(hour, 0, 0, 0);
+    return t.toISOString();
+  };
   const history = [
     { at: d(0, 10), agent: "lead", endedBy: "ok", totals: { calls: 2, promptTokens: 100, completionTokens: 50, reasoningTokens: 10, costUsd: 0.2 } },
     { at: d(0, 15), agent: "issue-x-alpha", endedBy: "turn-limit", totals: { calls: 3, promptTokens: 200, completionTokens: 80, reasoningTokens: 20, costUsd: 0.4 } },
@@ -61,7 +64,7 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
   const agg = aggregateUsage(history, { days: 14 });
   // 日別(新しい順)
   assert.ok(agg.byDate.length >= 2);
-  assert.equal(agg.byDate[0].date, todayUTC, "1件目は今日");
+  assert.equal(agg.byDate[0].date, localDateKey(now), "1件目は今日(ローカル日付)");
   const today = agg.byDate[0];
   assert.equal(today.calls, 6);
   assert.ok(Math.abs(today.costUsd - 0.7) < 1e-9, 'costUsd合計(浮動小数は接近比較)');
@@ -80,10 +83,24 @@ test("aggregateUsage: usage.jsonから日別・スレッド別・日別xスレ�
   const key = (date, thread) => `${date}|${thread}`;
   const m = Object.fromEntries(agg.matrix.map((r) => [key(r.date, r.thread), r]));
   // 今日のスレッド別内訳: __main__はleadラウンドのみ(calls=2)、issue-xはalpha(推測)3+thread付き1で4
-  const todayMain = m[key(todayUTC, "__main__")];
+  const todayMain = m[key(localDateKey(now), "__main__")];
   assert.ok(todayMain && todayMain.calls === 2, "今日のmain分はleadラウンドのみ(summaryは昨日)");
 });
 
+test("localDateKey: どんなTZでもローカル日付(getFullYear/M/D)と一致し、UTC瞬間との対応が保たれる", () => {
+  // TZ依存を避ける: ローカル正午の瞬間を作り、localDateKeyがローカル日付部と一致することを確認(JST/UTC双方で安定)
+  const mk = (y, m, d) => { const dt = new Date(y, m - 1, d, 12, 0, 0); return dt; };
+  const now = new Date();
+  for (const off of [0, 1]) {
+    const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - off, 12, 0, 0);
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const d = String(dt.getDate()).padStart(2, "0");
+    assert.equal(localDateKey(dt), y + "-" + m + "-" + d, "ローカル正午のキーはローカル日付と一致");
+    // その瞬間をUTC文字列へ出して戻しても同じキー(丸め誤差・TZ変換で壊れない)
+    assert.equal(localDateKey(new Date(dt.toISOString())), y + "-" + m + "-" + d, "ISO往復でも同じキー");
+  }
+});
 test("aggregateUsage: 空や形状不良のhistoryでも安全に空集計を返す", () => {
   assert.deepEqual(aggregateUsage(null), { byDate: [], byThread: [], matrix: [] });
   assert.deepEqual(aggregateUsage("not-array"), { byDate: [], byThread: [], matrix: [] });
@@ -105,7 +122,7 @@ test("usage.json: usage.round/summaryの蓄積に日付とスレッド名が付�
     const history = JSON.parse(readFileSync(file, "utf8"));
     assert.equal(history.length, 3);
     const r1 = history.find((h) => h.agent === "lead");
-    assert.ok(r1.thread === "__main__" && r1.date === new Date().toISOString().slice(0, 10), "mainのusage.roundにthread=__main__と日付が付く");
+    assert.ok(r1.thread === "__main__" && r1.date === localDateKey(new Date()), "mainのusage.roundにthread=__main__と日付が付く");
     const r2 = history.find((h) => h.agent === "issue-y-alpha");
     assert.equal(r2.thread, "issue-y", "スレッドのusage.roundにthread名が付く");
     assert.ok(r2.date, "日付が付く");

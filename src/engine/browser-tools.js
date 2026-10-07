@@ -6,7 +6,8 @@ import { URL, URLSearchParams } from "node:url";
 export function normalizeUrl(href, baseUrl) {
   const h = String(href ?? "").trim();
   if (!h) return null;
-  if (/^#/i.test(h) || /^javascript:/i.test(h) || /^data:/i.test(h) || /^vbscript:/i.test(h)) return null;
+  if (/^javascript:/i.test(h) || /^data:/i.test(h) || /^vbscript:/i.test(h)) return null;
+  if (/^#/i.test(h)) return null; // 断片(#...)は遷移候補から除外(テスト仕様 e80e512)
   try {
     return new URL(h, baseUrl).toString();
   } catch {
@@ -105,7 +106,7 @@ export function parsePage(html, baseUrl) {
     const raw = am[1] ?? am[2] ?? am[3] ?? "";
     const text = btStripTags(am[4]);
     const href = normalizeUrl(raw, base);
-    if (href === null) continue; // javascript:/断片(#)等はリンク一覧から除外(テスト仕様: e80e512)
+    if (href === null) continue; // javascript:/断片(#)等は除外(テスト仕様 e80e512)
     if (!text) continue;
     links.push({ text, href });
   }

@@ -42,39 +42,40 @@
       "gamma"
     ],
     "maxTurnsPerRound": 12,
-    "autoContinueRounds": 3,
+    "autoContinueRounds": 6,
     "requireSeparateApprove": true,
     "idleClaimWaitSec": 45,
     "autoscale": true,
     "autoscaleIntervalSec": 30,
     "maxWorkersPerThread": 4
   },
-  "agents": [
-    {
-      "id": "alpha",
-      "displayName": "アルファ",
-      "role": "impl",
-      "persona": "agents/alpha.md"
-    },
-    {
-      "id": "delta",
-      "displayName": "デルタ",
-      "role": "impl",
-      "persona": "agents/delta.md"
-    },
-    {
-      "id": "beta",
-      "displayName": "ベータ",
-      "role": "review",
-      "persona": "agents/beta.md"
-    },
-    {
-      "id": "gamma",
-      "displayName": "ガンマ",
-      "role": "lead",
-      "persona": "agents/gamma.md"
-    }
-  ],
+    "agents": [
+      {
+        "id": "alpha",
+        "displayName": "アルファ",
+        "role": "impl",
+        "persona": "agents/alpha.md"
+      },
+      {
+        "id": "delta",
+        "displayName": "デルタ",
+        "role": "impl",
+        "persona": "agents/delta.md"
+      },
+      {
+        "id": "beta",
+        "displayName": "ベータ(検証・Flash)",
+        "role": "review",
+        "persona": "agents/beta.md",
+        "model": "zai/glm-5.3-flash"
+      },
+      {
+        "id": "gamma",
+        "displayName": "ガンマ",
+        "role": "lead",
+        "persona": "agents/gamma.md"
+      }
+    ],
   "loop": {
     "maxTurns": 40
   },
