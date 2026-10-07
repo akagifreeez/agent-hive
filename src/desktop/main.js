@@ -12,6 +12,8 @@ import { chatUiHandlers } from "../ui/chat-wiring.js";
 import { runChat } from "../runner.js";
 import { Bus } from "../engine/board.js";
 import { wireConsoleLog } from "../log.js";
+import { installProcessGuard } from "../engine/process-guard.js";
+import { wireProcessErrorToBoards } from "../engine/process-error-wiring.js";
 
 const SMOKE = process.argv.includes("--smoke");
 const SCENARIO = process.argv.includes("--scenario"); // 既定はchatモード(v5)。--scenarioで従来のバッチ実行
@@ -44,6 +46,12 @@ async function bootstrap() {
   const config = loadConfig();
   const bus = new Bus();
   wireConsoleLog(bus);
+  // プロセス生存ガード(long-run-resilience): 未捕捉rejection/例外を捕捉してログ+通知。
+  // ボード投稿配線はスレッドBoardがrunChat内で生成されるためgetterで後付け参照する
+  installProcessGuard(bus, {
+    notify: (line) => { try { notify("プロセス警告", line, config.ui.port); } catch { /* UI未起動時は無視 */ } },
+  });
+  wireProcessErrorToBoards(bus, { getBoards: () => (controllerRef.c ? [controllerRef.c.boardOf?.("__main__") ?? null].filter(Boolean) : []) });
 
   // smokeモード: chat配線とサーバーの立ち上がりだけ確認し、窓も出さず終了する
   if (SMOKE) {

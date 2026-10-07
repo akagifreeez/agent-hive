@@ -6,6 +6,7 @@ import { startUi } from "./ui/server.js";
 import { chatUiHandlers } from "./ui/chat-wiring.js";
 import { wireConsoleLog } from "./log.js";
 import { wireCliNotify, wireStallNotify } from "./notify.js";
+import { installProcessGuard } from "./engine/process-guard.js";
 
 function usage() {
   console.log(`agent-hive — 複数エージェントが同一ワークスペースで同時作業するハーネス
@@ -20,6 +21,9 @@ function usage() {
 async function main() {
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) return usage();
+  // プロセス生存ガード(long-run-resilience): 未捕捉rejection/例外で落ちない。
+  // 前面のどの入口(--chat/--serve/--run/デスクトップ)より先に配線する
+  installProcessGuard(null, { notify: (line) => console.error(`🔔 [通知] ${line}`) });
   const config = loadConfig(args.includes("--config") ? args[args.indexOf("--config") + 1] : undefined);
   const bus = new Bus();
   wireConsoleLog(bus);
