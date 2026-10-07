@@ -1,5 +1,8 @@
 // シェル実行の共用層。ツールのbashも発見器のプローブもこれを使う。
 // WindowsではGit Bashを自動検出してPOSIXコマンドを受けられるようにする。
+// さらにテスト系コマンド(npm test / node --test)にはプロセス横断セマフォを掛け、
+// 複数ワーカーと発見器プローブが重なってもテストの子プロセスが百オーダ同時起動して
+// マシンが飽和するのを防ぐ(exec.testMaxConcurrentで上限を上書き可)。
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
@@ -73,9 +76,84 @@ export async function detectShell() {
   return (cachedShell = "cmd");
 }
 
+// ---------------------------------------------------------------------------
+// テスト系コマンドのプロセス横断セマフォ。
+// 複数エージェントが npm test や node --test を同時に実行すると、node:test が
+// テストファイルごとに子プロセスを起動するため瞬時に百オーダのプロセスになり、
+// タイムアウトやフレーキーの主因になっていた。テストだけ直列化(上限N)して防ぐ。
+// 上限は setTestMaxConcurrent() で注入(hive.config.json の exec.testMaxConcurrent)。
+const TEST_COMMAND_RE = new RegExp(
+  "(^|[\\s&;|])npm\\s+(?:-{1,2}[\\w.-]+\\s+)*(?:test(?::[A-Za-z0-9._-]+)?|--test)(?![\\w-])" +
+  "|(^|[\\s&;|])npm\\s+(?:-{1,2}[\\w.-]+\\s+)*(?:run|exec)\\s+(?:-{1,2}[\\w.-]+\\s+)*test(?::[A-Za-z0-9._-]+)?(?![\\w-])" +
+  "|(^|[\\s&;|])node\\s+(?:-{1,2}[^\\s]+\\s+)*--test(?![\\w-])");
+ // npm test/npm --test/npm run|exec ... test(:xxx) と node --test にマッチ(行頭・空白・& ; | 直後の起動セグメント)
+ // npm test/npm --test/npm run|exec ... test(:xxx) と node --test にマッチ(行頭・空白・& ; | 直後の起動セグメント)
+
+// プロセス横断の実行中カウントとFIFO待ちキュー(モジュール単一インスタンスが全呼び出しで共有)
+let testMaxConcurrent = 1;
+let testRunning = 0;
+const testQueue = [];
+
+/** テスト系コマンドかどうか(npm test / node --test にマッチ)。セマフォの対象判定。
+ *  @param {string} command */
+export function isTestCommand(command) {
+  return TEST_COMMAND_RE.test(String(command));
+}
+
+/** 同時実行上限を設定する(loadConfig が exec.testMaxConcurrent を注入する)。
+ *  @param {number} n */
+export function setTestMaxConcurrent(n) {
+  const v = Math.floor(Number(n));
+  if (Number.isFinite(v) && v >= 1) testMaxConcurrent = v;
+}
+
+/** 現在の上限(テスト・診断用)。 */
+export function getTestMaxConcurrent() {
+  return testMaxConcurrent;
+}
+
+/** セマフォの内部状態を初期化へ戻す(テスト間の隔離用)。
+ *  呼び出しはテストの直列区間(onTestDone/slice内)だけで行われる。 */
+export function resetTestSemaphore() {
+  testMaxConcurrent = 1;
+  testRunning = 0;
+  testQueue.length = 0;
+}
+
+/** 空きスロットができるまでFIFOで待つ(呼び出し側は必ず onTestDone を呼ぶ)。
+ *  @param {(dt: () => void) => void} onTestDone 実行完了時に呼ぶ解放関数 */
+function acquireTestSlot(onTestDone) {
+  return new Promise((res) => {
+    const attempt = () => {
+      if (testRunning < testMaxConcurrent) {
+        testRunning++;
+        res(onTestDone);
+      } else {
+        testQueue.push(attempt);
+      }
+    };
+    attempt();
+  });
+}
+
+function releaseTestSlot() {
+  testRunning--;
+  const next = testQueue.shift();
+  if (next) next();
+}
+
+/** テスト実行セマフォの上限をconfig値で上書きする。null/undefined/不正値は既定(1)維持。
+ *  @param {number|null} [n] hive.config.json の exec.testMaxConcurrent */
+export function applyTestMaxConcurrent(n) {
+  if (n === null || n === undefined) return;
+  setTestMaxConcurrent(n);
+}
+
 /**
  * コマンドを実行する(outputLimitで出力を丸める)。cwd省略時はプロセスのカレント。
  * 子プロセスの環境はscrubEnvで鍵っぽい変数を落として渡す(env引数は明示割り当てとして上書き)。
+ * テスト系コマンド(npm test / node --test)はプロセス横断セマフォで同時実行が上限までに抑えられ、
+ * 上限超過の待ちがテスト待ちタイムアウトを過ぎたら教師文面つきで失敗を返す。
  * @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number}} o
  * @param {string} [keep="head"] 出力の丸め方向。"head"=先頭から保持(従来動作・既定)|"tail"=末尾を保持(テストサマリ等・失敗節が末尾に出る形式向け)
  * @returns {Promise<{ok: boolean, text: string}>}
@@ -94,6 +172,24 @@ export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit 
  */
 async function runCommandInner({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null, keep = "head" }) {
   const kind = await detectShell();
+  let release = null;
+  let waitedMs = 0;
+  if (isTestCommand(command)) {
+    const waitedAt = Date.now();
+    release = await acquireTestSlot(() => releaseTestSlot());
+    waitedMs = Date.now() - waitedAt;
+    if (waitedMs > timeoutMs) {
+      release();
+      return {
+        ok: false,
+        text: [
+          `同時実行制限で待機タイムアウト(${Math.round(waitedMs / 1000)}秒待機・上限${getTestMaxConcurrent()}件): テスト系コマンド(npm test等)はプロセス横断のセマフォで直列化されています。`,
+          "対処: 上限は hive.config.json の exec.testMaxConcurrent で上げられます。または他のテスト実行の完了をお待ちください。",
+          "",
+        ].join("\n"),
+      };
+    }
+  }
   const childEnv = scrubEnv(process.env, env);
   const child =
     kind === "bash"
@@ -111,17 +207,22 @@ async function runCommandInner({ command, cwd, timeoutMs = 30000, outputLimit = 
   child.stdout.on("data", append);
   child.stderr.on("data", append);
   return await new Promise((res) => {
+    const finish = (value) => {
+      if (release) release();
+      res(value);
+    };
     const timer = setTimeout(() => {
       child.kill();
-      res({ ok: false, text: `タイムアウト(${timeoutMs}ms)で中断:\n${out.slice(0, outputLimit)}` });
+      finish({ ok: false, text: `タイムアウト(${timeoutMs}ms)で中断:\n${out.slice(0, outputLimit)}` });
     }, timeoutMs);
+    if (timer.unref) timer.unref();
     child.on("error", (err) => {
       clearTimeout(timer);
-      res({ ok: false, text: `起動エラー: ${err.message}` });
+      finish({ ok: false, text: `起動エラー: ${err.message}` });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      res({ ok: code === 0, text: `exit=${code}\n${out.slice(0, outputLimit)}` });
+      finish({ ok: code === 0, text: `exit=${code}\n${out.slice(0, outputLimit)}` });
     });
   });
 }
