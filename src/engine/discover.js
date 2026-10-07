@@ -161,7 +161,8 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
     triageBusy = true;
     try {
       const command = t.command ?? "npm test";
-      const r = await exec({ command, cwd: workspace, timeoutMs: t.timeoutMs ?? 300000, outputLimit: 60000 });
+      // keep=tail: 失敗節(failing tests)は出力の末尾に出るため、末尾側を保持する
+      const r = await exec({ command, cwd: workspace, timeoutMs: t.timeoutMs ?? 300000, outputLimit: 120000, keep: "tail" });
       const report = parseTap(r.text ?? "");
       const known = Array.isArray(t.knownFailures) ? t.knownFailures : [];
       if (r.ok && report.failures.length === 0) return; // 全緑: 仕事なし
