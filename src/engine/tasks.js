@@ -293,6 +293,7 @@ export class TaskBlackboard {
     const src = join(this.claimed, `${agentId}--${taskId}.md`);
     const dst = join(this.open, `${taskId}.md`);
     try {
+      if (!existsSync(src)) return true; // 既に無い=解放済みとして成功(べき等)
       if (note) appendNote(src, note);
       if (existsSync(dst)) return false; // 同idのopenが既にある(手動投入等)場合は壊さない
       renameSync(src, dst);
