@@ -160,7 +160,7 @@ test("異常頻度: 1時間の窓でしきい値超過したら「異常頻度�
     let notified = [];
     const g = installCrashGuard({ logFile: logPath, rateLimit: 3, rateWindowMs: 60_000, onNotify: (n) => notified.push(n) });
     assert.equal(guardRateLimit(), 20, "既定しきい値は20");
-    for (let i = 0; i < 3; i++) process.emit("unhandledRejection", new TypeError(`t${i}`));
+    console.error("Lcount=" + process.listenerCount("unhandledRejection")); for (let i = 0; i < 3; i++) process.emit("unhandledRejection", new TypeError(`t${i}`));
     assert.equal(notified.filter((n) => n.kind === "crash.rate").length, 0, "しきい値以下は警告しない");
     process.emit("unhandledRejection", new TypeError("t3"));
     process.emit("unhandledRejection", new TypeError("t4"));

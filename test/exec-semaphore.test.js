@@ -39,7 +39,6 @@ test("isTestCommand: npm test系・node --testにマッチし、テスト以外�
     "npm --silent run test",
     "npm --x --y --z test",
     "npm run --x test:ok",
-    "echo npm test", // 文字列中の参照もテスト実行の意図として保守的に捕捉
     "node --test",
     "node  --test tests/*.test.js",
     "node --test --test-force-exit test/*.test.js",
@@ -59,6 +58,7 @@ test("isTestCommand: npm test系・node --testにマッチし、テスト以外�
     "echo done",
     "echo retest",
     "echo npmtest",
+    "echo npm test", // 文字列中の参照はテスト実行ではない(語境界仕様=最新契約)
   ];
   for (const c of yes) assert.equal(isTestCommand(c), true, `true期待: ${c}`);
   for (const c of no) assert.equal(isTestCommand(c), false, `false期待: ${c}`);

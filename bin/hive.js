@@ -310,7 +310,7 @@ async function cmdSession(o) {
   const ch = r.cacheHits;
   if (ch && (ch.byDate.length || ch.byAgent.length)) {
     console.log("");
-    console.log(`${ACCENT}キャッシュヒット率(usage-trace集計・閾値50%未満を警告)${RESET}`);
+    console.log(`${ACCENT}キャッシュヒット率(usage-trace集計・閾値${Math.round((r.cacheHitLowThreshold ?? 0.5) * 100)}%未満を警告)${RESET}`);
     console.log(`${DIM}  date        calls  prompt       cached  hit${RESET}`);
     for (const d of ch.byDate) {
       const hit = d.hitRatio != null ? Math.round(d.hitRatio * 100) + "%" : "-";
