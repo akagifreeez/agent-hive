@@ -146,6 +146,18 @@ function releaseTestSlot() {
  * @returns {Promise<{ok: boolean, text: string}>}
  */
 export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null }) {
+  // テスト系コマンド(npm test / node --test 等)はプロセス横断セマフォで直列化する
+  // (exec-test-semaphore)。非テストコマンドは従来どおり即実行(影響ゼロ)。
+  if (isTestCommand(command)) {
+    return runTestCommand({ command, cwd, timeoutMs, outputLimit, env }, runCommandInner);
+  }
+  return runCommandInner({ command, cwd, timeoutMs, outputLimit, env });
+}
+
+/** @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number}} o
+ * @returns {Promise<{ok: boolean, text: string}>}
+ */
+async function runCommandInner({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null }) {
   const kind = await detectShell();
   let release = null;
   let waitedMs = 0;
