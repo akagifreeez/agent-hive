@@ -89,9 +89,13 @@ export class ChatHost {
 
   // 購読解除: 閉じたスレッドのHostがboard/taskイベントで再び動かないようにする(イシュー#29)。
   // runner.jsのcloseThreadから呼ばれる。二重呼び出しは安全(no-op)。
+  // dispose: unsubscribeの別名(イシュー#29のテスト・runner.js双方から呼ばれる名称)。二重呼び出し安全。
+  dispose() { this.unsubscribe(); }
+
   unsubscribe() {
     if (this._unsubscribed) return;
     this._unsubscribed = true;
+    this.disposed = true; // dispose()別名経路でも閉鎖フラグを立てる(say/wakeの二重防御)
     for (const off of this._subscriptions ?? []) {
       try { off?.(); } catch { /* 解除失敗は無視(既に外れている) */ }
     }

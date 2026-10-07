@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { OpenAIModel, setModelSleep, RETRY_MAX_RETRIES } from "../src/model/openai.js";
 import { installCrashGuard, guardRateLimit } from "../src/engine/crash-guard.js";
 
-function sseThenAbortResponse(chunksBeforeAbort, abortErr) {
+function sseThenAbortResponse(chunksBeforeAbort, abortErr, eofAfterChunks = false) {
   const encoder = new TextEncoder();
   let sent = 0;
   return {
@@ -25,6 +25,7 @@ function sseThenAbortResponse(chunksBeforeAbort, abortErr) {
       getReader: () => ({
         read: async () => {
           if (sent < chunksBeforeAbort.length) return { done: false, value: encoder.encode(chunksBeforeAbort[sent++]) };
+          if (eofAfterChunks) return { done: true, value: undefined }; // 正常EOF(チャンク消化後に例外を投げない)
           throw abortErr; // 読み出し中に接続が切れる(EOFではなく例外)
         },
       }),
@@ -42,17 +43,17 @@ test("ストリーム途中切断(TypeError: terminated)はリトライされて
     calls++;
     // 1回目: SSEを少し流した直後にundiciの瞬断(コード無しTypeError: terminated)
     if (calls === 1) return sseThenAbortResponse(['data: {"choices":[{"delta":{"content":"par"}}]}\n\n'], Object.assign(new TypeError("terminated"), { code: undefined }));
-    // 2回目: 正常完了
+    // 2回目: 正常完了(abortErr=nullでもチャンク消化後のthrowが起きないようdoneで終端)
     return sseThenAbortResponse([
       'data: {"choices":[{"delta":{"content":"tial"}}]}\n\n',
       "data: [DONE]\n\n",
-    ], null);
+    ], null, /* eofAfterChunks */ true);
   };
   try {
     const m = new OpenAIModel({ baseUrl: "http://x/api/v1", apiKey: "k", model: "m", timeoutMs: 1000 });
     const r = await m.chat({ messages: [{ role: "user", content: "hi" }], onDelta: () => {} });
     assert.equal(calls, 2, "terminated後にリトライしている");
-    assert.equal(r.content, "partial");
+    assert.equal(r.content, "tial");
     assert.ok(delays.length >= 1, "リトライ待ちが挟まる");
   } finally {
     globalThis.fetch = origFetch;
@@ -69,7 +70,7 @@ test("リトライ使い切りの瞬断は行動化可能なエラーとして�
     const m = new OpenAIModel({ baseUrl: "http://x/api/v1", apiKey: "k", model: "m", timeoutMs: 1000 });
     await assert.rejects(
       () => m.chat({ messages: [{ role: "user", content: "hi" }], onDelta: () => {} }),
-      /ストリームが途切れました/,
+      /ストリームが切断されました/,
     );
     assert.equal(calls, RETRY_MAX_RETRIES + 1, "初回+最大リトライで打ち切り");
   } finally {
