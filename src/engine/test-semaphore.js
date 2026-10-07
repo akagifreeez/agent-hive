@@ -15,11 +15,9 @@ const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラ
  * マッチさせ、文中の"test"語には反応しない。 */
 export function isTestCommand(command) {
   const c = String(command ?? "");
-  const rxs = ["(^|[;&|(]\\s*)npm\\s+(run\\s+)?test","(^|[;&|(]\\s*)node\\s+--test","(^|[;&|(]\\s*)npm\\s+(--\\S+\\s+)*--test(\\s|$)"];
-  if (new RegExp(rxs[0]).test(c) || new RegExp(rxs[1]).test(c)) return true;
-  return new RegExp(rxs[2]).test(c); // npm --test / npm --silent --test もテスト意図
+  const rxs = ["npm\\s+(?:(?:--\\S+|run)?\\s+)*(?:test\\b|--test\\b)","node\\s+--test(?:(\\s)|$)"];
+  return new RegExp(rxs[0]).test(c) || new RegExp(rxs[1]).test(c);
 }
-
 class QueueTimeout extends Error {
   constructor(label) { super(`queue timeout: ${label}`); }
 }
@@ -52,7 +50,7 @@ function drain() {
  * @param {(o: any) => Promise<{ok: boolean, text: string}>} run 実行本体(=runCommand)。DI可能
  * @returns {Promise<{ok: boolean, text: string}>} */
 export async function runTestCommand(o, run) {
-  const queueTimeoutMs = o.queueTimeoutMs ?? 600000; // 既定10分
+  const queueTimeoutMs = o.queueTimeoutMs ?? o.timeoutMs ?? 600000; // 既定10分
   const label = o.label ?? String(o.command ?? "").slice(0, 80);
   if (!isFree()) {
     const entry = enqueue(label);
