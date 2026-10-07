@@ -48,6 +48,7 @@ export class TaskBlackboard {
     // 別本文で再createでき、2人のagentが同じIDを同時請求できてしまう。
     // doneは参照しないので「完了済みIDの再利用(自動再投入等)」は従来どおり許可。
     if (this.existsOpenOrClaimed(id)) return false;
+    const f = join(this.open, `${id}.md`);
     const meta = metaLines(project, role, acceptance, dependsOn, model);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
     if (createdBy) this.createdBy.set(id, createdBy);
