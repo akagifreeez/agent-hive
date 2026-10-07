@@ -15,7 +15,8 @@ const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラ
  * マッチさせ、文中の"test"語には反応しない。 */
 export function isTestCommand(command) {
   const c = String(command ?? "");
-  return /(^|[;&|(]\s*)npm\s+(run\s+)?test/.test(c) || /(^|[;&|(]\s*)node\s+--test/.test(c);
+  return /(^|[;&|(]\s*)npm\s+(run\s+)?test(\s|$|&|;|\||\))/.test(c)
+    || /(^|[;&|(]\s*)node\s+--test/.test(c);
 }
 
 class QueueTimeout extends Error {
@@ -38,8 +39,6 @@ function isFree() {
 function drain() {
   while (queue.length > 0 && running < limit) {
     const next = queue.shift();
-    running += 1;
-    runningIds.add(next.label);
     next.resolve();
   }
 }
