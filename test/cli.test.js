@@ -130,10 +130,11 @@ test("CLI: cancel/release/reopen/auditが実サーバーに対して動く", asy
   assert.notEqual(c2.code, 0);
   assert.match(c2.stderr, /中止できません/);
 
-  // release: 担当のいないタスクは解放できない
+  // release: 未請求(open)タスクの解放はべき等で成功(releaseOneの実装契約:
+  // 担当ファイルが無ければ true。二重宙吊りデッドロック対策のべき等化 4f9e280)
   const r = await runCli(["tasks", "release", "cli-t2"], port, token);
-  assert.notEqual(r.code, 0);
-  assert.match(r.stderr, /解放できません/);
+  assert.equal(r.code, 0);
+  assert.match(r.stdout, /cli-t2/);
 
   // reopen: doneタスクを再open(一旦cancel済みのcli-t1はdone扱い)
   const ro = await runCli(["tasks", "reopen", "cli-t1"], port, token);
