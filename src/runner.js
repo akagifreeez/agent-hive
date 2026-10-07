@@ -332,6 +332,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     if (!t) return { error: `スレッド ${name} は開いていません` };
     threads.delete(name);
     writeRegistry();
+    if (typeof t.host?.unsubscribe === "function") t.host.unsubscribe(); // 閉じたスレッドのHostはイベントで再起床しない(イシュー#29)
     bus.emit("thread.closed", { name });
     t.board.post("system", `[スレッド終了] ${name} を閉じました。成果物とログは保持されています(再open時は履歴ごと戻ります)。`);
     return { ok: true };

@@ -83,6 +83,7 @@ export class ChatHost {
     this._subscriptions.push("task.created", (p) => this.noteLanding(null));
     // 解放(退場した担当者のタスクがopenへ戻る)でも同様に起こす。
     this._subscriptions.push("task.released", (p) => this.handleTaskReleased(p));
+  }
 
   // 購読解除: 閉じたスレッドのHostがboard/taskイベントで再び動かないようにする(イシュー#29)。
   // runner.jsのcloseThreadから呼ばれる。二重呼び出しは安全(no-op)。
@@ -93,7 +94,6 @@ export class ChatHost {
       try { off?.(); } catch { /* 解除失敗は無視(既に外れている) */ }
     }
     this._subscriptions = [];
-  }
   }
 
   // 新タスク投入時の起床: 自分のprojectのタスク、または全スレッド共通の自動仕事(fix/review/distill)のみ
