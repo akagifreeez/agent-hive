@@ -111,22 +111,18 @@ async function runCommandInner({ command, cwd, timeoutMs = 30000, outputLimit = 
   child.stdout.on("data", append);
   child.stderr.on("data", append);
   return await new Promise((res) => {
-    const finish = (value) => {
-      if (release) release();
-      res(value);
-    };
     const timer = setTimeout(() => {
       child.kill();
-      finish({ ok: false, text: `タイムアウト(${timeoutMs}ms)で中断:\n${out.slice(0, outputLimit)}` });
+      res({ ok: false, text: `タイムアウト(${timeoutMs}ms)で中断:\n${out.slice(0, outputLimit)}` });
     }, timeoutMs);
     if (timer.unref) timer.unref();
     child.on("error", (err) => {
       clearTimeout(timer);
-      finish({ ok: false, text: `起動エラー: ${err.message}` });
+      res({ ok: false, text: `起動エラー: ${err.message}` });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      finish({ ok: code === 0, text: `exit=${code}\n${out.slice(0, outputLimit)}` });
+      res({ ok: code === 0, text: `exit=${code}\n${out.slice(0, outputLimit)}` });
     });
   });
 }
