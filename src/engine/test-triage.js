@@ -46,7 +46,15 @@
 
 /** テストファイルパス表記を正規化する(バックスラッシュ→スラッシュ、test/ 基準へ) */
 export function normalizeTestFile(raw) {
-  let p = String(raw ?? "").replace(/\/g, "/");
+  let p = String(raw ?? "").split(String.fromCharCode(92)).join("/");
+  // test at test/foo.test.js:103:1 のような行と列の接尾を落とす(数字のみの接尾を最大2段除去)
+  for (let k = 0; k < 2; k++) {
+    const j = p.lastIndexOf(":");
+    if (j <= 0) break;
+    const tail = p.slice(j + 1);
+    if (!/^[0-9]+$/.test(tail)) break;
+    p = p.slice(0, j);
+  }
   const i = p.lastIndexOf("test/");
   if (i > 0) p = p.slice(i); // 絶対パスやワークスペース接頭辞を落とす
   return p;
@@ -148,4 +156,76 @@ function finish(report) {
     report.tests = report.pass + report.fail + (report.skipped > 0 ? report.skipped : 0);
   }
   return report;
+}
+
+/**
+ * 失敗を既知/新規へ分類する。照合キーは file+name(ファイルが空なら名前のみ)。
+ * @param {TriageReport} report
+ * @param {KnownFailure[]} knownFailures config等で管理される既知失敗リスト
+ * @returns {TriageClassification}
+ */
+export function classifyFailures(report, knownFailures = []) {
+  const knownList = Array.isArray(knownFailures) ? knownFailures : [];
+  const keyOf = (file, name) => (file ? normalizeTestFile(file) + "::" + name : "*::" + name);
+  const knownKeys = new Set(knownList.map((k) => keyOf(k.file, k.name)));
+  const known = [];
+  const fresh = [];
+  for (const f of report.failures) {
+    if (knownKeys.has(keyOf(f.file, f.name))) known.push(f);
+    else fresh.push(f);
+  }
+  const total = report.tests > 0 ? report.tests : report.failures.length;
+  const summary = "tests=" + total + " fail=" + report.failures.length + " (known=" + known.length + " fresh=" + fresh.length + ")";
+  return { known, fresh, summary };
+}
+
+/**
+ * 新規失敗(群)からfix候補タスク1件を組み立てる(純関数)。
+ * 失敗はエリア(系統)ごとに1タスクへ集約する(8件→最大5候補。粒度が細かすぎて
+ * ボードが流れないようにする)。
+ * @param {TriageFailure[]} failures 同一エリアの新規失敗群
+ * @param {string} area エリアラベル(deriveAreaの結果)
+ * @returns {{id: string, role: string, project: string, acceptance: string, body: string}}
+ */
+export function buildFixCandidate(failures, area) {
+  const list = Array.isArray(failures) ? failures : [];
+  const lines = list.map((f) => {
+    const head = "- " + f.name + " (" + f.file + ")";
+    return head + " / " + f.errorType + (f.message ? ": " + f.message : "");
+  });
+  const fileSet = [...new Set(list.map((f) => f.file).filter(Boolean))];
+  const cmd = fileSet.length === 1 ? "node --test " + fileSet[0] : "npm test";
+  const id = "fix-triage-" + String(area ?? "unknown").replace(/[^a-z0-9-]+/gi, "-");
+  const body = [
+    "フルスイートトリアージ(発見器)が新規失敗を検出した。エリア「" + area + "」の失敗 " + list.length + " 件を修正せよ。",
+    "",
+    "## 失敗テスト(" + list.length + "件)",
+    ...lines,
+    "",
+    "- まず bash で `git merge main` して最新mainを取り込む。",
+    "- 失敗原因を特定して修正する(テストがTDD途中領域なら、その旨をボードへ報告し既知失敗リストへの登録を提案する)。",
+    "- 修正後 `" + cmd + "` を通し、ボードへ報告して finish_task。",
+  ].join(String.fromCharCode(10));
+  return {
+    id,
+    role: "impl",
+    project: "test-triage",
+    acceptance: "対象失敗テスト(" + list.length + "件)が通ること。" + cmd + " が緑であること。",
+    body,
+  };
+}
+
+/**
+ * 失敗群をエリアごとに集約しfix候補群へ組み立てる。
+ * @param {TriageFailure[]} fresh 新規失敗群
+ * @returns {Array<ReturnType<typeof buildFixCandidate>>}
+ */
+export function buildFixCandidates(fresh) {
+  const byArea = new Map();
+  for (const f of Array.isArray(fresh) ? fresh : []) {
+    const area = deriveArea(f.file, f.name, f.errorType);
+    if (!byArea.has(area)) byArea.set(area, []);
+    byArea.get(area).push(f);
+  }
+  return [...byArea.entries()].map(([area, fs]) => buildFixCandidate(fs, area));
 }

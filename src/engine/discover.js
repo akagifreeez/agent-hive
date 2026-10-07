@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "./exec.js";
+import { parseTap, classifyFailures, buildFixCandidates, deriveArea } from "./test-triage.js";
 import { detectStaleSections, genCliCommands, genRepoLayout, extractHelp } from "./readme-auto.js";
 
 export const FIX_TASK_ID = "fix-test-failures";
@@ -145,6 +146,45 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
     bus.emit("discovery.created", { taskId: README_TASK_ID });
   }
 
+  // ⑤ トリアージプローブ: フルスイート(または指定コマンド)を実行し、失敗を既知/新規へ分類。
+  //    新規失敗だけをエリア別のfix候補タスクへ起票する(既知リストはconfig管理・TDD途中領域の区別)。
+  //    重いフル実行は既定off(discovery.probes.triage.mode)。exec-test-semaphore着地後に有効化する想定。
+  let triageBusy = false;
+  async function probeTriage() {
+    const t = probes?.triage;
+    const mode = String(t?.mode ?? "off");
+    if (mode === "off" || triageBusy) return;
+    if (hasOutstandingWork()) {
+      bus.emit("discovery.skip", { reason: "通常タスクが残っているため、重いトリアージ実行を飛ばす" });
+      return;
+    }
+    triageBusy = true;
+    try {
+      const command = t.command ?? "npm test";
+      const r = await exec({ command, cwd: workspace, timeoutMs: t.timeoutMs ?? 300000, outputLimit: 60000 });
+      const report = parseTap(r.text ?? "");
+      const known = Array.isArray(t.knownFailures) ? t.knownFailures : [];
+      if (r.ok && report.failures.length === 0) return; // 全緑: 仕事なし
+      const cls = classifyFailures(report, known);
+      const fresh = cls.fresh.filter((f) => !tasks.existsOpenOrClaimed("fix-triage-" + areaSlug(deriveAreaSafe(f))));
+      const candidates = buildFixCandidates(fresh);
+      for (const c of candidates) {
+        if (tasks.existsOpenOrClaimed(c.id)) continue; // 重複起票防止
+        tasks.create(c);
+        bus.emit("discovery.created", { taskId: c.id });
+      }
+    } finally {
+      triageBusy = false;
+    }
+  }
+  // エリア名をタスクidに安全な形へ(小文字英数字とハイフン)
+  function areaSlug(a) {
+    return String(a ?? "unknown").toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+  }
+  function deriveAreaSafe(f) {
+    return deriveArea(f.file, f.name, f.errorType);
+  }
+
   // bin/hive.jsのHELPを取り出してcli-commandsセクション本文を作るラッパ
   function genCliCommandsFromRoot(root) {
     const hivePath = join(root, "bin", "hive.js");
@@ -160,6 +200,7 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
       await probeDiffs();
       await probeMemory();
       await probeReadme();
+      await probeTriage();
       return true;
     } catch (err) {
       bus.emit("discovery.error", { error: err.message });
