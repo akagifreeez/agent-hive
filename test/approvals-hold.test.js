@@ -33,10 +33,15 @@ async function waitUntil(fn, ms = 120000) {
 }
 
 // 即答する固定応答モデル(ツール呼出なし=ラウンドは1ターンで終わる)
-function scriptedModel(text) {
+function scriptedModel(text, steps = null) {
+  let si = 0;
   return {
     maxTokens: 100,
     async chat() {
+      if (steps && si < steps.length) {
+        const step = steps[si++];
+        return { content: "", toolCalls: step.toolCalls ?? [], raw: { content: "" }, usage: { promptTokens: 1, completionTokens: 1 } };
+      }
       return { content: text, toolCalls: [], raw: { content: text }, usage: { promptTokens: 1, completionTokens: 1 } };
     },
   };
@@ -47,7 +52,7 @@ async function commitIn(dir, msg) {
 }
 
 // テスト環境: mainリポジトリ(ws)+alphaのworktree。ChatHostのラウンド末自動マージ経路を有効化。
-async function mkEnv() {
+async function mkEnv(opts = {}) {
   const ws = mktmp();
   const wtRoot = `${ws}-wt`;
   await ensureGitRepo(ws);
@@ -75,9 +80,9 @@ async function mkEnv() {
     mains: [alpha],
     mainWorkspace: ws, // ラウンド終了の自動マージ(#22の対象経路)
     project: "approvals",
-    autoContinueRounds: 0,
+    autoContinueRounds: opts.autoContinueRounds ?? 0,
     staggerMs: 0,
-    modelFactory: () => model,
+    modelFactory: () => opts.model ?? model,
     toolsFactory: (agent) => createTools({ agent, workspace: wtA, mainWorkspace: ws, board, tasks, bus, approvals }),
     board, tasks, bus,
     approvals,
