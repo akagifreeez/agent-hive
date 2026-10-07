@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
-import { runTestCommand } from "./test-semaphore.js";
+import { runTestCommand, configureTestSemaphore } from "./test-semaphore.js";
 
 // config.exec.testMaxConcurrent の反映用(runner起動時に呼ぶ)。空でも既定(1)へ戻す。
 export function applyTestSemaphoreConfig(execCfg) {
