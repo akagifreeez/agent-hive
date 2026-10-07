@@ -125,7 +125,10 @@ test("runScenario再実行: seedがdone/の完了済みタスクを再起票せ�
     // verify-statsは未完了なのでopenへ投入され、かつ依存解決済みで請求可能であること
     assert.ok(openIds.includes("verify-stats"), "未完了のverify-statsは通常どおり起票される");
     const tasks = new TaskBlackboard(ws, new Bus());
-    const got = tasks.claim({ id: "reviewer", role: null }, { project: "lab-lessons" });
+    // project無しで起票されたseedタスクは文脈絞り(lab-lessons)の対象外 — これはclaimの正しい仕様。
+    // blog lab実害の本質は「依存解決が済んでいれば請求できること」なので、文脈絞り無しで検証する。
+    // (project付きで絞りたいテストは dash ゾンビ回収テストの impl-stats が担保している)
+    const got = tasks.claim({ id: "reviewer", role: null });
     assert.ok(got, "verify-statsは依存完了済みとして請求可能(blog lab実害の解消)");
     assert.equal(got?.id, "verify-stats");
   } finally {
