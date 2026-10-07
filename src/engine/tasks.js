@@ -304,7 +304,14 @@ export class TaskBlackboard {
     try {
       if (!existsSync(src)) return true; // 既に無い=解放済みとして成功(べき等)
       if (note) appendNote(src, note);
-      if (existsSync(dst)) return false; // 同idのopenが既にある(手動投入等)場合は壊さない
+      if (existsSync(dst)) {
+        // 同idのopenが既にある(二重宙吊りの先着分/手動投入等)場合はrenameせず、
+        // この重複実体をdone/へ掃除する(dash lab実害: alpha/delta二重宙吊りで解放時に
+        // 1件だけ戻り、残り1件がclaimedのまま宙吊り続行→idle-claim待ちデッドロック)。
+        renameSync(src, join(this.done, src.split(/[\/]/).pop()));
+        this.bus?.emit("task.released", { agent: agentId, taskId });
+        return true;
+      }
       renameSync(src, dst);
       this.bus?.emit("task.released", { agent: agentId, taskId });
       return true;
