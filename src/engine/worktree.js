@@ -154,12 +154,23 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
       const files = mainMarkers.text.trim().split("\n").map((f) => f.trim()).join(", ");
       return { ok: false, marker: true, text: `mainに競合マーカーが残っています(${files})。マージを中止しました。先にmain側のマーカーを解消してください。` };
     }
-    // 1) worktree側の未コミット変更を確定(変更がなければno-op)
-    await exec({
-      command: `git add -A && (git diff --cached --quiet || git -c user.name=${agent.id} -c user.email=${agent.id}@hive.local commit -m 'wip: ${taskId}')`,
-      cwd: worktreePath,
-      outputLimit: 2000,
-    });
+    // 1) worktree側の未コミット変更を確定(変更がなければno-op)。ステップを分解して
+    // コミット失敗(pre-commitフック等)を見える化する(イシュー#28: 空振りコミットの成功扱い防止)
+    const addStep = await exec({ command: "git add -A", cwd: worktreePath, outputLimit: 2000 });
+    if (!addStep.ok) {
+      return { ok: false, text: "ステージ(git add)に失敗しました: " + addStep.text.slice(0, 300) };
+    }
+    const staged = await exec({ command: "git diff --cached --quiet", cwd: worktreePath, outputLimit: 500 });
+    if (!staged.ok) {
+      const commitStep = await exec({
+        command: "git -c user.name=" + agent.id + " -c user.email=" + agent.id + "@hive.local commit -m 'wip: " + taskId + "'",
+        cwd: worktreePath,
+        outputLimit: 2000,
+      });
+      if (!commitStep.ok) {
+        return { ok: false, text: "コミットに失敗しました(pre-commitフック等): " + commitStep.text.slice(0, 300) };
+      }
+    }
     // 1.5) ブランチ側ガード: このマージで運ばれるファイルにマーカーが入っていれば拒否し、
     //      作業者へ返送する(マーカー入りの確定をmainに作らない)
     const dirty = await exec({ command: `git diff --name-only main...agent/${agent.id}`, cwd: mainWorkspace, outputLimit: 4000 });
