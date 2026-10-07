@@ -7,6 +7,7 @@ import { chatUiHandlers } from "./ui/chat-wiring.js";
 import { wireConsoleLog } from "./log.js";
 import { wireCliNotify, wireStallNotify } from "./notify.js";
 import { installProcessGuard } from "./engine/process-guard.js";
+import { wireProcessErrorToBoards } from "./engine/process-error-wiring.js";
 
 function usage() {
   console.log(`agent-hive — 複数エージェントが同一ワークスペースで同時作業するハーネス
@@ -22,7 +23,7 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) return usage();
   // プロセス生存ガード(long-run-resilience): 未捕捉rejection/例外で落ちない。
-  // 前面のどの入口(--chat/--serve/--run/デスクトップ)より先に配線する
+  // どの入口(--chat/--serve/--run)より先に配線する(busが無い段階はコンソール+ログのみ)
   installProcessGuard(null, { notify: (line) => console.error(`🔔 [通知] ${line}`) });
   const config = loadConfig(args.includes("--config") ? args[args.indexOf("--config") + 1] : undefined);
   const bus = new Bus();
@@ -42,6 +43,23 @@ async function main() {
     // 逆だとリーダーの登録イベント(thread.opened)がUI立ち上がり前に消える。
     // controllerは後から入るのでgetterで渡す
     let controller = null;
+    // プロセス警告のボード投稿先(プロセス生存ガード): メイン+全スレッドのBoardを遅延解決
+    const listGuardBoards = () => {
+      const boards = [];
+      try {
+        const mainB = controller?.boardOf?.("__main__");
+        if (mainB) boards.push(mainB);
+        for (const name of controller?.listThreads?.() ?? []) {
+          const b = controller.boardOf?.(name);
+          if (b) boards.push(b);
+        }
+      } catch { /* コントローラ未初期化時は投稿先なし(イベントとログだけ流れる) */ }
+      return boards;
+    };
+    installProcessGuard(bus, {
+      notify: (line) => console.error(`🔔 [通知] ${line}`),
+    });
+    wireProcessErrorToBoards(bus, { getBoards: listGuardBoards });
     await startUi({ config, bus, autoStart: false, ...chatUiHandlers(() => controller) });
     controller = await runChat({ config, bus });
     return;
