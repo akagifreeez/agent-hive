@@ -331,9 +331,9 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     const t = threads.get(name);
     if (!t) return { error: `スレッド ${name} は開いていません` };
     threads.delete(name);
-    // イシュー#29: 閉じたHostのbus購読を解除する。解除しないとMapから外した後も
-    // task.created/board等で閉じたHostのハンドラが動き、閉じたスレッドのメンバーが再起床する。
-    try { t.host?.unsubscribe?.(); } catch { /* 解除失敗でもクローズ自体は続行 */ }
+    // 閉じたスレッドのホストを破棄(bus購読解除+起床遮断)。これが無いと
+    // 閉鎖後も task.created/task.released でワーカーが起こされ続ける(イシュー#29)。
+    try { t.host?.dispose?.(); } catch (e) { console.error("[closeThread] dispose失敗", e); }
     writeRegistry();
     bus.emit("thread.closed", { name });
     t.board.post("system", `[スレッド終了] ${name} を閉じました。成果物とログは保持されています(再open時は履歴ごと戻ります)。`);

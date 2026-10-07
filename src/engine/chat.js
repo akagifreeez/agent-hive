@@ -51,6 +51,8 @@ export class ChatHost {
     this.hooks = hooks;
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
     this.paused = false; // 一時停止中は新しい起床を潰す(実行中ラウンドはターン境界で自然終了)
+    this.disposed = false; // dispose後は閉鎖スレッド。新しい起床・sayを一切起こさない(イシュー#29)
+    this.unsubs = []; // bus購読の解除関数(disposeで全解除)
     const effChat = this.chatConfig ?? this.config?.chat ?? null; // chatConfig(直接)/config.chat の両対応
     this.memPrune = { // 会話メモリの刈り取り設定(イシュー#20)。0/nullで無効化可
       maxMessages: effChat?.memMaxMessages ?? 200,
@@ -63,34 +65,36 @@ export class ChatHost {
     this.landingSignal = landingSignal; // null可(未指定時はイベント購読のみ)
     this.landedThisRound = new Map(); // id => 直前ラウンドに着地(タスクdone/マージ完了)があったか(進捗ゲート用)
     this.approvals = approvals; // 承認フロー(null可=無効。ラウンド末マージの保留判定)
-    this.busSubs = []; // bus購読の解除ハンドル(イシュー#29: closeThreadで解除し閉じたHostの再起床を防ぐ)
     for (const m of mains) {
       this.seen.set(m.id, board.lastId());
       this.landedThisRound.set(m.id, false); // 着地フラグの初期値(進捗ゲート)
     }
     // ボード上の@表示名でメインを起こす(横つながりの入口)
-    this.busSubs.push(bus.on("board", (p) => this.handleBoardPost(p)));
+    this.unsubs.push(bus.on("board", (p) => this.handleBoardPost(p)));
     // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
     // これがないと全員退出後の発見器起票タスクが誰にも消化されない。
-    this.busSubs.push(bus.on("task.created", (p) => this.handleTaskCreated(p)));
+    this.unsubs.push(bus.on("task.created", (p) => this.handleTaskCreated(p)));
     // 進捗ゲート(自動継続の着地検出): タスク完了とラウンド末mainマージを着地として記録する。
     // landedThisRoundはwake()でリセットし、ラウンド中の実績だけを次判定に使う。
-    this.busSubs.push(bus.on("task.finished", (p) => this.noteLanding(p.agent)));
+    this.unsubs.push(bus.on("task.finished", (p) => this.noteLanding(p.agent)));
     // テスト起点: ChatHost外(ユニットテスト等)から着地を直接報せる入口(進捗ゲートの観測点)。
-    this.busSubs.push(bus.on("agent.merged", (p) => this.noteLanding(p.agent)));
+    this.unsubs.push(bus.on("agent.merged", (p) => this.noteLanding(p.agent)));
     // create_task(新しい仕事の発生)も着地として扱う: 「次にやることが生まれた」のは進捗。
     // これが無いと「探索ラウンドで新タスクを起票→次ラウンドで着手」の正当な循環が止まる。
-    this.busSubs.push(bus.on("task.created", (p) => this.noteLanding(null)));
+    this.unsubs.push(bus.on("task.created", (p) => this.noteLanding(null)));
     // 解放(退場した担当者のタスクがopenへ戻る)でも同様に起こす。
-    this.busSubs.push(bus.on("task.released", (p) => this.handleTaskReleased(p)));
+    this.unsubs.push(bus.on("task.released", (p) => this.handleTaskReleased(p)));
   }
 
-  /** bus購読を全て解除する(イシュー#29: closeThreadから呼ぶ)。以後のboard/taskイベントで
-   * 閉じたHostのハンドラが動かなくなり、閉じたスレッドのメンバーが再起床しない。 */
-  unsubscribe() {
-    for (const off of this.busSubs.splice(0)) {
-      try { off(); } catch { /* 二重解除でも続行 */ }
+  // 破棄(イシュー#29): スレッド閉鎖後にこのホストがbus購読で起こされ続け、
+  // 閉じたスレッドのワーカーへ「新着タスク/解放」の再循環が流れるのを断つ。
+  // 購読解除+以降のwake/sayを握り潰す。タスク・ボード・セッションデータは壊さない。
+  dispose() {
+    this.disposed = true;
+    for (const off of this.unsubs) {
+      try { off(); } catch { /* 二重解除は無視 */ }
     }
+    this.unsubs.length = 0;
   }
 
   // 新タスク投入時の起床: 自分のprojectのタスク、または全スレッド共通の自動仕事(fix/review/distill)のみ
@@ -215,6 +219,7 @@ export class ChatHost {
   // イシュー#21: ボード側はslice(0,6000)打ち切り+seen進行を持ち、巨大worker投稿の影で
   // 質問本文は実行中ならsteering([入力])で、未実行ならkickoffへ載せて届ける(二重配信しない)。
   say(text) {
+    if (this.disposed) return { ok: false, error: `スレッド ${this.board.name} は閉じられています` }; // 閉鎖後の入力は無効(イシュー#29)
     // 破損入力(U+FFFD等)の検知(イシュー#20 提案3): 化けた入力をそのまま渡すと
     // リーダーが断片から主題を推測して答えてしまうため、注入文へ明示的に警告を載せる。
     const broken = detectBrokenInput(text)
@@ -276,6 +281,7 @@ export class ChatHost {
   }
 
   wake(main, kickoffText, delayMs = 0) {
+    if (this.disposed) return; // 閉鎖済みスレッドの再循環を遮断(イシュー#29)
     if (this.paused) return; // 停止中の起床は握り潰す(再開後に改めて起こされる)
     const st = this.roundState.get(main.id) ?? { running: false, pending: [] };
     this.roundState.set(main.id, st);
