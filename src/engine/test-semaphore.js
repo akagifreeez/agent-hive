@@ -23,8 +23,7 @@ export function isTestCommand(command) {
     || new RegExp(start + "npm\\s+(--[^\\s|;&()]+\\s+)*--test(\\s|$)").test(c)
     || new RegExp(start + "npm\\s+(--[^\\s|;&()]+\\s+)*(run\\s+)?(--[^\\s|;&()]+\\s+)*(run\\s+)?test\\b").test(c)
     || new RegExp(start + "npm\\s+(run\\s+)?test\\s+[\\w:@/.\\-\\[\\]*]").test(c)
-    || new RegExp(start + "node\\s+--test").test(c)
-    || /\bnpm\s+(run\s+)?test\b/.test(c); // 文字列中の参照もテスト実行意図として保守的に捕捉
+    || new RegExp(start + "node\\s+--test").test(c);
 }
 
 // ---- セマフォ本体(モジュール単一 = プロセス横断で共有) ----
