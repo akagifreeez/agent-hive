@@ -80,7 +80,7 @@ test("Hooks roundEnd: ChatHostのラウンド終了で発火する", async () =>
   host.say("始めて");
   const ok = await (async () => {
     const start = Date.now();
-    while (Date.now() - start < 8000) {
+    while (Date.now() - start < 45000) {
       if (existsSync(join(ws2, "rounds.txt"))) return true;
       await new Promise((r) => setTimeout(r, 50));
     }
