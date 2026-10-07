@@ -56,6 +56,21 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   }
   await ensureGitRepo(config.workspace);
 
+  // 漂流チェック(runChat): チャット起動時も同様にmainワークスペースのチェックアウトを検査。
+  // 漂流+中断マージの残骸はゾンビ回収・ラウンド開始より先に片付ける(判定不能時は何もしない)。
+  try {
+    const gc = await ensureMainCheckout({ mainWorkspace: config.workspace });
+    if (gc.branch && gc.branch !== "main") {
+      const driftMsg = gc.ok
+        ? "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされていました。mainへ復帰しました。"
+        : "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされており、自動復帰できませんでした: " + (gc.reason ?? "");
+      mainBoard.post("system", driftMsg);
+      bus.emit("scenario.warn", { message: driftMsg });
+    }
+  } catch (err) {
+    bus.emit("scenario.warn", { message: "起動時ブランチチェックに失敗(起動は続行): " + (err instanceof Error ? err.message : err) });
+  }
+
   // 起動時のゾンビclaim回収: プロセス再起動で走行中ラウンドは全て死んでいるため、claimedのまま
   // 残ったタスクは誰にも進められない(idle-claim待ちのデッドロック)。起動直後なので全claimedは
   // ゾンビと見なして解放する(task.releasedが出るが、この時点でラウンドは無いので無害)
