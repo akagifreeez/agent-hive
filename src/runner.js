@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from 
 import { join, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Board, Bus } from "./engine/board.js";
+import { readModelPolicy } from "./engine/model-policy.js";
 import { TaskBlackboard } from "./engine/tasks.js";
 import { createTools } from "./engine/tools.js";
 import { runAgentLoop } from "./engine/loop.js";
@@ -158,8 +159,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     hooks,
     idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0,
     approvals,
+    modelPolicy: readModelPolicy(config),
   });
-  const mcpTo = (extra) => ({ ...extra, mcpHosts, hooks, idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0 });
+  const mcpTo = (extra) => ({ ...extra, mcpHosts, hooks, idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0, modelPolicy: readModelPolicy(config) });
 
   // サブスレッド: project名=スレッド名。3ワーカー( personas: workers )が専用ボードで並行作業
   const threads = new Map();
@@ -695,6 +697,8 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       tasks,
       bus,
       gate,
+      // scenario実行でもモデル選択ポリシーを有効化(承認フロー競合の検証差し戻し経路で参照される)
+      modelPolicy: readModelPolicy(config),
       // scenario実行ではスレッド機構が無いので自分のボードのみ解決(他スレッド宛はok:false)
       resolveBoard: (name) => (String(name ?? "").trim() === board.name ? board : null),
     });
