@@ -62,7 +62,7 @@ export async function runTestCommand(o, run) {
       }
     }, queueTimeoutMs);
     try {
-      await entry.p;
+      await entry.p; // drain()がこの分のスロット(running)を確保済み。ここでは加算しない(二重加算=スロットリークの原因)
     } catch (err) {
       clearTimeout(timer);
       if (err instanceof QueueTimeout) {
@@ -76,9 +76,10 @@ export async function runTestCommand(o, run) {
       throw err;
     }
     clearTimeout(timer);
+  } else {
+    running += 1;
+    runningIds.add(label);
   }
-  running += 1;
-  runningIds.add(label);
   try {
     return await run(o);
   } finally {
