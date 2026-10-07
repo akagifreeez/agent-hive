@@ -30,5 +30,6 @@ test("semaphore-leak: isTestCommandはテスト系コマンドだけにマッチ
   assert.equal(isTestCommand("node --test tests/"), true);
   assert.equal(isTestCommand("git worktree add wt main"), false, "gitコマンドは対象外");
   assert.equal(isTestCommand("cat package.json"), false, "catは対象外");
-  assert.equal(isTestCommand("echo npm test"), false, "文中のtest語には反応しない");
+  assert.equal(isTestCommand("echo npm test"), true, "文中参照も保守捕捉(main契約: exec-semaphore.test.jsと同一仕様)");
+  assert.equal(isTestCommand("echo npmtest"), false, "test語を含まない/語が別語なら反応しない");
 });
