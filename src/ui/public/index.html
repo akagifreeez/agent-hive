@@ -317,13 +317,13 @@
   #progress-chip:hover { color: var(--label); border-color: var(--line-strong); }
   #progress-chip.on { color: var(--accent); border-color: var(--accent); background: var(--accent-fill); }
   #progress-wrap { position: relative; display: inline-flex; margin-left: 10px; flex-shrink: 0; }
-  #progress-panel { display: none; position: absolute; top: 100%; right: 0; z-index: 60; width: min(460px, 90vw); max-width: 460px; max-height: 60vh; overflow: auto; overflow-y: auto; background: var(--bg-elevated); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow-overlay); padding: 8px 10px; font-size: 12px; }
+  #progress-panel { display: none; position: absolute; top: 100%; right: 0; z-index: 60; width: min(520px, 90vw); max-width: 520px; max-height: 60vh; overflow-x: hidden; overflow-y: auto; background: var(--bg-elevated); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow-overlay); padding: 8px 10px; font-size: 12px; }
   #progress-panel .pc-sec { font-weight: 600; color: var(--label); margin: 6px 0 4px; }
   #progress-panel .pc-none { color: var(--label-tertiary); padding: 2px 0 6px; }
   #progress-panel .pc-row { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; border-bottom: 1px solid var(--separator); min-width: 0; }
   #progress-panel .pc-id { font-family: var(--font-mono); color: var(--accent); flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #progress-panel .pc-sum { color: var(--sub); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #progress-panel .pc-ag { color: var(--label-tertiary); flex-shrink: 0; font-size: 11px; }
+  #progress-panel .pc-ag { color: var(--label-tertiary); flex-shrink: 0; font-size: 11px; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #progress-panel .pc-done .pc-id { color: var(--ok); }
   #progress-panel .pc-more { color: var(--label-tertiary); font-size: 11px; padding: 4px 0 2px; }
   /* モデル未接続の警告バー(composerの上・鍵/認証がないときだけ出る。JSでflex/none切替) */
@@ -1970,9 +1970,11 @@ function renderProgressPanel() {
     // 長いid・要約はCSSでellipsis。全文はtitle属性でホバー時に出す(切れても読める)
     row.title = (id + " " + (sum ?? "") + (ag ? " " + ag : "")).trim();
     const i = document.createElement("span"); i.className = "pc-id"; i.textContent = id;
+    i.title = id; // 長いタスクidの全文をホバーで出す(ellipsisで切れても読める)
     const m = document.createElement("span"); m.className = "pc-sum"; m.textContent = sum;
+    m.title = sum; // 長い要約の全文をホバーで出す
     row.appendChild(i); row.appendChild(m);
-    if (ag) { const a = document.createElement("span"); a.className = "pc-ag"; a.textContent = ag; row.appendChild(a); }
+    if (ag) { const a = document.createElement("span"); a.className = "pc-ag"; a.textContent = ag; a.title = ag; row.appendChild(a); }
     return row;
   };
   panel.textContent = "";
@@ -1982,10 +1984,15 @@ function renderProgressPanel() {
   for (const t of l.claimed) panel.appendChild(mk("pc-row", t.id, t.summary ?? "", "@" + (t.agent ?? "?"))); // 作業中は全件
   const s2 = document.createElement("div"); s2.className = "pc-sec"; s2.textContent = "直近の完了";
   panel.appendChild(s2);
-  const doneDesc = [...l.done].reverse().slice(0, 15); // 新しい順・直近15件に絞る(数十件でも下端を押し上げない)
-  if (l.done.length > 15) { const n = document.createElement("div"); n.className = "pc-more"; n.textContent = "他" + (l.done.length - 15) + "件"; panel.appendChild(n); }
-  if (doneDesc.length === 0) { const n = document.createElement("div"); n.className = "pc-none"; n.textContent = "完了タスクはまだありません"; panel.appendChild(n); }
-  for (const t of doneDesc) panel.appendChild(mk("pc-row pc-done", t.id, t.summary ?? "", "@" + (t.agent ?? "?")));
+  const doneDesc = [...l.done].reverse(); // 新しい順
+  const doneShow = doneDesc.slice(0, 15); // 完了は直近15件に絞る(数十件あってもパネルが縦に伸びない)
+  if (doneShow.length === 0) { const n = document.createElement("div"); n.className = "pc-none"; n.textContent = "完了タスクはまだありません"; panel.appendChild(n); }
+  for (const t of doneShow) panel.appendChild(mk("pc-row pc-done", t.id, t.summary ?? "", "@" + (t.agent ?? "?")));
+  if (doneDesc.length > doneShow.length) {
+    const more = document.createElement("div"); more.className = "pc-none"; // 省略表記(完了タスクの残り)
+    more.textContent = "他" + (doneDesc.length - doneShow.length) + "件";
+    panel.appendChild(more);
+  }
 }
 $("progress-chip").onclick = () => { progressPanelOpen = !progressPanelOpen; renderAll(); };
 
