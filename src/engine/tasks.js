@@ -44,6 +44,10 @@ export class TaskBlackboard {
   // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
   // acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
   create({ id, role, body, project = "", acceptance = "", dependsOn = [], createdBy = null, model = null }) {
+    // ID一意性はopenとclaimedの両方で見る(イシュー#30): claimed中のIDを別本文で
+    // 再createすると2人のagentが同じIDを同時請求できてしまう。doneは許可する
+    // (自動再投入・タスクボードの正常な再利用経路。IDの衝突ではなく再生産)。
+    if (this.existsOpenOrClaimed(id)) return false;
     const f = join(this.open, `${id}.md`);
     if (existsSync(f)) return false;
     const meta = metaLines(project, role, acceptance, dependsOn, model);
