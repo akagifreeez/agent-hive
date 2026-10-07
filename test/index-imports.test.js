@@ -17,7 +17,9 @@ test("index-imports: index.jsのローカルimportは実在する名前付きエ
   let checks = 0;
   while ((m = re.exec(src)) !== null) {
     const names = m[1].split(",").map((s) => s.trim()).filter(Boolean);
-    const mod = await import(pathToFileURL(join(root, "src", m[2])).href);
+    const spec = pathToFileURL(join(root, "src", m[2]));
+    const mod = await import(spec)
+      .catch((err) => { throw new Error(`import失敗: specifier="${m[2]}" url=${spec} → ${err.message}`); });
     for (const n of names) {
       assert.notEqual(
         mod[n], undefined,
