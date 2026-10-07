@@ -91,6 +91,32 @@ test("diff検出(reviewed..main)→reviewタスク生成、レビュー完了→
   rmTree(ws);
 });
 
+test("プローブ既定はスモーク(フルスイートを回さない)・full指定で旧挙動に戻せる", async () => {
+  const ws = makeWorkspace();
+  const { bus, tasks } = makeEnv(ws);
+  const ran = [];
+  const fakeExec = async (o) => {
+    ran.push(o.command);
+    return { ok: true, text: 'exit=0' };
+  };
+  // 既定(probes未指定): スモークコマンドが使われ、フルスイートは回さない
+  const d = startDiscovery({ workspace: ws, tasks, bus, intervalSec: 3600, exec: fakeExec });
+  await d.tick();
+  const testRuns = () => ran.filter((c) => !c.startsWith("git ")).length;
+  assert.equal(testRuns(), 1);
+  assert.match(ran[0], /node --test /);
+  assert.equal(ran[0].includes("npm test"), false);
+  d.stop();
+  // 旧挙動: probes.tests="full" でフルスイート(npm test)へ戻せる
+  ran.length = 0;
+  const d2 = startDiscovery({ workspace: ws, tasks, bus, intervalSec: 3600, probes: { tests: "full" }, exec: fakeExec });
+  await d2.tick();
+  assert.equal(testRuns(), 1);
+  assert.equal(ran.find((c) => !c.startsWith("git ")), "npm test");
+  d2.stop();
+  rmTree(ws);
+});
+
 test("impl等の通常タスクが残っている間はテスト失敗を仕事化しない", async () => {
   const ws = makeWorkspace();
   const { bus, tasks } = makeEnv(ws);

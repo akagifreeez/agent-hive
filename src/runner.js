@@ -92,6 +92,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     workspace: config.workspace, tasks, bus,
     intervalSec: config.discovery?.intervalSec ?? 30,
     testCommand: config.discovery?.testCommand,
+    probes: config.discovery?.probes,
   });
   bus.on("merge.completed", () => void discovery.tick());
 
@@ -676,6 +677,7 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
     bus,
     intervalSec: config.discovery?.intervalSec ?? 30,
     testCommand: config.discovery?.testCommand,
+    probes: config.discovery?.probes,
   });
   // マージでmainが動くたびに即時プローブ(レビュータスクの立ち遅れ防止)
   bus.on("merge.completed", () => void discovery.tick());
