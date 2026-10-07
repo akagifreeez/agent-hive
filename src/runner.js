@@ -669,6 +669,22 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
     writeFileSync(p, f.content);
   }
   await ensureGitRepo(config.workspace);
+
+  // 起動時ブランチ漂流チェック(self-improve-lab-lessons): mainワークスペースのチェックアウトが
+  // agent/<id>等へ漂流していたら安全にmainへ復帰し、逸脱をボードへ警告(2026-10-07朝の本番実害)。
+  // 判定不能(git不在等)は起動を止めない(既存契約)。
+  try {
+    const gc = await ensureMainCheckout({ mainWorkspace: config.workspace });
+    if (gc.branch && gc.branch !== "main") {
+      const driftMsg = gc.ok
+        ? "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされていました。mainへ復帰しました。"
+        : "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされており、自動復帰できませんでした: " + (gc.reason ?? "");
+      board.post("system", driftMsg);
+      bus.emit("scenario.warn", { message: driftMsg });
+    }
+  } catch (err) {
+    bus.emit("scenario.warn", { message: "起動時ブランチチェックに失敗(起動は続行): " + (err instanceof Error ? err.message : err) });
+  }
   tasks.seed(config.scenario.tasks);
   bus.emit("scenario.started", { name: config.scenario.name, tasks: config.scenario.tasks.map((t) => t.id) });
 
