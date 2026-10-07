@@ -59,10 +59,8 @@ export class TaskBlackboard {
     // 発見器・seed・スクリプトからの直接呼び出しはここが最後の砦。
     const key = String(id ?? "").trim();
     if (!/^[a-z0-9][a-z0-9-]*$/.test(key)) return false;
-    // 完了済みIDの再起票はスキップ(blog lab実害: seed再実行でdone/のタスクがopenへ再起票され、
-    // dependsOn依存解決が永久ブロックした)。claim(未着手)の再投入は許す(自動再投入の運用維持)。
-    const doneDir = join(this.dir, "done");
-    if (readdirSync(doneDir).some((f) => f.endsWith("--" + id + ".md") || f === id + ".md")) return false;
+    // done済みIDの再createは許可(自動再投入・reopen運用の後方互換)。seed再実行での再起票防止は
+    // seed()側のdone参照で防御(blog lab実害: dependsOn依存解決の永久ブロック)。
     const f = join(this.open, `${key}.md`);
     const meta = metaLines(project, role, acceptance, dependsOn, model);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
