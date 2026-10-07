@@ -1,0 +1,26 @@
+// テストと同じstartUiTokenizedでUIを立て、CLIサブコマンドを直実行
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { Bus } from "./src/engine/board.js";
+import { startUi as _startUi } from "./src/ui/server.js";
+import { startUiTokenized } from "./test/helpers/hf-token.js";
+const CLI = join(fileURLToPath(new URL("./bin/hive.js", import.meta.url)));
+const ws = mkdtempSync(join(tmpdir(), "hive-cmd-"));
+const bus = new Bus();
+const config = { workspace: ws, ui: { port: 0 }, model: { model: "test-model" }, agents: [] };
+const ui = await startUiTokenized(_startUi, { config, modelFactory: () => ({}), bus, autoStart: false });
+const port = config.ui.port, token = ui.token;
+const cli = (args, tok) => new Promise(res => execFile(process.execPath, [CLI, "--port", String(port), ...args], { timeout: 20000, encoding: "utf8", env: { ...process.env, ...(tok ? { HIVE_UI_TOKEN: tok } : {}) } }, (err, stdout, stderr) => res({ code: err && err.code ? err.code : 0, stdout, stderr: stderr ?? "" })));
+const mk = (id) => fetch(`http://127.0.0.1:${port}/api/tasks`, { method: "POST", headers: { "content-type": "application/json", "x-hive-token": token, origin: "http://localhost" }, body: JSON.stringify({ action: "create", id, body: "x" }) });
+await (await mk("cli-t1")).json();
+await (await mk("cli-t2")).json();
+const c = await cli(["tasks", "cancel", "cli-t1"], token);
+console.log("C1:", c.code, JSON.stringify(c.stdout.slice(0, 60)), JSON.stringify(c.stderr.slice(0, 120)));
+const c2 = await cli(["tasks", "cancel", "cli-t1"], token);
+console.log("C2:", c2.code, JSON.stringify(c2.stderr.slice(0, 120)));
+ui.close();
+rmSync(ws, { recursive: true, force: true });
+process.exit(0);
