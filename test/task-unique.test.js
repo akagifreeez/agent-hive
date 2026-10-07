@@ -48,7 +48,7 @@ test("2人のagentが同じIDを同時請求できない(原子性はrenameで�
   rmTree(ws);
 });
 
-test("done済みIDの再createは通る(自動再投入運用の後方互換)", () => {
+test("done済みIDの再createはスキップされる(done再起票の永久ブロック防止)", () => {
   const ws = mktmp();
   const tasks = new TaskBlackboard(ws, new Bus());
   tasks.create({ id: "done-1", body: "1巡目" });
@@ -56,8 +56,11 @@ test("done済みIDの再createは通る(自動再投入運用の後方互換)", 
   tasks.finish({ id: "w" }, "done-1");
   assert.equal(tasks.list().done.filter((t) => t.id === "done-1").length, 1);
 
-  assert.equal(tasks.create({ id: "done-1", body: "2巡目として再投入" }), true);
-  assert.equal(tasks.snapshot().open.includes("done-1.md"), true);
+  // done済みIDの再createはfalse(seed再実行でdependsOn依存解決が永久ブロックする実害対策)。
+  // 自動再投入は起動時回収(宙吊りclaimed解放)経路で担保される。
+  assert.equal(tasks.create({ id: "done-1", body: "2巡目として再投入" }), false);
+  assert.equal(tasks.snapshot().open.some((f) => f === "done-1.md"), false);
+  assert.equal(tasks.list().done.filter((t) => t.id === "done-1").length, 1, "done実体は1件のまま");
   rmTree(ws);
 });
 

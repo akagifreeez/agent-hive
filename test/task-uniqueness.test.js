@@ -1,6 +1,6 @@
 // イシュー#30: タスクIDの一意性がopenだけしか守られていなかった修正の回帰テスト。
 // (1)claimed中のIDを再createしようとすると失敗する (2)2人のagentが同じIDを同時請求できない
-// (3)done済みIDの再createは通る(自動再投入等の既存運用を壊さない)。
+// (3)done済みIDの再createはスキップされる(再起票によるdependsOn永久ブロック防止)。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -49,15 +49,18 @@ test("claim: 2人のagentが同じIDを同時請求できない(open単一ファ
   }
 });
 
-test("create: done済みIDの再createは通る(自動再投入の既存運用を維持)", () => {
+test("create: done済みIDの再createはスキップされる(done再起票の永久ブロック防止)", () => {
   const ws = mktmp();
   const tasks = new TaskBlackboard(ws, new Bus());
   try {
     tasks.create({ id: "dup-3", body: "一回目" });
     tasks.claim({ id: "alpha", role: null });
     tasks.finish({ id: "alpha" }, "dup-3");
-    assert.ok(tasks.create({ id: "dup-3", body: "二回目(再投入)" }), "done済みIDの再createは成功");
-    assert.equal(tasks.snapshot().open.includes("dup-3.md"), true, "再投入されたタスクはopenに戻る");
+    // done済みIDの再createはfalse(seed再実行でdependsOn依存解決が永久ブロックする実害対策)。
+    // 自動再投入は起動時回収(宙吊りclaimed解放)経路で担保される。
+    assert.equal(tasks.create({ id: "dup-3", body: "二回目(再投入)" }), false, "done済みIDの再createは失敗");
+    assert.equal(tasks.snapshot().open.some((f) => f === "dup-3.md"), false, "openへ再起票されない");
+    assert.equal(tasks.list().done.filter((t) => t.id === "dup-3").length, 1, "done実体は1件のまま");
   } finally {
     rmTree(ws);
   }
