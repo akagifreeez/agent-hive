@@ -18,11 +18,6 @@ export function isTestCommand(command) {
   if (/(^|[;&|(]s*)npms+(runs+)?test/.test(c) || /(^|[;&|(]s*)nodes+--test/.test(c)) return true;
   return /(^|[;&|(]s*)npms+(--S+s+)*--test(s|$)/.test(c); // npm --test / npm --silent --test もテスト意図
 }
-export function isTestCommand(command) {
-  const c = String(command ?? "");
-  return /(^|[;&|(]\s*)npm\s+(run\s+)?test/.test(c) || /(^|[;&|(]\s*)node\s+--test/.test(c);
-}
-
 class QueueTimeout extends Error {
   constructor(label) { super(`queue timeout: ${label}`); }
 }
