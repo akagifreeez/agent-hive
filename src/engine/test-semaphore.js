@@ -4,7 +4,6 @@
  * 依存はsrc/engine/proc.js(実行本体)のみ。
  * @module engine/test-semaphore
  */
-import { runCommand } from "./proc.js";
 
 /** 現在実行中のラベル集合(デバッグ/テスト用) @type {Set<string>} */
 const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラベル。待機タイムアウト文面で使う)
@@ -20,16 +19,23 @@ const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラ
 export function isTestCommand(command) {
   const c = String(command ?? "");
   const start = "(^|[;&|(]\s*)";
-  return new RegExp(start + "npm\s+(run\s+)?test\b").test(c)
-    || new RegExp(start + "npm\s+(--[^\s|;&()]+\s+)*--test(\s|$)").test(c)
-    || new RegExp(start + "npm\s+(--[^\s|;&()]+\s+)*(run\s+)?(--[^\s|;&()]+\s+)*(run\s+)?test\b").test(c)
-    || new RegExp(start + "npm\s+(run\s+)?test\s+[\w:@/.\-\[\]*]").test(c)
-    || new RegExp(start + "node\s+--test").test(c);
+  return new RegExp(start + "npm\\s+(run\\s+)?test\\b").test(c)
+    || new RegExp(start + "npm\\s+(--[^\\s|;&()]+\\s+)*--test(\\s|$)").test(c)
+    || new RegExp(start + "npm\\s+(--[^\\s|;&()]+\\s+)*(run\\s+)?(--[^\\s|;&()]+\\s+)*(run\\s+)?test\\b").test(c)
+    || new RegExp(start + "npm\\s+(run\\s+)?test\\s+[\\w:@/.\\-\\[\\]*]").test(c)
+    || new RegExp(start + "node\\s+--test").test(c)
+    || /npms+(runs+)?test/.test(c); // 文字列中の参照もテスト実行意図として保守的に捕捉
 }
+
+// ---- セマフォ本体(モジュール単一 = プロセス横断で共有) ----
+let limit = 1; // 同時実行上限(既定1)。setTestMaxConcurrent()/configureTestSemaphore()で上書き
+let running = 0;
+const queue = []; // FIFO待ちキュー
 
 class QueueTimeout extends Error {
   constructor(label) { super(`queue timeout: ${label}`); }
 }
+
 
 function enqueue(label) {
   let resolveFn, rejectFn;
@@ -126,4 +132,9 @@ export function setTestMaxConcurrent(n) {
   const v = Math.floor(Number(n));
   if (Number.isFinite(v) && v >= 1) limit = v;
   drain();
+}
+
+/** 現在の上限(テスト・診断用)。 */
+export function getTestMaxConcurrent() {
+  return limit;
 }
