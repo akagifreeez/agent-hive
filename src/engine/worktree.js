@@ -154,12 +154,26 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
       const files = mainMarkers.text.trim().split("\n").map((f) => f.trim()).join(", ");
       return { ok: false, marker: true, text: `mainに競合マーカーが残っています(${files})。マージを中止しました。先にmain側のマーカーを解消してください。` };
     }
-    // 1) worktree側の未コミット変更を確定(変更がなければno-op)
-    await exec({
-      command: `git add -A && (git diff --cached --quiet || git -c user.name=${agent.id} -c user.email=${agent.id}@hive.local commit -m 'wip: ${taskId}')`,
-      cwd: worktreePath,
-      outputLimit: 2000,
-    });
+    // 1) worktree側の未コミット変更を確定(変更がなければno-op)。
+    //    add/commitを個別に検査する(イシュー#28: pre-commitフック等でコミットが空振りしても
+    //    従来は ok:true 扱いになり、成果がmainに入らないまま成功扱いになっていた)。
+    const add = await exec({ command: "git add -A", cwd: worktreePath, outputLimit: 2000 });
+    if (!add.ok) {
+      return { ok: false, text: "ステージ(git add)に失敗しました: " + add.text.slice(0, 400) };
+    }
+    const staged = await exec({ command: "git diff --cached --quiet", cwd: worktreePath, outputLimit: 2000 });
+    let commit = { ok: true, text: "" };
+    if (!staged.ok) {
+      // ステージ差分あり=コミットを試みる。ここで失敗したら成果は確定できていない
+      commit = await exec({
+        command: `git -c user.name=${agent.id} -c user.email=${agent.id}@hive.local commit -m 'wip: ${taskId}'`,
+        cwd: worktreePath,
+        outputLimit: 2000,
+      });
+      if (!commit.ok) {
+        return { ok: false, text: "コミットに失敗(pre-commitフック等): " + commit.text.slice(0, 400) + " 変更を確定できるようにしてから再度 finish_task してください。" };
+      }
+    }
     // 1.5) ブランチ側ガード: このマージで運ばれるファイルにマーカーが入っていれば拒否し、
     //      作業者へ返送する(マーカー入りの確定をmainに作らない)
     const dirty = await exec({ command: `git diff --name-only main...agent/${agent.id}`, cwd: mainWorkspace, outputLimit: 4000 });
