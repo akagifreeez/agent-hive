@@ -60,3 +60,15 @@ test("UI: 進捗チップはSSE更新で即時再描画される(refreshSoon経�
   const sp = html.indexOf("syncProgressChip(lastState);");
   assert.ok(ra >= 0 && sp > ra, "renderAll内でsyncProgressChipが呼ばれる");
 });
+
+// ---- SSE即時更新のイベント種別を固定(acceptance: task.created/claimed/finished/merge.completed) ----
+// チップの再描画は refreshSoon → renderAll → syncProgressChip の経路で行われる。
+// その引き金となるSSEイベント配列に4種が入っていることを固定する(欠けると即時更新が漏れる)。
+test("UI: SSE再描画の引き金にtask.created/claimed/finished/merge.completedが入る", () => {
+  const m = html.match(/if \(\[([^\]]+)\]\.includes\(type\)\)/);
+  assert.ok(m, "refreshSoon判定のイベント配列がある");
+  const events = m[1].split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
+  for (const ev of ["task.created", "task.claimed", "task.finished", "merge.completed"]) {
+    assert.ok(events.includes(ev), "SSE再描画イベントに " + ev + " がある(実際: " + events.join(",") + ")");
+  }
+});
