@@ -18,13 +18,9 @@ export function isTestCommand(command) {
   // npm test系: npm[オプション群] (run[オプション群])? test(:接尾)? / npm --test
   //   - オプションはハイフン始まりのトークン群(--silent 等)
   //   - "echo npm test" のような文中参照もテスト実行の意図として保守的に捕捉する
-  //   - 末尾の境界は  で判定(後続が "testx" 等の語なら弾く)
-  const opt = "(?:\s+-{1,2}[^\s]+)*"; // npm/node直後に続けるオプション群(0個以上)
-  const npmTest = new RegExp(
-    "(^|[;&|(]\s*)npm" + opt + "\s+(?:run" + opt + "\s+)?test(?::[A-Za-z0-9._-]+)?(?:\s|$)"
-    + "|(^|[;&|(]\s*)npm" + opt + "\s+--test(?:\s|$)"
-  ).test(c);
-  const nodeTest = new RegExp("(^|[;&|(]\s*)node" + opt + "\s+--test(?:\s|$)").test(c);
+  //   - 語境界は \b で判定(testx 等は弾く)。正規表現リテラル直書き(生成コード経由のエスケープ崩れを避ける)
+  const npmTest = /(^|[;&|(]\s*|\s)npm(?:\s+-{1,2}[^\s]+)*\s+(?:run(?:\s+-{1,2}[^\s]+)*\s+)?test(?::[A-Za-z0-9._-]+)?(?:\s|$)|(^|[;&|(]\s*)npm(?:\s+-{1,2}[^\s]+)*\s+--test(?:\s|$)/.test(c);
+  const nodeTest = /(^|[;&|(]\s*)node(?:\s+--[^\s]+)*\s+--test(?:\s|$)/.test(c);
   return npmTest || nodeTest;
 }
 
