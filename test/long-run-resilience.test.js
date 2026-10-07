@@ -80,20 +80,21 @@ test("リトライ使い切りの瞬断は行動化可能なエラーとして�
 });
 
 // ===== 子プロセスでガードの生存を固定する =====
-const CHILD_SRC = `
-import { installCrashGuard } from "../src/engine/crash-guard.js";
-const g = installCrashGuard({ logFile: process.argv[2] });
-// 未捕捉rejection(undici terminatedを模したError)
-Promise.reject(Object.assign(new TypeError("terminated"), { code: undefined }));
-// 非Error値のrejection(ガードは必ず文字列化してログへ残す)
-setTimeout(() => { Promise.reject("文字列rejection"); }, 20);
-setTimeout(() => {
-  try { process.stdout.write("ALIVE " + g.guardCount() + "\\n"); } catch {}
-}, 80);
-// 自然終了させる(ハンドルは無い)
-`;
+// 子はtmpdir配下で動くため相対importでは解決できない(fileURLで絶対参照にする)
+const guardUrl = pathToFileURL(join(process.cwd(), "src", "engine", "crash-guard.js")).href;
+const CHILD_SRC = [
+  "import { installCrashGuard } from \"" + guardUrl + "\";",
+  "const g = installCrashGuard({ logFile: process.argv[2] });",
+  "// uncaughtRejection(undici terminatedを模したError)",
+  "Promise.reject(Object.assign(new TypeError(\"terminated\"), { code: undefined }));",
+  "// 非Error値のrejection(ガードは必ず文字列化してログへ残す)",
+  "setTimeout(() => { Promise.reject(\"文字列rejection\"); }, 20);",
+  "setTimeout(() => {",
+  "  try { process.stdout.write(\"ALIVE \" + g.guardCount() + String.fromCharCode(10)); } catch {}",
+  "}, 80);",
+].join(String.fromCharCode(10));
 const CHILD_COVER = `
-process.on("unhandledRejection", () => {});
+// 対照: ガード無し。process.onを置かないのでrejectionで死ぬ(exit 1)
 Promise.reject(new TypeError("terminated"));
 setTimeout(() => { process.stdout.write("ALIVE\\n"); }, 80);
 `;
