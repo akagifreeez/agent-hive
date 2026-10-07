@@ -156,19 +156,6 @@ export class McpHost {
 
   async call(name, args) {
     const local = name.slice(`mcp__${this.name}__`.length);
-<<<<<<< HEAD
-    try {
-      const r = await this.request("tools/call", { name: local, arguments: args ?? {} });
-      const text = (r.content ?? [])
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
-        .join("\n");
-      return { ok: !r.isError, text: text || "(空の結果)" };
-    } catch (err) {
-      // 接続断・起動失敗・タイムアウトはツール失敗(ok:false)として返す(例外を外へ漏らさない)
-      return { ok: false, text: `MCP呼び出し失敗: ${err.message}` };
-    }
-=======
     let r;
     try {
       r = await this.request("tools/call", { name: local, arguments: args ?? {} });
@@ -180,7 +167,6 @@ export class McpHost {
       .map((c) => c.text)
       .join("\n");
     return { ok: !r.isError, text: text || "(空の結果)" };
->>>>>>> main
   }
 
   // pending中の全要求をrejectして切断状態へ(起動失敗・終了の共通経路)
