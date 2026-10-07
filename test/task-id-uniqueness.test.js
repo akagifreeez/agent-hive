@@ -36,17 +36,19 @@ test("#30: 2人のagentが同じIDを同時請求できない", () => {
   rmTree(ws);
 });
 
-test("#30: done済みIDの再createは拒否される(done再起票スキップ契約)", () => {
-  // 後続拡張の契約: seed再実行でdone/のタスクがopenへ再起票され、dependsOn依存解決が
-  // 永久ブロックした実害を受け、done済みIDの再createはfalse。自動再投入は別IDで行う。
+test("#30: done済みIDの再createは許可される(自動再投入・reopenの後方互換)", () => {
+  // 契約(477bdde): create()のdone拒否は撤去済み。自動再投入・reopen運用のため、done済みIDの
+  // 再createはopenへ復活する。seed再実行での再起票防止(blog lab実害: dependsOn依存解決の
+  // 永久ブロック)はseed()側のdone参照で防御するため、二重防御はしない。
+  // seed()のdoneスキップ契約は scenario-robustness.test.js の単体テストで担保。
   const ws = mktmp();
   const tasks = new TaskBlackboard(ws, new Bus());
   tasks.create({ id: "reuse", body: "1回目" });
   tasks.claim({ id: "alpha", role: null });
   tasks.finish({ id: "alpha" }, "reuse");
   const recreated = tasks.create({ id: "reuse", body: "2回目(再投入)" });
-  assert.equal(recreated, false, "done済みIDの再createは拒否(再起票スキップ契約)");
-  assert.equal(existsSync(join(ws, "tasks", "open", "reuse.md")), false, "openへ復活しない");
+  assert.equal(recreated, true, "done済みIDの再createは許可(後方互換)");
+  assert.equal(existsSync(join(ws, "tasks", "open", "reuse.md")), true, "openへ復活する");
   rmTree(ws);
 });
 
