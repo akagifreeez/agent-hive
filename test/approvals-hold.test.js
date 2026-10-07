@@ -233,7 +233,9 @@ test("approvals: 承認待ち保留中にターン上限で自動継続しても
       const st = host.roundState.get("alpha");
       return st && !st.running;
     }), "2ラウンド目が完走");
-    assert.ok(posts.some((p) => p.text.includes("[マージ]") && p.text.includes("ラウンド中の作業")), "2ラウンド目もラウンド末マージ経路が生きている");
+    // 承認でマージ済みのauto.txtが消えておらず、保留の恒久化(2ラウンド目でも[承認待ち])が起きていないこと
+    assert.equal(existsSync(join(ws, "auto.txt")), true, "承認済みの変更はmainに残り続ける");
+    assert.equal(posts.filter((q) => q.text.includes("[承認待ち]") && q.text.includes("アルファ")).length, 1, "[承認待ち]は1ラウンド目の1回だけ(2ラウンド目では保留されない)");
   } finally {
     cleanup();
   }
