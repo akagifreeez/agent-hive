@@ -5,11 +5,17 @@ import { Bus } from "./engine/board.js";
 import { startUi } from "./ui/server.js";
 import { chatUiHandlers } from "./ui/chat-wiring.js";
 import { wireConsoleLog } from "./log.js";
+<<<<<<< HEAD
 import { wireCliNotify, wireStallNotify, printNotifyLine } from "./notify.js";
 import { wireCrashGuard } from "./engine/crash-guard.js";
 
 // プロセスガードのログ先(ワークスペース直下。*.logはgitignore済み)
 const GUARD_LOG_FILE = "run-chat.err.log";
+=======
+import { wireCliNotify, wireStallNotify } from "./notify.js";
+import { installProcessGuard } from "./engine/process-guard.js";
+import { wireProcessErrorToBoards } from "./engine/process-error-wiring.js";
+>>>>>>> agent/process-guard-impl
 
 function usage() {
   console.log(`agent-hive — 複数エージェントが同一ワークスペースで同時作業するハーネス
@@ -33,6 +39,9 @@ async function main() {
   void crashGuard; // 起動中は常に配線(プロセス寿命と同じ)
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) return usage();
+  // プロセス生存ガード(long-run-resilience): 未捕捉rejection/例外で落ちない。
+  // どの入口(--chat/--serve/--run)より先に配線する(busが無い段階はコンソール+ログのみ)
+  installProcessGuard(null, { notify: (line) => console.error(`🔔 [通知] ${line}`) });
   const config = loadConfig(args.includes("--config") ? args[args.indexOf("--config") + 1] : undefined);
   const bus = new Bus();
   wireConsoleLog(bus);
@@ -51,6 +60,23 @@ async function main() {
     // 逆だとリーダーの登録イベント(thread.opened)がUI立ち上がり前に消える。
     // controllerは後から入るのでgetterで渡す
     let controller = null;
+    // プロセス警告のボード投稿先(プロセス生存ガード): メイン+全スレッドのBoardを遅延解決
+    const listGuardBoards = () => {
+      const boards = [];
+      try {
+        const mainB = controller?.boardOf?.("__main__");
+        if (mainB) boards.push(mainB);
+        for (const name of controller?.listThreads?.() ?? []) {
+          const b = controller.boardOf?.(name);
+          if (b) boards.push(b);
+        }
+      } catch { /* コントローラ未初期化時は投稿先なし(イベントとログだけ流れる) */ }
+      return boards;
+    };
+    installProcessGuard(bus, {
+      notify: (line) => console.error(`🔔 [通知] ${line}`),
+    });
+    wireProcessErrorToBoards(bus, { getBoards: listGuardBoards });
     await startUi({ config, bus, autoStart: false, ...chatUiHandlers(() => controller) });
     controller = await runChat({ config, bus });
     return;

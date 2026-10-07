@@ -566,6 +566,13 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     setThreadFolder,
     setThreadPaused,
     listThreads: () => [...threads.keys()],
+    // プロセス警告の投稿先解決(long-run-resilience): スレッド名→そのスレッドのBoard。
+    // __main__はメインボード。開いていないスレッドはnull
+    boardOf: (threadName) => {
+      const name = String(threadName ?? "").trim();
+      if (name === mainBoard.name) return mainBoard;
+      return threads.get(name)?.board ?? null;
+    },
     runDiscussion: (req) => {
       // モデル横断ディスカッション: 接続済みプロバイダの代表モデル同士を1つのボードで議論させる。
       // host無しのBoard単体スレッド(タスク請求なし)なので、発言分のトークンだけで完結する
