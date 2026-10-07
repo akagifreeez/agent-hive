@@ -48,6 +48,10 @@ export class TaskBlackboard {
     // 別本文で再createでき、2人のagentが同じIDを同時請求できてしまう。
     // doneは参照しないので「完了済みIDの再利用(自動再投入等)」は従来どおり許可。
     if (this.existsOpenOrClaimed(id)) return false;
+    // 完了済みIDの再起票はスキップ(blog lab実害: seed再実行でdone/のタスクがopenへ再起票され、
+    // dependsOn依存解決が永久ブロックした)。claim(未着手)の再投入は許す(自動再投入の運用維持)。
+    const doneDir = join(this.dir, "done");
+    if (readdirSync(doneDir).some((f) => f.endsWith("--" + id + ".md") || f === id + ".md")) return false;
     const f = join(this.open, `${id}.md`);
     const meta = metaLines(project, role, acceptance, dependsOn, model);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
@@ -300,7 +304,14 @@ export class TaskBlackboard {
     try {
       if (!existsSync(src)) return true; // 既に無い=解放済みとして成功(べき等)
       if (note) appendNote(src, note);
-      if (existsSync(dst)) return false; // 同idのopenが既にある(手動投入等)場合は壊さない
+      if (existsSync(dst)) {
+        // 同idのopenが既にある(二重宙吊りの先着分/手動投入等)場合はrenameせず、
+        // この重複実体をdone/へ掃除する(dash lab実害: alpha/delta二重宙吊りで解放時に
+        // 1件だけ戻り、残り1件がclaimedのまま宙吊り続行→idle-claim待ちデッドロック)。
+        renameSync(src, join(this.done, src.split(/[\/]/).pop()));
+        this.bus?.emit("task.released", { agent: agentId, taskId });
+        return true;
+      }
       renameSync(src, dst);
       this.bus?.emit("task.released", { agent: agentId, taskId });
       return true;

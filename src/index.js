@@ -1,5 +1,6 @@
 import { loadConfig } from "./config.js";
 import { createModelFactory } from "./model/factory.js";
+import { applyTestSemaphoreConfig } from "./engine/exec.js";
 import { runScenario, runChat } from "./runner.js";
 import { Bus } from "./engine/board.js";
 import { startUi } from "./ui/server.js";
@@ -38,6 +39,10 @@ async function main() {
   wireConsoleLog(bus);
 
   const modelFactory = createModelFactory(config);
+
+  // テスト系コマンドのプロセス横断セマフォ上限(hive.config.json の exec.testMaxConcurrent)。
+  // exec.js はモジュール単一インスタンスなのでここで1回注入すれば全呼び出し経路に効く
+  applyTestSemaphoreConfig(config.exec);
 
   // CLI通知(#11): UIを立てない実行(--run/シナリオ直実行)はコンソール配信だけ。
   // --chat/--serve はstartUi側で同じbusへ配線する(コンソール+監視/monitor配信)ので二重にやらない

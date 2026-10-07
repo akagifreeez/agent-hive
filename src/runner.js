@@ -12,6 +12,7 @@ import { PermissionGate } from "./engine/permissions.js";
 import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
 import { applyTestSemaphoreConfig } from "./engine/exec.js";
 import { setupWorktrees } from "./engine/worktree.js";
+import { ensureMainCheckout } from "./engine/branch-guard.js";
 import { respawnUnfinishedWork } from "./engine/respawn.js";
 import { runCommand } from "./engine/exec.js";
 import { UsageLedger } from "./engine/usage.js";
@@ -54,6 +55,21 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     writeFileSync(p, '{ "name": "hive-workspace", "private": true, "type": "module", "scripts": { "test": "node --test tests/*.test.mjs" } }\n');
   }
   await ensureGitRepo(config.workspace);
+
+  // 漂流チェック(runChat): チャット起動時も同様にmainワークスペースのチェックアウトを検査。
+  // 漂流+中断マージの残骸はゾンビ回収・ラウンド開始より先に片付ける(判定不能時は何もしない)。
+  try {
+    const gc = await ensureMainCheckout({ mainWorkspace: config.workspace });
+    if (gc.branch && gc.branch !== "main") {
+      const driftMsg = gc.ok
+        ? "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされていました。mainへ復帰しました。"
+        : "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされており、自動復帰できませんでした: " + (gc.reason ?? "");
+      mainBoard.post("system", driftMsg);
+      bus.emit("scenario.warn", { message: driftMsg });
+    }
+  } catch (err) {
+    bus.emit("scenario.warn", { message: "起動時ブランチチェックに失敗(起動は続行): " + (err instanceof Error ? err.message : err) });
+  }
 
   // 起動時のゾンビclaim回収: プロセス再起動で走行中ラウンドは全て死んでいるため、claimedのまま
   // 残ったタスクは誰にも進められない(idle-claim待ちのデッドロック)。起動直後なので全claimedは
@@ -675,8 +691,31 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
     writeFileSync(p, f.content);
   }
   await ensureGitRepo(config.workspace);
+
+  // 起動時ブランチ漂流チェック(self-improve-lab-lessons): mainワークスペースのチェックアウトが
+  // agent/<id>等へ漂流していたら安全にmainへ復帰し、逸脱をボードへ警告(2026-10-07朝の本番実害)。
+  // 判定不能(git不在等)は起動を止めない(既存契約)。
+  try {
+    const gc = await ensureMainCheckout({ mainWorkspace: config.workspace });
+    if (gc.branch && gc.branch !== "main") {
+      const driftMsg = gc.ok
+        ? "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされていました。mainへ復帰しました。"
+        : "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされており、自動復帰できませんでした: " + (gc.reason ?? "");
+      board.post("system", driftMsg);
+      bus.emit("scenario.warn", { message: driftMsg });
+    }
+  } catch (err) {
+    bus.emit("scenario.warn", { message: "起動時ブランチチェックに失敗(起動は続行): " + (err instanceof Error ? err.message : err) });
+  }
   tasks.seed(config.scenario.tasks);
   bus.emit("scenario.started", { name: config.scenario.name, tasks: config.scenario.tasks.map((t) => t.id) });
+
+  // 起動時のゾンビclaim回収(runScenario): チャット(runChat)と同じく、プロセス再起動で
+  // claimedのまま宙吊りになったタスクを解放する(2026-10-07 hive-lab-dash実害: alpha/delta
+  // 二重宙吊りでidle-claim待ちデッドロック)。seedより先に回収し、再投入と干渉しない。
+  for (const z of tasks.list().claimed) {
+    tasks.releaseOne(z.agent, z.id, "[起動時回収] 前回走行のラウンド消滅により解放しました(宙吊りclaim回収)");
+  }
 
   // v3: エージェント別worktree(作業の隔離)
   const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
