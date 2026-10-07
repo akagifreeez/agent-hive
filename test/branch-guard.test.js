@@ -45,7 +45,8 @@ test("ensureMainCheckout: 漂流(クリーン)を検出してmainへ復帰する
     const r = await ensureMainCheckout({ mainWorkspace: ws });
     assert.equal(r.ok, true, "クリーンな漂流は自動復帰できる");
     assert.equal(await currentBranch(ws), "main", "mainへ復帰している");
-    assert.equal(r.branch, "main");
+    assert.equal(r.branch, "agent/ghost", "branchには検出した漂流先を報告する(警告文の素材)");
+    assert.equal(r.restored, true, "復帰済みであることをrestoredで示す");
   } finally {
     rmTree(ws);
   }

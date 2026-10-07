@@ -60,6 +60,9 @@ export async function ensureMainCheckout({ mainWorkspace, exec = runCommand }) {
     out.reason = `mainワークスペースがブランチ ${branch} に漂流しており、mainへの復帰に失敗しました: ${co.text.slice(0, 300)}`;
     return out;
   }
-  out.branch = "main";
+  // out.branchには検出した漂流先を保持する(復帰成功でもmainで上書きしない)。
+  // runner側は branch !== "main" で逸脱検出して警告するため、復帰成功時にここで書き換えると
+  // 逸脱警告が消失する(初回実装で捕捉漏れ)。復帰済みはrestoredで示す。
+  out.restored = true;
   return out;
 }
