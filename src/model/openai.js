@@ -8,6 +8,32 @@
 // プロバイダ横断スロットリング(throttle.js)にも参加: 429/529を受けたら同プロバイダ(baseUrl)を
 // 叩く全エージェントへ共有クールダウンを記録し、リクエスト前にgateで待つ(イシュー#1)。
 import { gateProvider, noteProviderRateLimited, clearProviderRateLimit } from "./throttle.js";
+// ===== 中断/瞬断系エラーの正規化(long-run-resilience) =====
+// undici(node内蔵fetch)は接続切断のタイミングでコードを持たない TypeError: terminated を投げることが
+const ABORT_CODE_RE = /^(UND_ERR|ECONNRESET|ECONNABORTED|EPIPE|ERR_STREAM_PREMATURE_CLOSE|ABORT_ERR|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED)/;
+const ABORT_MSG_RE = /(^|)(terminated|aborted|socket hang up|other side closed|premature close|fetch failed|network error|connection (reset|closed|terminated)|request body (aborted|stream terminated))(|$)/i;
+// 中断/瞬断系と判定できるか(undiciのTypeError: terminated系・node系统一コード両方を見る)
+function isAbortRelated(err) {
+  if (!err) return false;
+  const code = String(err.code ?? err.cause?.code ?? "");
+  if (code && ABORT_CODE_RE.test(code)) return true;
+  const message = String(err.message ?? "");
+  const causeMsg = String(err.cause?.message ?? "");
+  if (code) return false; // コードを持つがリスト外(例: 401系のAPIエラー)は中断扱いにしない
+  return ABORT_MSG_RE.test(message) || ABORT_MSG_RE.test(causeMsg) || /abort(ed|ion)?/i.test(message) || err.name === "AbortError";
+}
+// リトライ可否の一本道: 中断/瞬断系(タイムアウト・接続断・body中断)は可、それ以外は不可
+function isRetryableNetworkError(err) {
+  if (!err) return false;
+  const code = String(err.code ?? err.cause?.code ?? "");
+  return ABORT_CODE_RE.test(code) || isAbortRelated(err);
+}
+// 中断観測の痕跡(HIVE_DEBUG_FILE指定時に採取。依存ゼロ・既定は無効)
+function noteAborted(err) {
+  if (!process.env.HIVE_DEBUG_FILE) return;
+  try { console.error("[openai-adapter] stream/接続中断を検出(リトライ契約へ正規化):", String(err?.message ?? err)); } catch {}
+}
+
 /**
  * OpenAI互換エンドポイント(GLM等)への最小クライアント。
  */
@@ -73,8 +99,10 @@ export class OpenAIModel {
           signal: AbortSignal.timeout(this.timeoutMs),
         });
       } catch (err) {
-        // ネットワーク系(タイムアウト含む)はリトライ可(ZCode: NetworkError)
-        if (attempt <= RETRY_MAX_RETRIES) {
+        // ネットワーク系(タイムアウト含む)はリトライ可(ZCode: NetworkError)。
+        // undiciのTypeError: terminated(中断系)も瞬断として同じリトライ経路へ正規化する
+        if (isAbortRelated(err)) noteAborted(err);
+        if (isRetryableNetworkError(err) && attempt <= RETRY_MAX_RETRIES) {
           await modelSleep(computeRetryDelay(attempt));
           continue;
         }
@@ -115,8 +143,11 @@ export class OpenAIModel {
         try {
           parsed = await consumeStream(res, onDelta);
         } catch (err) {
-          // ストリーム途中切断もリトライ対象(再試行は最初から)
-          if (attempt <= RETRY_MAX_RETRIES) {
+          // ストリーム途中切断もリトライ対象(再試行は最初から)。
+          // undiciのTypeError: terminated(Fetch.onAborted・TLS切断)はここで例外として観測されるため、
+          // 未捕捉rejectionへ抜けさせずリトライ契約へ正規化して飲み込む
+          if (isAbortRelated(err)) noteAborted(err);
+          if (isRetryableNetworkError(err) && attempt <= RETRY_MAX_RETRIES) {
             await modelSleep(computeRetryDelay(attempt));
             continue;
           }
