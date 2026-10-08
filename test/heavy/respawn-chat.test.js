@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runChat } from "../src/runner.js";
-import { Bus } from "../src/engine/board.js";
-import { runCommand } from "../src/engine/exec.js";
+import { runChat } from "../../src/runner.js";
+import { Bus } from "../../src/engine/board.js";
+import { runCommand } from "../../src/engine/exec.js";
 
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのロックは無視 */ } }
 
