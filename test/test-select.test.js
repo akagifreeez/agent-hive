@@ -44,9 +44,15 @@ test("selectTestsForDiff: 重複排除・安定ソート", () => {
   assert.deepEqual(tests, sorted, "ソート済み(安定)");
 });
 
-test("selectTestsForDiff: 空入力は空配列・非対象拡張子はglob式にならない", () => {
+test("selectTestsForDiff: 空入力は空配列・非対象拡張子は拾わない・未対応src差分はglob式", () => {
   assert.deepEqual(selectTestsForDiff([]), []);
   assert.deepEqual(selectTestsForDiff(["docs/notes.txt"]), [], "src/配下でないものは拾わない");
-  const tests = selectTestsForDiff(["src/engine/unknown-module-xyz.js"]);
-  assert.deepEqual(tests, ["test/unknown-module-xyz*.test.js"], "実一覧が無ければglob式(実在確認は呼び出し側)");
+  // 実一覧(allTestFiles)未指定時: glob式を返す(実在確認は呼び出し側のglob展開)
+  const glob = selectTestsForDiff(["src/engine/unknown-module-xyz.js"]);
+  assert.deepEqual(glob, ["test/unknown-module-xyz*.test.js"]);
+  // 実一覧指定時: 実在しないbaseは拾わない(規則3)
+  const tests = selectTestsForDiff(["src/engine/unknown-module-xyz.js"], {
+    allTestFiles: ["test/exec.test.js"],
+  });
+  assert.deepEqual(tests, [], "対応規則に当たらないものは拾わない");
 });
