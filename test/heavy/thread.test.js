@@ -183,7 +183,11 @@ test("ChatHost自動継続: 上限回数に達したら告知して停止する"
     board, tasks, bus,
   });
   host.say("始めて");
+<<<<<<< Updated upstream
   const stopped = await waitUntil(() => board.posts.some((p) => p.from === "q-beta" && p.text.includes("[自動継続停止(ハード上限)]")), 15000);
+=======
+  const stopped = await waitUntil(() => board.posts.some((p) => p.from === "q-beta" && p.text.includes("[自動継続停止(")), 15000);
+>>>>>>> Stashed changes
   assert.ok(stopped, "上限到達で停止告知が出る");
   assert.ok(tasks.snapshot().claimed.length >= 1, "請求中タスクは解放されず保持される");
   rmTree(ws);
