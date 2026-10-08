@@ -78,9 +78,12 @@ export class McpHost {
       this.connected = false;
       this.childError = err.message;
       this.spawnError = err;
-      this.failPending(`MCPサーバー ${this.name} は起動できません: ${err.message}`);
-      // #27: 起動失敗も通知経路へ流す。start()のcatchはspawnErrorを見て二重emitしない
       this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(new Error(`MCPサーバー ${this.name} が起動できません: ${err.message}`));
+      }
+      this.pending.clear();
       try { this.child?.kill(); } catch { /* 既に死んでいる */ }
     });
     // stdinのEPIPE等も未捕捉だとプロセス死の種になるので同様に飲み込む

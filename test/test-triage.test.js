@@ -60,7 +60,7 @@ const REAL_SUMMARY_TAIL = [
 ].join(NL);
 
 test("normalizeTestFile: バックスラッシュ・行番号接尾・絶対パスを正規化する", () => {
-  assert.equal(normalizeTestFile("test" + BS + "cli.test.js:103:1"), "test/heavy/cli.test.js");
+  assert.equal(normalizeTestFile("test" + BS + "heavy" + BS + "cli.test.js:103:1"), "test/heavy/cli.test.js");
   assert.equal(normalizeTestFile("D:" + BS + "ws" + BS + "test" + BS + "a.test.js:12:3"), "test/a.test.js");
   assert.equal(normalizeTestFile("test/foo.test.js"), "test/foo.test.js");
   assert.equal(normalizeTestFile(""), "");
@@ -72,10 +72,10 @@ test("extractErrorType / deriveArea: エラー種別とエリアを推定する"
   assert.equal(extractErrorType("何もない"), "Error");
   assert.equal(deriveArea("test/crash-guard.test.js", "x", "Error"), "crash-guard");
   assert.equal(deriveArea("test/hooks.test.js", "何かのテスト", "Error"), "hooks");
-  assert.equal(deriveArea("test/heavy/long-run-resilience.test.js", "onEvent/onPostフック経由でbusに流れ、board投稿に使える", "TypeError"), "long-run-resilience");
+  assert.equal(deriveArea("test/heavy/long-run-resilience.test.js", "onEvent/onPostフック経由でbusに流れ、board投稿に使える", "TypeError"), "heavy/long-run-resilience");
   assert.equal(deriveArea("test/x.test.js", "承認フロー競合経路: 差し戻し記録", "AssertionError"), "approval-conflict");
   assert.equal(deriveArea("test/retry.test.js", "chat(stream): stall検知でリトライ", "Error"), "stream-stall");
-  assert.equal(deriveArea("test/heavy/cli.test.js", "CLI: 何か", "AssertionError"), "cli");
+  assert.equal(deriveArea("test/heavy/cli.test.js", "CLI: 何か", "AssertionError"), "cli"); // /cli/一致はパス全体で効く
 });
 
 test("parseTap: 実ログ形式(verboseサマリ+failing tests節)から8失敗を列挙する", () => {
