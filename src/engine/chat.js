@@ -355,7 +355,7 @@ export class ChatHost {
         // ラウンドごとの消費を運用データとして記録(state/usage.json)
         if (this.ledger) {
           try {
-            this.bus.emit("usage.round", { agent: main.id, thread: this.project ?? "__main__", endedBy: r?.endedBy ?? "ok", totals: this.ledger.agent(main.id) });
+            this.bus.emit("usage.round", { agent: main.id, thread: this.project ?? "__main__", endedBy: r?.endedBy ?? "ok", totals: this.ledger.agent(main.id), delta: r?.usage ?? null });
           } catch {}
         }
           // メインが自ら直接作業した場合の受け皿: ラウンド終了時にmainへ自動マージ
