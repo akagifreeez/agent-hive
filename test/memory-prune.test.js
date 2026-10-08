@@ -189,7 +189,7 @@ test("ChatHost: config省略時は既定上限が効く(DEFAULT_MEM_MAX_MESSAGES
       toolsFactory: () => null,
       board, tasks, bus,
     });
-    // 既定上限は輸出定数(DEFAULT_MEM_MAX_MESSAGES=120)と一致する契約。数値を2重管理しない
+    // 既定上限は輸出定数(DEFAULT_MEM_MAX_MESSAGES=200)と一致する契約。数値を2重管理しない
     assert.deepEqual(host.memPrune, { maxMessages: DEFAULT_MEM_MAX_MESSAGES, maxBytes: 512 * 1024 });
   } finally {
     cleanup(ws);
