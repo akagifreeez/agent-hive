@@ -132,6 +132,8 @@ export function modelStateInfo(config) {
       ref: specRef(spec),
       ready: modelReady,
       fallbacks: catalog.fallbackRefs,
+      // モデルルーティングの実効状態(実行中config)。UIスイッチの初期表示に使う
+      routing: normalizeRoutingConfig(catalog.routing),
       providers: Object.values(catalog.providers).map((p) => {
         if (p.auth?.type === "oauth") {
           return {
@@ -157,7 +159,7 @@ export function modelStateInfo(config) {
       }),
     };
   } catch (err) {
-    return { name: config.model?.model ?? "(未設定)", ref: null, fallbacks: [], providers: [], error: err.message };
+    return { name: config.model?.model ?? "(未設定)", ref: null, fallbacks: [], providers: [], routing: null, error: err.message };
   }
 }
 

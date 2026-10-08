@@ -430,6 +430,34 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
+      if (url.pathname === "/api/routing" && req.method === "GET") {
+        // モデルルーティングの実効状態。実行中configから取り直す(起動後のlocal.json反映を含む)
+        const m = modelStateInfo(config);
+        return json(res, { enabled: Boolean(m.routing?.enabled), appliedAt: m.routing?.enabled != null ? "config" : null, reflectTiming: "restart" });
+      }
+      if (url.pathname === "/api/routing" && req.method === "POST") {
+        // モデルルーティングのON/OFF。hive.local.jsonのmodels.routing.enabledへ永続化する
+        // (configとの優先順位: local > config。反映はhiveの再起動後 = モデル実体はラウンド開始時に組立)
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const enabled = JSON.parse(body || "{}").enabled;
+            if (typeof enabled !== "boolean") throw new Error("enabledはbooleanで指定してください");
+            const localPath = resolve(dataDir(), "hive.local.json");
+            let local = {};
+            if (existsSync(localPath)) {
+              try { local = JSON.parse(readFileSync(localPath, "utf8")); } catch { /* 壊れていれば新規作成 */ }
+            }
+            local.models = { ...(local.models ?? {}), routing: { ...(local.models?.routing ?? {}), enabled } };
+            writeFileSync(localPath, JSON.stringify(local, null, 1));
+            json(res, { ok: true, enabled, note: "保存しました。hiveの再起動で反映されます" });
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
       if (url.pathname === "/api/workspace" && req.method === "GET") {
         return json(res, { workspace: config.workspace, dataDir: dataDir() });
       }
