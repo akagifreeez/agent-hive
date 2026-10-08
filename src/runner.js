@@ -267,6 +267,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       project: name,
       autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
       hooks,
+      approvals, // ラウンド末マージの保留判定(イシュー#22)
     });
     host.worktreePaths = wtPaths;
     threads.set(name, { name, goal, folder: folderName, host, board: threadBoard });
