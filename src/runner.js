@@ -26,7 +26,7 @@ import { hasOAuthEntry } from "./model/openai-auth.js";
 // re-exportで既存の参照(index.js等)の互換を維持する。
 export { createModelFactory };
 import { SpawnManager } from "./engine/spawn.js";
-import { ChatHost } from "./engine/chat.js";
+import { ChatHost, normalizeAutoResume } from "./engine/chat.js";
 import { buildMemoryContext, ensurePcRules } from "./engine/memory.js";
 import { buildSkillsIndex } from "./engine/skills.js";
 import { McpHost, mcpServersInfo } from "./engine/mcp.js";
@@ -266,6 +266,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       staggerMs: 0, // ユーザー入力時の全ワーカー同時起こしを遅延なく(2番目以降にstagger秒の純遅延が乗るバグのため0固定)
       project: name,
       autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
+      autoResume: normalizeAutoResume(config.chat?.autoResume),
       hooks,
       approvals, // ラウンド末マージの保留判定(イシュー#22)
     });
@@ -290,6 +291,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     for (const m of p.agents) { threadOfAgent.set(m.id, p.name); set.add(m.id); agentStatus.set(m.id, "idle"); }
     aliveWorkers.set(p.name, set);
   });
+  // thread.openedの同tick登録順問題: listener登録はemitより後でも動くよう、
+  // openThread内のemit(276行目)はここで受ける。ただしrunChat内のthreads.setが
+  // emitより先なので、復元(silent)で開かれたスレッドも同様に拾う。
   bus.on("agent.spawned", (p) => {
     agentStatus.set(p.agent.id, "working");
     const th = threadOfAgent.get(p.agent.parent);
@@ -310,11 +314,18 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     const globalCap = config.hierarchy?.maxConcurrent ?? 6;
     const list = tasks.list();
     // 再起動などで担当者が停止したままの請求を解放(作業が凍結するのを防ぐ)
+    // ChatHostラウンド実行中の担当者は稼働中とみなす(agent.status workingの発火が
+    // ラウンド開始より遅れる競合があり、直後tickで請求を誤解放するため)
+    const runningNow = new Set();
+    for (const [, th2] of threads) {
+      for (const m of th2.host?.mains ?? []) {
+        if (th2.host?.roundState?.get(m.id)?.running) runningNow.add(m.id);
+      }
+    }
     for (const t of list.claimed) {
       if (!t.agent) continue;
-      if (agentStatus.get(t.agent) !== "working") {
-        tasks.releaseOne(t.agent, t.id, "[自動解放] 担当者が稼働していないため再請求可能にしました。");
-      }
+      if (agentStatus.get(t.agent) === "working" || runningNow.has(t.agent)) continue;
+      tasks.releaseOne(t.agent, t.id, "[自動解放] 担当者が稼働していないため再請求可能にしました。");
     }
     const open = list.open;
     for (const [name, alive] of aliveWorkers) {
@@ -322,7 +333,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       // host無しスレッド(ディスカッション等・タスク請求なし)は増員対象外
       if (!th || !th.host || th.host.paused) continue; // 停止中スレッドは増員しない
       const nOpen = open.filter((t) => (t.project || "") === name).length;
-      const desired = nOpen === 0 ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil(nOpen / 2));
+      const nClaimedMine = list.claimed.filter((t) => (t.project || "") === name && agentStatus.get(t.agent) === "working").length;
+      // 請求中(稼働中)の仕事があるスレッドは縮小しない(open==0でも作業進行中ならbase維持)
+      const desired = nOpen === 0 && nClaimedMine === 0 ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil((nOpen + nClaimedMine) / 2));
       if (alive.size >= desired || manager.live.size >= globalCap) continue;
       const member = th.host?.mains?.[0];
       if (!member) continue;
@@ -344,6 +357,10 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     }
   };
   const autoscaleTimer = config.chat?.autoscale === false ? null : setInterval(() => { void autoscale(); }, (config.chat?.autoscaleIntervalSec ?? 30) * 1000);
+  // テスト/デバッグ用の明示tick(autoscaleをintervalの到達を待たず1回実行)
+  const autoscaleTick = () => autoscale();
+  // テスト/デバッグ用: スレッドごとの生きたワーカーid集合の観測点
+  const aliveWorkersFor = (threadName) => aliveWorkers.get(String(threadName)) ?? null;
   if (autoscaleTimer?.unref) autoscaleTimer.unref();
 
   // 前回実行で開いていたスレッドを無音で復元(ボード・メモリ・タブが復帰する)
@@ -451,6 +468,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     staggerMs: config.chat?.staggerMs ?? 3000,
     project: null, // リーダーは請求しないので自動継続は実質発火しない
     autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
+      autoResume: normalizeAutoResume(config.chat?.autoResume),
     hooks,
     approvals, // ラウンド末マージの保留判定(イシュー#22)
   });
@@ -643,6 +661,9 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       });
       return { ok: true, thread: name, participants: participants.map((p) => p.ref), notes };
     },
+    autoscaleTick,
+    aliveWorkersFor,
+    tasks,
     manager,
     mcpHosts,
     bus,
@@ -784,6 +805,8 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       maxTurns: config.loop.maxTurns, shellKind,
       contextWindow: config.model.contextWindow ?? 200000,
       thresholdPercent: config.compact?.thresholdPercent,
+      sessionLogKeep: config.sessionLog?.keep ?? null,
+      sessionLogMaxBytes: config.sessionLog?.maxBytes ?? null,
       memory: [buildMemoryContext(config.workspace), buildSkillsIndex(config.workspace)].filter(Boolean).join("\n\n") || null,
     });
   })());

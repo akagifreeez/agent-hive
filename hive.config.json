@@ -30,6 +30,10 @@
   "compact": {
     "thresholdPercent": 90
   },
+  "sessionLog": {
+    "maxBytes": 67108864,
+    "keep": 5
+  },
   "workspace": "workspace",
   "worktrees": {
     "dir": "worktrees"
@@ -52,6 +56,7 @@
     ],
     "maxTurnsPerRound": 20,
     "autoContinueRounds": 6,
+    "autoResume": { "enabled": true, "delaySec": 120, "maxConsecutive": 3 },
     "requireSeparateApprove": true,
     "idleClaimWaitSec": 45,
     "autoscale": true,

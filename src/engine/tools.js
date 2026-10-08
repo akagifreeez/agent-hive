@@ -434,11 +434,16 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
             const verifyId = `verify-${taskId}`;
             if (reviewer && reviewer.id !== agent.id) {
               const claimedTask = tasks.claimedBy(agent.id).find((t) => t.id === taskId);
+              // 速度改善: 実装が既にmainへ反映済み(ラウンド末マージ等)なら検証は軽量でよい
+              const merged = await isImplMergedIntoMain({ mainWorkspace, worktreePath: workspace });
+              const lightNote = merged
+                ? `\n[軽量検証可] この実装は既にmainへ反映済みです(差分ゼロ)。main HEADでの該当箇所確認+関連する単一テストの実行だけで完了判定してよい(フルスイート不要)。`
+                : "";
               const created = tasks.create({
                 id: verifyId,
                 role: reviewer.role,
                 project: claimedTask?.project ?? "",
-                body: `検証: タスク ${taskId}(${agent.id} 実装)の差分をレビューしてください。\n動作確認(テスト実行など)を行い、問題なければ finish_task (task_id: "${verifyId}") で検証完了としてください。承認後、成果が main へマージされます。`,
+                body: `検証: タスク ${taskId}(${agent.id} 実装)の差分をレビューしてください。\n動作確認(テスト実行など)を行い、問題なければ finish_task (task_id: "${verifyId}") で検証完了としてください。承認後、成果が main へマージされます。${lightNote}`,
                 createdBy: agent.id,
               });
               approvals.pending.set(taskId, { agentId: agent.id, worktreePath: workspace });
@@ -995,6 +1000,23 @@ function decodeEntities(s) {
     .replace(/&quot;/g, '"')
     .replace(/&#x27;|&#39;/g, "'")
     .replace(/&nbsp;/g, " ");
+}
+
+// 検証の軽量化: 実装ブランチのHEADが既にmainの先祖(=ラウンド末マージ等で反映済み)なら
+// 差分ゼロ扱いとし、検証タスクに軽量パスを注記する。git不備時はfalse(従来どおり重めに検証)。
+export async function isImplMergedIntoMain({ mainWorkspace, worktreePath }) {
+  try {
+    if (!mainWorkspace || !worktreePath) return false;
+    const head = await runCommand({ command: "git rev-parse HEAD", cwd: worktreePath, timeoutMs: 15000 });
+    if (!head.ok) return false;
+    // 出力にはexitコード行が前置されることがあるため、ハッシュ行だけを拾う
+    const hash = (String(head.text || "").match(/^[0-9a-f]{7,40}\b/m) || [])[0];
+    if (!hash) return false;
+    const anc = await runCommand({ command: `git merge-base --is-ancestor ${hash} main`, cwd: mainWorkspace, timeoutMs: 15000 });
+    return anc.ok;
+  } catch {
+    return false;
+  }
 }
 
 // ワークスペースのファイル一覧(UI共用)。node_modulesと隠しファイルは除外。
