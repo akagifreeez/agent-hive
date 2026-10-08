@@ -326,7 +326,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     "scenario.started": (p) => { live.scenario = { name: p.name, phase: "running" }; },
     // runner.jsは{byAgent, totals}をemitする(旧契約のp.usageも後方互換で受ける)
     "usage.summary": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), totals: p.totals ?? p.usage ?? null }),
-    "usage.round": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), agent: p.agent, thread: p.thread ?? '__main__', endedBy: p.endedBy ?? 'ok', totals: p.totals ?? null }),
+    "usage.round": (p) => persistUsage(config.workspace, { at: new Date().toISOString(), agent: p.agent, thread: p.thread ?? '__main__', endedBy: p.endedBy ?? 'ok', totals: p.totals ?? null, delta: p.delta ?? null }),
     "scenario.finished": () => { if (live.scenario) live.scenario.phase = "done"; },
   };
   for (const [type, fn] of Object.entries(record)) bus.on(type, fn);
