@@ -6,15 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { Bus } from "../src/engine/board.js";
-import { startUi as _startUi } from "../src/ui/server.js";
+import { Bus } from "../../src/engine/board.js";
+import { startUi as _startUi } from "../../src/ui/server.js";
 // test-hf-token-inject: UIサーバーのPOSTはCSRFトークンを要求するため、
 // テスト内のfetchは全てトークン付きへ差し替える(startUi後にtokenedFetchOn()を呼ぶ)
-import { tokenedFetchOn, startUiTokenized } from "./helpers/hf-token.js";
+import { tokenedFetchOn, startUiTokenized } from "../helpers/hf-token.js";
 tokenedFetchOn();
 
 
-const CLI = join(fileURLToPath(new URL("../bin/hive.js", import.meta.url)));
+const CLI = join(fileURLToPath(new URL("../../bin/hive.js", import.meta.url)));
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-cli-"));
