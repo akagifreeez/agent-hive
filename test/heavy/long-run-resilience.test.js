@@ -12,8 +12,8 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { OpenAIModel, setModelSleep, RETRY_MAX_RETRIES } from "../src/model/openai.js";
-import { installCrashGuard, guardRateLimit } from "../src/engine/crash-guard.js";
+import { OpenAIModel, setModelSleep, RETRY_MAX_RETRIES } from "../../src/model/openai.js";
+import { installCrashGuard, guardRateLimit } from "../../src/engine/crash-guard.js";
 
 function sseThenAbortResponse(chunksBeforeAbort, abortErr, eofAfterChunks = false) {
   const encoder = new TextEncoder();
