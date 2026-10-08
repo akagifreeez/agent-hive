@@ -78,7 +78,7 @@ export async function probe(url, timeoutMs = 3000) {
  * @param {string} [o.workspace] state/の基準ディレクトリ
  * @param {string} [o.markerPath] markerパス(テスト用上書き。既定はstate/watchdog-on)
  * @param {string} [o.logPath] ログパス(テスト用上書き。既定はstate/watchdog.log)
- * @param {((cmd: string, args: string[], opts: {detached: boolean, stdio: string[], windowsHide: boolean}) => {pid?: number})|null} [o.spawnFn]
+ * @param {((cmd: string, args: string[], opts: {detached: boolean, stdio: string, windowsHide: boolean}) => {pid?: number})|null} [o.spawnFn]
  *        起動処理(差し替え可能)。nullでmarker判定のみ(起動しない)。既定の実装はscripts/watchdog.mjs側
  * @param {string} [o.startCmd] 起動コマンド(既定 process.execPath)
  * @param {string[]} [o.startArgs] 起動引数(既定 ["src/index.js","--chat"])
