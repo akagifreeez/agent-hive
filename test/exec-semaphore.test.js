@@ -66,9 +66,13 @@ test("isTestCommand: npm test系・node --testにマッチし、テスト以外�
 
 test("セマフォ: 上限1でnpm test系2本の並列実行は直列化される(2本目は1本目完了まで待つ)", async () => {
   await withSemaphore(1, async () => {
+    // 軽量フィクスチャ(node --test 1ファイル 約300ms)を使う。npm testダミーは全スイート
+    // 起動が20秒超のため、フル実行中(自分自身がスロット保持)に発射すると自縄自縛で落ちる。
+    // 直列化の検証要件(2本目が1本目の完了まで走らない+順序)はフィクスチャで満たせる。
+    const cmd = "node --test test/fixtures/empty.test.js";
     const log = [];
-    const mk = (name) => runCommand({ command: `npm test -- dummy-${name}`, timeoutMs: 15000 }).then((r) => {
-      log.push(`done-${name}:${r.ok ? "ok" : "fail"}`);
+    const mk = (name) => runCommand({ command: cmd + " && echo done-" + name, timeoutMs: 15000 }).then((r) => {
+      if (r.ok && r.text.includes("done-" + name)) log.push(`done-${name}`);
       return r;
     });
     const p1 = mk(1);
@@ -81,7 +85,7 @@ test("セマフォ: 上限1でnpm test系2本の並列実行は直列化され�
     const mid = log.length;
     await p2;
     assert.equal(mid, 1, "1本目の完了後に2本目が走った痕跡が無い");
-    assert.deepEqual(log, ["done-1:ok", "done-2:ok"]);
+    assert.deepEqual(log, ["done-1", "done-2"]);
   });
 });
 
@@ -152,9 +156,11 @@ test("セマフォ: FIFOで待ちキューが消化される(3本直列・順序
 
 test("セマフォ: 失敗・タイムアウト・起動エラーでもスロットはリークしない(後続が通る)", async () => {
   await withSemaphore(1, async () => {
-    const bad = await runCommand({ command: "npm test -- dummy-leak", timeoutMs: 200 });
+    // タイムアウト誘発も軽量フィクスチャで(フル実行中のnpm testダミーは自縄自縛落ちの元)。
+    // 短すぎるtimeoutMsは「セマフォ待ちタイムアウト」ではなく「実行タイムアウト」になる。
+    const bad = await runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 200 });
     assert.equal(bad.ok, false, "200msでは終わらないのでタイムアウト失敗になる");
-    const next = await runCommand({ command: "npm test -- dummy-next", timeoutMs: 15000 });
+    const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 });
     assert.equal(next.ok, true, `スロットがリークして後続が永久待ちになった: ${next.text}`);
   });
 });
