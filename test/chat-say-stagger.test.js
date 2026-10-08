@@ -79,6 +79,7 @@ test("runner: say(text, thread)はstagger遅延なしで全メインへ注入さ
         `${id} のラウンドが5秒以内に開始(遅延なしが観測できる)`
       );
     }
+    const startObservedAt = Date.now(); // 全員の開始を観測した時点(say→開始の遅延計測終点)
     // ラウンド完走を待つ(テスト終了時の残留タイマー防止)
     for (const id of ["saystagger-alpha", "saystagger-beta", "saystagger-gamma"]) {
       assert.ok(
@@ -86,11 +87,10 @@ test("runner: say(text, thread)はstagger遅延なしで全メインへ注入さ
         `${id} のラウンドが完走`
       );
     }
-    const elapsed = Date.now() - t0;
-    // 上限は緩めに: 5秒以内の「開始観測」は各行で検証済みであり、ここは全体の完走上限。
-    // フル実行中はセマフォ直列化・マシン負荷でラウンド1本(数秒)が積み上がるため、
-    // stagger遅延(旧実装+6秒)との識別に十分な30秒を上限とする(単独実行は実測2秒台)。
-    assert.ok(elapsed < 30000, `全体が30秒以内に完走(実測 ${elapsed}ms / 旧実装ならstagger分さらに遅延)`);
+    // 計測は「say→全員開始」区間に限定する(負荷で揺れる完走待ちを含めない)。
+    // stagger遅延が復活するとベータ+3秒/ガンマ+6秒 → 開始観測が10秒を超える。
+    const elapsed = startObservedAt - t0;
+    assert.ok(elapsed < 10000, `sayから全メイン開始まで10秒以内(実測 ${elapsed}ms / 旧実装はstaggerで+6秒)`);
   } finally {
     rmTree(ws); rmTree(`${ws}-wt`);
   }
