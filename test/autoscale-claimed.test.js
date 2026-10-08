@@ -66,33 +66,40 @@ test("autoscale: 請求中(稼働中)タスクがあるスレッドはdesired縮
     const opened = await ctl.openThread({ project: "scgtest", goal: "autoscale縮小ガードの検証" });
     assert.equal(opened.error, undefined, "スレッドが開ける: " + String(opened?.error ?? ""));
 
-    // タスクを2件起票し、片方を「稼働中の誰か」へ事前請求させる
-    const mk = ctl.tasks.create({ id: "scg-a", body: "稼働中エージェントが請求中のタスク", project: "scgtest" });
-    assert.ok(mk, "タスクscg-a起票");
-    assert.ok(ctl.tasks.create({ id: "scg-b", body: "未請求タスク", project: "scgtest" }), "タスクscg-b起票");
     const claimer = "scgtest-alpha"; // 稼働中(working)として観測させるエージェントid
     const host = ctl.threadHost("scgtest");
     assert.ok(host, "ChatHost取得");
-    // ラウンドを走らせて claimer を working 状態へ(実機のagent.statusイベント経由)
-    ctl.say("[テスト] 起こし", "scgtest");
+    // タスクを2件起票(起票wakeでもclaimerのラウンドが始まり、working状態を作れる)
+    assert.ok(ctl.tasks.create({ id: "scg-a", body: "稼働中エージェントが請求中のタスク", project: "scgtest" }), "タスクscg-a起票");
+    assert.ok(ctl.tasks.create({ id: "scg-b", body: "未請求タスク", project: "scgtest" }), "タスクscg-b起票");
+    const evLog = [];
+    bus.on("agent.status", (e) => evLog.push([e.agent, e.status]));
+    bus.on("task.claimed", (e) => evLog.push(["claim:" + e.agent, e.taskId]));
+    // 起票wakeでclaimerのラウンドが走り出す(agent.status working を実経路で発火)
     assert.ok(
       await waitUntil(() => {
         try { return host.roundState.get(claimer)?.running === true; } catch { return false; }
       }),
-      "claimer のラウンドが走り出す"
+      "claimer のラウンドが走り出す(起票wake経由)"
     );
-    // scriptedModelのラウンド自体は短い。tick時点で稼働状態を保つため、
-    // ラウンド完走を待たず(=running trueの間に)以降へ進むのが狙いだが、
-    // 競合で即finishedする場合に備え running がまだ true であることをここで確認済み。
-    // 稼働中のclaimerへタスクを請求させる(タスクツールはエージェント毎の紐付けのため、
-    // ここでは黒板APIを直接叩いて請求済み状態を作る)
+    // 稼働中のclaimerへタスクを事前請求させる(黒板APIを直接叩いて請求済み状態を作る)
     const claimed = ctl.tasks.claim("scg-a", { id: claimer, role: "impl" });
-    assert.ok(!claimed.error, "事前請求が成功: " + String(claimed?.error ?? ""));
+    assert.ok(claimed && !claimed.error, "事前請求が成功: " + String(claimed?.error ?? ""));
 
     // 明示tick: この時点で open=1件(scg-b), claimed稼働中=1件(scg-a)
+    // 注: claim後もラウンドが回り続けている間にtickする(直後にrunning確認)
+    assert.ok(
+      host.roundState.get(claimer)?.running === true,
+      "tick時点でもclaimerは稼働中(ラウンド実行中)"
+    );
     await ctl.autoscaleTick();
     const aliveAfter = ctl.aliveWorkersFor("scgtest");
     assert.ok(aliveAfter, "autoscaleTick後のaliveWorkersを観測できる");
+    console.log("[debug] aliveAfter.size =", aliveAfter.size);
+    console.log("[debug] evLog =", JSON.stringify(evLog));
+    console.log("[debug] roundState running =", host.roundState.get(claimer)?.running);
+    console.log("[debug] roundState keys =", [...host.roundState.keys()].join(","));
+    console.log("[debug] aliveWorkersFor now =", ctl.aliveWorkersFor("scgtest")?.size);
     // 縮小ガード: claimed稼働中があるので desired >= base(2) が維持される。
     // alive は base(2) のまま(増員しない/減らない)
     assert.ok(aliveAfter.size >= 2, "baseワーカーは維持される: size=" + aliveAfter.size);

@@ -291,6 +291,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     for (const m of p.agents) { threadOfAgent.set(m.id, p.name); set.add(m.id); agentStatus.set(m.id, "idle"); }
     aliveWorkers.set(p.name, set);
   });
+  // thread.openedの同tick登録順問題: listener登録はemitより後でも動くよう、
+  // openThread内のemit(276行目)はここで受ける。ただしrunChat内のthreads.setが
+  // emitより先なので、復元(silent)で開かれたスレッドも同様に拾う。
   bus.on("agent.spawned", (p) => {
     agentStatus.set(p.agent.id, "working");
     const th = threadOfAgent.get(p.agent.parent);
