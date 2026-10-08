@@ -65,6 +65,7 @@ test("autoscale: 請求中(稼働中)タスクがあるスレッドはdesired縮
   try {
     const opened = await ctl.openThread({ project: "scgtest", goal: "autoscale縮小ガードの検証" });
     assert.equal(opened.error, undefined, "スレッドが開ける: " + String(opened?.error ?? ""));
+    console.log("[debug] threadHosts =", ctl.listThreads().join(","));
 
     const claimer = "scgtest-alpha"; // 稼働中(working)として観測させるエージェントid
     const host = ctl.threadHost("scgtest");
@@ -99,7 +100,7 @@ test("autoscale: 請求中(稼働中)タスクがあるスレッドはdesired縮
     console.log("[debug] evLog =", JSON.stringify(evLog));
     console.log("[debug] roundState running =", host.roundState.get(claimer)?.running);
     console.log("[debug] roundState keys =", [...host.roundState.keys()].join(","));
-    console.log("[debug] aliveWorkersFor now =", ctl.aliveWorkersFor("scgtest")?.size);
+    console.log("[debug] aliveWorkersFor now =", [...(ctl.aliveWorkersFor("scgtest") ?? [])].join(","));
     // 縮小ガード: claimed稼働中があるので desired >= base(2) が維持される。
     // alive は base(2) のまま(増員しない/減らない)
     assert.ok(aliveAfter.size >= 2, "baseワーカーは維持される: size=" + aliveAfter.size);
