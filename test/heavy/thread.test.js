@@ -150,7 +150,7 @@ test("ChatHost自動継続: ターン上限でも仕事が残っていれば次�
   ]);
   const host = new ChatHost({
     mains: [agent], project: "p", autoContinueRounds: 3, maxTurnsPerRound: 4, staggerMs: 0, // 1モデル呼出=1ターンの現行実装で完走に4ターン要る
-    landingSignal: () => true, // 進捗ゲート対応: 着地ありを模擬(旧仕様の自動継続検証を維持)
+    landingSignal: () => true, // 進捗ゲート対応(aed7ccd): 着地ありを模擬して自動継続経路を検証(5bf76b6から移植)
     modelFactory: () => model, toolsFactory: () => tools,
     board, tasks, bus,
   });
@@ -178,7 +178,7 @@ test("ChatHost自動継続: 上限回数に達したら告知して停止する"
   ]);
   const host = new ChatHost({
     mains: [agent], project: "q", autoContinueRounds: 1, maxTurnsPerRound: 3, staggerMs: 0, // 上限到達までに3ターン要る(現行loop実装)
-    landingSignal: () => true, // 進捗ゲート対応: 着地ありを模擬(旧仕様の自動継続検証を維持)
+    landingSignal: () => true, // 進捗ゲート対応(aed7ccd): 着地ありを模擬し「ハード上限」経路の告知を検証(5bf76b6から移植)
     modelFactory: () => model, toolsFactory: () => tools,
     board, tasks, bus,
   });

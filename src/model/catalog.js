@@ -14,7 +14,7 @@ import { parseModelRef, formatModelRef } from "./ref.js";
 
 /** 内蔵カタログを土台に設定をマージする。
  * @param {ModelsCfg} [modelsCfg]
- * @returns {{providers: Record<string, ProviderCfg>, defaultRef: string|null, fallbackRefs: string[]}} */
+ * @returns {{providers: Record<string, ProviderCfg>, defaultRef: string|null, fallbackRefs: string[], routing?: {enabled?: boolean, heavyPromptTokens?: number, heavyRoles?: string[], heavyQualityStrikes?: number, heavyTools?: number, heavyModelRef?: string|null, lightModelRef?: string|null}}} */
 export function buildCatalog(modelsCfg = {}) {
   const providers = {};
   for (const [id, p] of Object.entries(BUILTIN_PROVIDERS)) {

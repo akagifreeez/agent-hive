@@ -49,6 +49,7 @@ node bin/hive.js usage             トークン消費の直近サマリ
 ## セーフティ
 
 - 権限モード(normal=要承認 / auto)+ 破壊的コマンドのパターン拒否 + 承認要求のデスクトップ通知
+- 停止系通知: 自動継続停止・ツール失敗停止・予算停止と全エージェント無音の「ラウンド静止」(既定10分、1回だけ)をCLI通知へ配信。`hive.config.json` の `notify.stop: false` で止める(`notify.stallSec` で静止閾値秒を変更)
 - **PC操作制限8か条**を全エージェントのシステムプロンプトへ常時注入(最小権限/state/への接触禁止/外部送信禁止など)
 - state/へのエージェント書き込みは`safeWritePath`で構造的に拒否(シンボリックリンクや大小文字の回避も含め`test/state-guard.test.js`で検証)
 - 監査台帳(`state/audit.jsonl`): 全ツール実行をagent/tool/所要ms/応答brief付きで記録(5MBローテート)

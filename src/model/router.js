@@ -18,13 +18,13 @@ export class RouterModel {
   /**
    * @param {{primary: Object, strong: Object, routing: Object, onRoute?: Function|null}} cfg
    *   primary: 軽量側(既定=flash)のモデル実体。strong: 重量側(glm-5.3)のモデル実体。
-   *   routing: {enabled, heavyPromptTokens, roles, heavyIds, heavyModelId} 形の正規化済設定
+   *   routing: RoutingConfig(normalizeRoutingConfig()の出力。router-config.js参照) 形の正規化済設定
    *   (normalizeRoutingConfig()の出力)。enabled=falseなら全てprimaryへ委譲する(回帰)。
    *   role: 呼出元エージェントのロール(impl/review/verify/lead等)。review/verify等の
    *   heavyRolesに一致すると品質重視でstrong側へ振る。未指定なら判定から除外される。
    *   onRoute: 判定時に呼ばれるフック({selected, reason, ...})。テスト/ログ配線用。
    */
-  constructor({ primary, strong, routing, role = null, onRoute = null }) {
+  constructor(/** @type {{primary: Object, strong: Object, routing?: Object|null, role?: string|null, onRoute?: Function|null}} */ { primary, strong, routing, role = null, onRoute = null }) {
     if (!primary) throw new Error("RouterModel: primaryモデルがありません");
     if (!strong) throw new Error("RouterModel: strongモデルがありません");
     this.primary = primary;
