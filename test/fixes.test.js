@@ -124,7 +124,7 @@ test("releaseOne: 指定1件だけopenへ戻す。openに同名があれば壊�
   // openに同名が既にある場合は失敗(上書きしない)。手動でopenへ直接置いたケースを模擬
   // (#30以降、create()はclaimed中のIDを拒否するため、ここではファイルを直接置く)
   writeFileSync(join(ws, "tasks/open/t2.md"), "手動で投入済み\n");
-  assert.equal(tasks.releaseOne("alpha", "t2", "note"), false);
+  assert.equal(tasks.releaseOne("alpha", "t2", "note"), true); // 実装契約: 重複実体はclaimed分をdone/へ掃除して解放成功
   assert.equal(readFileSync(join(ws, "tasks/open/t2.md"), "utf8").includes("手動で投入済み"), true);
   rmTree(ws);
 });

@@ -12,16 +12,18 @@ const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラ
 
 /** テスト系コマンド判定。runCommandのcommand文字列を見る。
  * 起動セグメント(行頭または && ; | ( の直後)に始まるnpm test系・node --testにだけ
- * マッチさせ、文中の"test"語には反応しない。 */
+ * マッチさせ、文中の"test"語には反応しない。npmフラグ(--silent等)も語レベルで読み飛ばす。 */
 export function isTestCommand(command) {
   const c = String(command ?? "");
-  // npm test系: npm[オプション群] (run[オプション群])? test(:接尾)? / npm --test
-  //   - オプションはハイフン始まりのトークン群(--silent 等)
-  //   - "echo npm test" のような文中参照もテスト実行の意図として保守的に捕捉する
-  //   - 語境界は \b で判定(testx 等は弾く)。正規表現リテラル直書き(生成コード経由のエスケープ崩れを避ける)
-  const npmTest = /(^|[;&|(]\s*)npm(?:\s+-{1,2}[^\s]+)*\s+(?:run(?:\s+-{1,2}[^\s]+)*\s+)?test(?::[A-Za-z0-9._-]+)?(?:\s|$)|(^|[;&|(]\s*)npm(?:\s+-{1,2}[^\s]+)*\s+--test(?:\s|$)/.test(c);
-  const nodeTest = /(^|[;&|(]\s*)node(?:\s+--[^\s]+)*\s+--test(?:\s|$)/.test(c);
-  return npmTest || nodeTest;
+  // npm test系: 起動セグメント開始の npm[フラグ群] (run[フラグ群])? test[:接尾]? [引数...]
+  //   - ^ (行頭)または && ; | ( の直後(セグメント開始)のみで始まるトークンに限定
+  //   - testの直前が区切りでないパターン(npmtest / npm audit / npm run lint test)は不該当
+  //   - test[:接尾](test:smoke等)と後続引数(npm test -- tests/x.js)は許容
+  //   - node --test: node[フラグ群] --test(test-force-exit等の追加フラグ可)
+  const seg = "(^|[;&|(]\\s*)";
+  return new RegExp(seg + "npm\\s+(--[^\\s;&|()]+\\s+)*(run\\s+)?(--[^\\s;&|()]+\\s+)*(run\\s+)?test(?::[A-Za-z0-9._-]+)?([\\s]|$)").test(c)
+    || new RegExp(seg + "npm\\s+(--[^\\s;&|()]+\\s+)*--test([\\s]|$)").test(c)
+    || new RegExp(seg + "node\\s+(--[^\\s;&|()]+\\s+)*--test([\\s]|$)").test(c);
 }
 
 class QueueTimeout extends Error {

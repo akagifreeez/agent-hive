@@ -5,7 +5,7 @@
  * @typedef {{id: string, baseUrl: string, api: string, name?: string, auth?: {type?: string, env?: string, file?: string, value?: string}, params?: {temperature?: number, maxTokens?: number, timeoutMs?: number, contextWindow?: number, reasoningEffort?: string, webSearch?: boolean|object|null}, models?: Array<{id: string, name?: string, contextWindow?: number, maxTokens?: number, reasoning?: boolean, reasoningEffort?: string, cost?: {input?: number, output?: number}|null}>}} ProviderCfg
  * @typedef {{id: string, name?: string, contextWindow?: number, maxTokens?: number, reasoning?: boolean, reasoningEffort?: string, cost?: {input?: number, output?: number, cacheRead?: number, cacheWrite?: number}|null}} ModelRow
  * @typedef {{provider: ProviderCfg, model: {id: string, name: string, contextWindow: number, maxTokens: number, reasoning: boolean, reasoningEffort: string|null, cost: {input?: number, output?: number, cacheRead?: number, cacheWrite?: number}|null}}} ModelSpec
- * @typedef {{default?: string|null, fallbacks?: string[]|null, providers?: Record<string, Object>}} ModelsCfg
+ * @typedef {{default?: string|null, fallbacks?: string[]|null, providers?: Record<string, Object>, routing?: Object}} ModelsCfg
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
