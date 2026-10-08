@@ -15,6 +15,7 @@ import {
   resetTestSemaphore,
   setSemaphoreSelfBlockGuard,
   testSemaphoreState,
+  runTestCommand,
 } from "../src/engine/test-semaphore.js";
 
 // 並列テストファイル同士でセマフォ状態を持ち越さない。各テストの終了時に必ず戻す。
@@ -120,15 +121,20 @@ test("セマフォ: npm testを待っている間はテスト以外のコマン�
 test("セマフォ: 上限超過の待ちがタイムアウトを過ぎると教師文面つきで失敗を返す", async () => {
   await withSemaphore(1, async () => {
     // 待ちタイムアウト(queueTimeoutMs)の誘発には本物のセマフォ待ちが要るため、
-    // ガードを解除して本番経路で検証する(ガードon中は待ち行列に入らず誘発不能)。
+    // ガードを解除して検証する(ガードon中は待ち行列に入らず誘発不能)。
     setSemaphoreSelfBlockGuard(false);
     try {
       // 1本目を軽量フィクスチャで握り、2本目を短い待ちタイムアウトで失敗させる。
+      // runCommand()は待ち上限にセマフォ既定(10分)を使う契約のため(queueTimeoutMs:null固定)、
+      // 待ちタイムアウトの誘発はrunTestCommand()直呼びで行う(本番経路のセマフォ実体は共用)。
       const blocker = runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000 });
       for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
         await new Promise((r) => setTimeout(r, 10));
       }
-      const waiter = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000, queueTimeoutMs: 300 });
+      const waiter = await runTestCommand(
+        { command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000, queueTimeoutMs: 300 },
+        (o) => runCommand(o),
+      );
       assert.equal(waiter.ok, false, `待ちタイムアウトで失敗するはず: ${waiter.text.slice(0, 120)}`);
       assert.match(waiter.text, /同時実行制限で待機タイムアウト/);
       assert.match(waiter.text, /exec\.testMaxConcurrent/);
@@ -200,8 +206,13 @@ test("セマフォ(ガード解除): 待ちタイムアウトで失敗しても�
       for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
         await new Promise((r) => setTimeout(r, 10));
       }
-      const waiter = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 300 });
-      assert.equal(waiter.ok, false, "待ちタイムアウトで失敗するはず");
+      // runCommand()は待ち上限にセマフォ既定(10分)を使う契約のため(queueTimeoutMs:null固定)、
+      // 待ちタイムアウトの誘発はrunTestCommand()直呼びで行う(本番経路のセマフォ実体は共用)。
+      const waiter = await runTestCommand(
+        { command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000, queueTimeoutMs: 300 },
+        (o) => runCommand(o),
+      );
+      assert.equal(waiter.ok, false, `待ちタイムアウトで失敗するはず: ${waiter.text.slice(0, 120)}`);
       assert.match(waiter.text, /同時実行制限で待機タイムアウト/);
       await hold;
       const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 });
