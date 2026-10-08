@@ -44,8 +44,14 @@ test("selectTestsForDiff: 重複排除・安定ソート", () => {
   assert.deepEqual(tests, sorted, "ソート済み(安定)");
 });
 
-test("selectTestsForDiff: 空入力は空配列・ディレクトリ風/非対象拡張子も安全", () => {
+test("selectTestsForDiff: 空入力は空配列・対応テストが無いsrc差分は実一覧指定時のみ空配列", () => {
   assert.deepEqual(selectTestsForDiff([]), []);
-  const tests = selectTestsForDiff(["src/engine/unknown-module-xyz.js", "docs/notes.txt"]);
+  // 実一覧(allTestFiles)指定時: 実在しないbaseは拾わない(規則3)
+  const tests = selectTestsForDiff(["src/engine/unknown-module-xyz.js", "docs/notes.txt"], {
+    allTestFiles: ["test/exec.test.js"],
+  });
   assert.deepEqual(tests, [], "対応規則に当たらないものは拾わない");
+  // 未指定時はglob式(実在は呼び出し側のglob展開で自然に候補ゼロになる)
+  const glob = selectTestsForDiff(["src/engine/unknown-module-xyz.js"]);
+  assert.deepEqual(glob, ["test/unknown-module-xyz*.test.js"]);
 });
