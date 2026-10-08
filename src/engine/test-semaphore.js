@@ -79,7 +79,7 @@ function drain() {
  * forceWait: true のときはガードon中でもこの呼び出しだけ待ち行列に入る(テスト専用:
  * 待ちタイムアウトの誘発検証に使う。ガードプロセス内で空きスロットを独占すれば、
  * 外側のセマフォ状態に依存せず待ち→タイムアウトをプロセス内で完結誘発できる)。
- * @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number, queueTimeoutMs?: number, label?: string, forceWait?: boolean}} o
+ * @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number, queueTimeoutMs?: number, label?: string, forceWait?: boolean, keep?: string}} o
  * @param {(o: any) => Promise<{ok: boolean, text: string}>} run 実行本体(=runCommand)。DI可能
  * @returns {Promise<{ok: boolean, text: string}>} */
 export async function runTestCommand(o, run) {

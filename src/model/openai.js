@@ -434,9 +434,9 @@ const STREAM_ABORT_HINTS = ["terminated", "aborted", "aborterror", "econnreset",
 export function isStreamAbortError(err) {
   let cur = err;
   for (let depth = 0; cur && depth < 5; depth++) {
-    const msg = String(cur.message ?? cur).toLowerCase();
+    const msg = String(/** @type {any} */ (cur).message ?? cur).toLowerCase();
     if (STREAM_ABORT_HINTS.some((h) => msg.includes(h))) return true;
-    if (cur.name && String(cur.name).toLowerCase() === "aborterror") return true;
+    if (/** @type {any} */ (cur).name && String(/** @type {any} */ (cur).name).toLowerCase() === "aborterror") return true;
     cur = /** @type {any} */ (cur).cause;
   }
   return false;
@@ -448,7 +448,7 @@ export function isStreamAbortError(err) {
  * @returns {string}
  */
 export function translateStreamAbortError(err) {
-  const detail = String(err?.message ?? err).slice(0, 200);
+  const detail = String(/** @type {any} */ (err)?.message ?? err).slice(0, 200);
   if (isStreamAbortError(err)) {
     return `ストリームが切断されました(ネットワーク瞬断の可能性)。リトライ${RETRY_MAX_RETRIES}回で不調。モデル呼び出しを諦めて次の行動を決めてください(待機/他タスク/ボード報告): ${detail}`;
   }
