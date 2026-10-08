@@ -504,6 +504,8 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       return { ok: true };
     },
     say: (text, thread = null) => {
+      // 引数順は(text, thread)。旧実装は h.say(text) に2引数をそのまま流し、
+      // threadがChatHost.sayの第2引数(delayMs滑落は無いがwake遅延の温床)へ混入していたため正規化。
       const t = thread ? threads.get(thread) : null;
       if (t) return t.host ? t.host.say(text) : { ok: false, error: `スレッド ${thread} はワーカーを持たないためsayできません` };
       return leadHost.say(text);
@@ -558,7 +560,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
         say: (text, thread) => {
           const h = thread ? threads.get(thread)?.host : leadHost;
           if (!h) return { ok: false, error: `スレッド ${thread} はワーカーを持たない(host無し)ため、sayできません` };
-          return h.say(text, thread);
+          return h.say(text); // ChatHost.sayの契約は(text)。thread解決は上で済んでいる
         },
         tasks,
         bus,
