@@ -1,0 +1,226 @@
+// スポーン管理(v5): エージェントが spawn_agent ツールで他エージェントを立てる。
+// 階層(メイン→サブ→作業員)は「仕事の組織化」だけに使い、コミュニケーションは
+// 全レベルが同じボードで合流する(報告は必ずボード/親への秘密チャネルは作らない)。
+import { join, resolve } from "node:path";
+import { readdirSync } from "node:fs";
+import { createWorktree } from "./worktree.js";
+import { createTools } from "./tools.js";
+import { readMeta } from "./tasks.js";
+import { runAgentLoop, buildSystemPrompt } from "./loop.js";
+import { runCommand } from "./exec.js";
+
+const WORKER_PERSONA = (displayName, role) => `# ${displayName}(スポーンされた作業エージェント/ロール: ${role})
+
+あなたはハイブで働く作業エージェントです。親エージェントからのブリーフ(最初の指示)に従って作業します。
+
+## 方針
+- ブリーフは要点(目標・完了条件)だけ書かれている。着手前に gather_context でボードの経過と、必要なら完了タスク(source: "done")も読み、**このタスクに必要な前提を自分で集めてから**作業計画を立てる(読み取り時キュレーション)。
+- ブリーフに書かれたことだけを確実にやる。範囲を広げすぎない。
+- 作ったら必ず自分で実行・確認し、結果をボードへ報告する。
+- 追加の仕事が必要になったら create_task で起票し、ボードでも告知する。
+- 困ったらボードで質問する(親に直接ではなく全員に見える形で)。
+`;
+
+// 請求中ブリーフタスクのメタからmodel指定を読む(#12)。無ければnull(既定モデル)
+function readTaskModel(tasks, agentId) {
+  try {
+    const dir = join(tasks.dir, "claimed");
+    const f = readdirSync(dir).find((x) => x === `${agentId}--spawn-${agentId}.md`);
+    if (!f) return null;
+    return readMeta(join(dir, f)).model ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export class SpawnManager {
+  constructor({
+    mainWorkspace, worktreeRoot, board, tasks, bus, gate = null, ledger = null, budget = null,
+    hierarchy = { maxDepth: 2, maxConcurrent: 6 }, modelFactory, maxTurns = 40,
+    contextWindow = 200000, thresholdPercent,
+    memoryFn = null, // () => 永続記憶の注入文脈
+    mcpHosts = null, // MCPサーバー群(外部ツール)
+    hooks = null, // ライフサイクルフック
+    idleClaimWaitSec = 0, // 請求ミス時に新着タスクを待つ秒数(トークン消費ゼロの待ち行)
+    approvals = null, // 実装者≠検証者の強制(#3)用の共有コンテキスト
+    modelPolicy = null, // モデル選択ポリシー(readModelPolicy(config)の結果)
+  }) {
+    this.approvals = approvals;
+    this.modelPolicy = modelPolicy;
+    this.mainWorkspace = mainWorkspace;
+    this.worktreeRoot = worktreeRoot;
+    this.board = board;
+    this.tasks = tasks;
+    this.bus = bus;
+    this.gate = gate;
+    this.ledger = ledger;
+    this.budget = budget;
+    this.hierarchy = hierarchy;
+    this.modelFactory = modelFactory;
+    this.maxTurns = maxTurns;
+    this.contextWindow = contextWindow;
+    this.thresholdPercent = thresholdPercent;
+    this.memoryFn = memoryFn;
+    this.mcpHosts = mcpHosts;
+    this.hooks = hooks;
+    this.idleClaimWaitSec = idleClaimWaitSec;
+    this.live = new Map(); // id => {displayName, depth, parent, status} 活性(走行中)のみ
+    this.exited = new Map(); // #26: 終了済みエントリの退避先(snapshot/UI表示・テストの退場待ちに使う)
+    this.counter = 0;
+  }
+
+  // #26: 活性(走行中)エージェント数。終了済みはliveから除外するため、
+  // 削除漏れがあってもstatus!==workingのものは数えない二重防护。
+  activeCount() {
+    let n = 0;
+    for (const v of this.live.values()) if (v.status === "working") n++;
+    return n;
+  }
+
+  // ツールから呼ばれる。呼び出し元は待たせないので、ループは非同期で走らせる。
+  // boardは呼び出し元のスレッドのボード(v6。省略時は構築時のboard=メイン)。
+  async spawn({ parent, board = null, displayName, role, brief, project = "", expendable = false, model = null }) {
+    const depth = (parent.depth ?? 0) + 1;
+    if (depth > this.hierarchy.maxDepth) {
+      return { error: `深さの上限(${this.hierarchy.maxDepth})に達しています。あなたの配下には作れません。` };
+    }
+    // #26: 判定は活性エージェント数で行う。終了済みがliveに残っていても詰まらせない(二重防护)
+    if (this.activeCount() >= this.hierarchy.maxConcurrent) {
+      return { error: `同時エージェント数の上限(${this.hierarchy.maxConcurrent})に達しています。既存の作業の完了を待ってください。` };
+    }
+    // model指定(#12)はリーダー(depth 0)のみ。子からの指定は既定運用へ戻すため拒否
+    if (model && (parent.depth ?? 0) !== 0) {
+      return { error: "model指定はリーダーのみ可能です(基本は既定モデルを使います)。" };
+    }
+    if (!brief || !brief.trim()) {
+      return { error: "briefが空です。何を/どう確認するかを書いてください。" };
+    }
+    const n = ++this.counter;
+    const id = `${role ?? "worker"}-${n}`;
+    const dn = displayName?.trim() || `${role ?? "worker"}-${n}`;
+    const b = board ?? this.board; // 呼び出し元のスレッドのボード
+    let worktreePath;
+    try {
+      worktreePath = await createWorktree({
+        mainWorkspace: this.mainWorkspace,
+        worktreeRoot: this.worktreeRoot,
+        agentId: id,
+      });
+    } catch (err) {
+      return { error: `worktreeの作成に失敗: ${err.message}` };
+    }
+    const agent = {
+      id, displayName: dn,
+      role: role ?? "impl",
+      depth, parent: parent.id,
+      personaText: WORKER_PERSONA(dn, role ?? "impl"),
+      scenarioName: "chat",
+      expendable: Boolean(expendable), // trueなら請求ミス1回で早期退場(自動増員ワーカー用)
+    };
+    this.live.set(id, { displayName: dn, depth, parent: parent.id, status: "working", model: model ?? null });
+    // ブリーフ=このエージェントの請求済みタスク。finish_taskで完了→main自動マージまで繋がる
+    const projNote = project ? `文脈(project): ${project} — 追加のタスクを請求するときは project: ${project} で絞ること。\n\n` : "";
+    this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, project, model, body: `${projNote}スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
+    this.bus.emit("agent.spawned", { agent: { id, displayName: dn, depth, parent: parent.id, role: agent.role, thread: project || null } });
+    b.post("system", `[スポーン] ${parent.displayName} が作業エージェント ${dn}(${id}) を作成しました。`);
+
+    // 呼び出し元をブロックしない(縦の待ちを作らない)
+    void this.runAgent(agent, worktreePath, brief.trim(), b);
+    return { id, displayName: dn };
+  }
+
+  async runAgent(agent, worktreePath, brief, board = null) {
+    const b = board ?? this.board;
+    // タスクにmodel指定があればそれを優先(#12: リーダーが特例で指定)。無ければ既定どおり
+    const taskModel = readTaskModel(this.tasks, agent.id);
+    const model = this.modelFactory({ ...agent, model: taskModel ?? agent.model });
+    const tools = createTools({
+      agent,
+      workspace: worktreePath,
+      mainWorkspace: this.mainWorkspace,
+      approvals: this.approvals,
+      board: b,
+      tasks: this.tasks,
+      bus: this.bus,
+      gate: this.gate,
+      spawner: this,
+      mcpHosts: this.mcpHosts,
+      hooks: this.hooks,
+      idleClaimWaitSec: this.idleClaimWaitSec,
+      modelPolicy: this.modelPolicy,
+    });
+    const shellKind = await tools.detectShell();
+    const mem = this.memoryFn?.() ?? "";
+    const messages = [
+      { role: "system", content: mem ? `${buildSystemPrompt(agent, shellKind)}\n\n${mem}` : buildSystemPrompt(agent, shellKind) },
+      { role: "user", content: `親(${agent.parent})からのブリーフです。まず gather_context でボード経過と関連素材を読み、必要な前提を集めてから着手してください:\n\n${brief}` },
+    ];
+    const loopOpts = {
+      agent, model, tools,
+      board: b, tasks: this.tasks, bus: this.bus,
+      ledger: this.ledger, budget: this.budget,
+      maxTurns: this.maxTurns, shellKind,
+      contextWindow: this.contextWindow, thresholdPercent: this.thresholdPercent,
+      messages,
+      memory: mem || null, // 圧縮時の権威分離判定に使う
+      claimMissesLimit: agent.expendable ? 1 : 3,
+    };
+    let r = await runAgentLoop(loopOpts);
+    // ターン上限での中断は1回だけ自動継続(同じworktree・同じ記憶で)
+    if (r.endedBy === "turn-limit") {
+      messages.push({ role: "user", content: "[システム] ターン上限で中断しました。請求中のタスクがあれば続きを完了し、finish_task まで進めてください。" });
+      r = await runAgentLoop(loopOpts);
+    }
+    // 継続しても完了できなかった場合、担当者はもう戻ってこないので請求中を解放する
+    if (r.endedBy === "turn-limit" || r.endedBy === "budget" || r.endedBy === "error") {
+      const released = this.tasks.release(
+        agent.id,
+        `[解放] 担当者(${agent.id})が終了したためopenへ戻しました。前走者の未反映作業は worktrees/${agent.id} にある場合があります。`
+      );
+      if (released.length) {
+        b.post("system", `[解放] ${agent.id} 終了により ${released.join(", ")} をopenへ戻しました。誰でも請求できます。`);
+      }
+    }
+    // 自己起票の未完了タスク(spawn-*管理タスク等)を掃除。退場後にopen/claimedへ残してノイズにしない
+    const cleaned = this.tasks.autoResolveCreatedBy?.(agent.id, `[掃除] 起票者(${agent.id})が退場したため自動完了にしました。`) ?? [];
+    if (cleaned.length) {
+      b.post("system", `[掃除] ${agent.id} 退場により自己起票タスク ${cleaned.join(", ")} をdoneへ移動しました。`);
+    }
+    const e = this.live.get(agent.id);
+    // idle(待機終了)とtool-fail-loop(失敗ループ打ち切り)は正常な退場扱い。UIではdoneと表示し、
+    // テストの退場待ちもこれで完了とみなす(ended:* は異常系の見た目を作るので避ける)
+    if (e) e.status = r.ok || r.endedBy === "idle" || r.endedBy === "tool-fail-loop" ? "done" : `ended:${r.endedBy ?? "error"}`;
+    // #26: 終了したエントリをliveから外しexitedへ退避する。
+    // liveに残り続けると同時実行数判定が満杯のままになり、次のspawnが永久に詰まる。
+    if (e) {
+      this.live.delete(agent.id);
+      this.exited.set(agent.id, e);
+    }
+    this.bus.emit("agent.exited", { agent: agent.id, ok: r.ok, endedBy: r.endedBy ?? r.error });
+    await this.cleanupOrKeep(b, agent, worktreePath, r);
+  }
+
+  // 終了後のworktree後始末: 未コミット/未マージがゼロなら掃除、あるなら保持してボードに告知
+  async cleanupOrKeep(board, agent, worktreePath, r) {
+    try {
+      const status = await runCommand({ command: "git status --porcelain", cwd: worktreePath, outputLimit: 2000 });
+      const unmerged = await runCommand({ command: `git log main..agent/${agent.id} --oneline`, cwd: this.mainWorkspace, outputLimit: 2000 });
+      const dirty = status.text.split("\n").slice(1).some((l) => l.trim());
+      const hasCommits = unmerged.text.split("\n").slice(1).some((l) => l.trim());
+      if (dirty || hasCommits) {
+        board.post("system", `[保持] ${agent.displayName}(${agent.id}) のworktreeに未反映の作業があります(worktrees/${agent.id})。引き継ぐ場合はそちらから。`);
+        return;
+      }
+      await runCommand({ command: `git worktree remove --force '${worktreePath}'`, cwd: this.mainWorkspace, outputLimit: 1000 });
+      await runCommand({ command: `git branch -D agent/${agent.id} 2>/dev/null || true`, cwd: this.mainWorkspace, outputLimit: 1000 });
+    } catch (err) {
+      this.bus.emit("scenario.warn", { message: `worktreeの後始末に失敗(${agent.id}): ${err.message}` });
+    }
+  }
+
+  snapshot() {
+    // #26: 表示・テスト用は終了済みも含める(exitedはlive退避後の履歴)。活性の実数はactiveCount()
+    const merged = new Map([...this.exited, ...this.live]);
+    return Object.fromEntries([...merged].map(([id, v]) => [id, v]));
+  }
+}
