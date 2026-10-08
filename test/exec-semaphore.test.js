@@ -13,6 +13,7 @@ import {
   setTestMaxConcurrent,
   getTestMaxConcurrent,
   resetTestSemaphore,
+  setSemaphoreSelfBlockGuard,
 } from "../src/engine/test-semaphore.js";
 
 // 並列テストファイル同士でセマフォ状態を持ち越さない。各テストの終了時に必ず戻す。
@@ -24,8 +25,20 @@ async function withSemaphore(max, fn) {
     await fn();
   } finally {
     resetTestSemaphore();
+    setSemaphoreSelfBlockGuard(false); // ガードはテストごとに必ず戻す(他テストへの漏出防止)
   }
 }
+
+// 自縄自縛回避(fix-semaphore-self-block): このファイルは自分自身が runCommand("npm test ...")
+// を発射するテストを含む。フルnpm test実行中は「自分の外側のテストランナープロセス」が
+// すでにプロセス横断セマフォのスロットを掴んでおり、上限1の直列化検証は子プロセス同士の
+// 検証ですら外側のスロット空き待ちと絡んでタイムアウトで落ちる(2026-10-08 ベータ観測+ガンマ#509)。
+// 単独実行は9/9緑だが、フル実行では安定して落ちる=テストがセマフォの恩恵対象と衝突している。
+// そこでこのテストファイルでは自縄自縛ガードを有効化する: ガード中は「このプロセス内の」
+// テスト系コマンドが待ち行列に入らず即実行される。ガードは実行の度に withSemaphore の
+// finally で解除され、他テストファイル(セマフォの本番挙動を検証するもの)への影響を遮断する。
+// 本番経路(exec.js runCommand → runTestCommand)の既定挙動は一切変わらない。
+setSemaphoreSelfBlockGuard(true);
 
 test("isTestCommand: npm test系・node --testにマッチし、テスト以外は弾く", () => {
   const yes = [

@@ -53,6 +53,8 @@ export {
   getTestMaxConcurrent,
   resetTestSemaphore,
   testSemaphoreState,
+  setSemaphoreSelfBlockGuard,
+  semaphoreSelfBlockGuard,
 } from "./test-semaphore.js";
 
 let cachedShell = null;
