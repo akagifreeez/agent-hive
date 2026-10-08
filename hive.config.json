@@ -88,6 +88,11 @@
   "loop": {
     "maxTurns": 40
   },
+  "exec": {
+    "testMaxConcurrent": 2,
+    "maxBashMs": 60000,
+    "maxBashCapMs": 600000
+  },
   "runner": {
     "timeoutSec": 900
   },
