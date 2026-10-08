@@ -115,7 +115,8 @@ node bin/hive.js feedback <taskId> <コメント>          # マージ済み差�
 ## 開発
 
 ```bash
-npm test             # 全テスト(node --test。ランタイム依存ゼロなので直接実行できる)
+npm test             # 既定スイート(node --test。ランタイム依存ゼロなので直接実行できる。test/heavy/ は除外)
+npm run test:heavy   # 重い統合テストのみ(test/heavy/。実サーバ起動・worktree作成を伴い数分かかる)
 npm run typecheck    # JSDoc契約の静的検査(tsc --checkJs。noEmit)
 npm run desktop:dist # インストーラ+ポータブルexeのビルド
 npm run desktop:smoke # 梱包・起動の疎通確認
