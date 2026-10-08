@@ -96,6 +96,8 @@ function currentTaskContext(tasks, agent, messages) {
  * @property {string|null} [memory] 永続記憶の注入文脈
  * @property {(() => any[])|null} [drainInput] ターン境界で割込ませる入力の取り出し(steering)
  * @property {(() => boolean)|null} [peekInput] 未処理入力が待っているか(idle退場の抑制)
+ * @property {number|null} [sessionLogKeep] session-logの旧世代保持数(config.sessionLog.keep)。null=既定
+ * @property {number|null} [sessionLogMaxBytes] session-logの1ファイル上限(config.sessionLog.maxBytes)。null=既定
  * @property {number} [claimMissesLimit] 連続請求ミス何回でidle終了するか
  * @property {number|null} [sessionLogKeep] session-logの旧世代保持数(config.sessionLog.keep)。null=既定
  * @property {number|null} [sessionLogMaxBytes] session-logの1ファイル上限(config.sessionLog.maxBytes)。null=既定

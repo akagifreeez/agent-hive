@@ -4,12 +4,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { respawnUnfinishedWork } from "../src/engine/respawn.js";
-import { setupWorktrees } from "../src/engine/worktree.js";
-import { ensureGitRepo } from "../src/engine/discover.js";
-import { Board, Bus } from "../src/engine/board.js";
-import { TaskBlackboard } from "../src/engine/tasks.js";
-import { runCommand } from "../src/engine/exec.js";
+import { respawnUnfinishedWork } from "../../src/engine/respawn.js";
+import { setupWorktrees } from "../../src/engine/worktree.js";
+import { ensureGitRepo } from "../../src/engine/discover.js";
+import { Board, Bus } from "../../src/engine/board.js";
+import { TaskBlackboard } from "../../src/engine/tasks.js";
+import { runCommand } from "../../src/engine/exec.js";
 
 function rmTree(p) { try { rmSync(p, { recursive: true, force: true }); } catch { /* Windowsのロックは無視 */ } }
 
