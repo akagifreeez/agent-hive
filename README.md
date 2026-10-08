@@ -100,6 +100,15 @@ npm start              # ブラウザUIのみ(http://localhost:7789)
 - `hive.local.json`: ワークスペース位置などのローカル上書き(git除外対象)
 - ポート: UI=7789 / モニタ=7791。`HIVE_UI_PORT` / `HIVE_MONITOR_PORT` 環境変数で変更
 - ワークスペース: 既定はリポジトリ直下。梱包実行時はuserData配下(`HIVE_DATA`で上書き)
+- 自動再起動ウォッチドッグ(Windows・任意): `scripts/watchdog.mjs` を同梱。UIプロセスが死んだとき、marker(`state/watchdog-on`)が有り且つユーザーがONにしているときだけ `node src/index.js --chat` をデタッチ起動し、`state/watchdog.log` へ記録。切替は `node scripts/watchdog.mjs --once|--loop` は判定/常駐モードで、marker作成/削除は `enableWatchdog()`/`disableWatchdog()`(または state/watchdog-on ファイルの作削除)で行う。常駐代替: `node scripts/watchdog.mjs --loop`(60秒間隔)。Windowsタスクスケジューラ登録(ユーザーレベル・管理者権限不要。実登録はシステム設定変更のため自動では行わない):
+
+  ```bat
+  rem 登録
+  schtasks /create /tn "agent-hive-watchdog" /tr "node C:\path\to\agent-hive\scripts\watchdog.mjs --once" /sc minute /mo 1 /f
+  rem 解除
+  schtasks /delete /tn "agent-hive-watchdog" /f
+  ```
+
 
 ### CLI(稼働中のhiveを端末から操作・依存ゼロ)
 
