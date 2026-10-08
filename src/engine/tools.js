@@ -266,7 +266,6 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           required: ["on"],
           additionalProperties: false,
         },
-      },
     },
     {
       name: "use_skill",
