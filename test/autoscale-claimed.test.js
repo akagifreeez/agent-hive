@@ -93,6 +93,8 @@ test("autoscale: 請求中(稼働中)タスクがあるスレッドはdesired縮
       host.roundState.get(claimer)?.running === true,
       "tick時点でもclaimerは稼働中(ラウンド実行中)"
     );
+    console.log("[debug] pre-tick claimed files =", readdirSync(join(ws, "tasks", "claimed")).join(","));
+    console.log("[debug] pre-tick running(claimer) =", host.roundState.get(claimer)?.running);
     await ctl.autoscaleTick();
     const aliveAfter = ctl.aliveWorkersFor("scgtest");
     assert.ok(aliveAfter, "autoscaleTick後のaliveWorkersを観測できる");
