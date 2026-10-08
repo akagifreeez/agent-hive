@@ -7,7 +7,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   runCommand,
-  runCommandInner,
 } from "../src/engine/exec.js";
 import {
   isTestCommand,
@@ -207,7 +206,6 @@ test("セマフォ(ガード解除): 待ちタイムアウトで失敗しても�
       for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
         await new Promise((r) => setTimeout(r, 10));
       }
-<<<<<<< HEAD
       // runCommand()は待ち上限にセマフォ既定(10分)を使う契約のため(queueTimeoutMs:null固定)、
       // 待ちタイムアウトの誘発はrunTestCommand()直呼びで行う(本番経路のセマフォ実体は共用)。
       const waiter = await runTestCommand(
@@ -215,12 +213,6 @@ test("セマフォ(ガード解除): 待ちタイムアウトで失敗しても�
         (o) => runCommand(o),
       );
       assert.equal(waiter.ok, false, `待ちタイムアウトで失敗するはず: ${waiter.text.slice(0, 120)}`);
-=======
-      // 待ちタイムアウト(300ms)の誘発は runTestCommand 直叩きで行う。runCommand経由は
-      // 待ち上限がセマフォ既定(10分)固定のため(2026-10-08 9d35dc4の契約)。
-      const waiter = await runTestCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000, queueTimeoutMs: 300 }, runCommandInner);
-      assert.equal(waiter.ok, false, "待ちタイムアウトで失敗するはず");
->>>>>>> main
       assert.match(waiter.text, /同時実行制限で待機タイムアウト/);
       await hold;
       const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 });
