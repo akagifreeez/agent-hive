@@ -266,3 +266,31 @@ test("config側routing有効+local未設定なら有効のまま。/api/models �
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test("実効状態の同期: POST直後のGET・/api/modelsが同じ値を返す(スイッチ表示が戻らない)", async () => {
+  const ws = mktmp();
+  const dataDir = mktmp();
+  const prev = process.env.HIVE_DATA;
+  process.env.HIVE_DATA = dataDir;
+  try {
+    // configは未設定(undefined)→ 初期実効状態はOFF(回帰)。POST true→GET true、POST false→GET false
+    const config = mkConfig(ws, undefined);
+    const ui = await startUiTokenized(startUi, { config, bus: new Bus(), autoStart: false });
+    const base = "http://127.0.0.1:" + config.ui.port;
+    const get = async () => (await (await fetch(base + "/api/routing")).json()).enabled;
+    const modelsEnabled = async () => (await (await fetch(base + "/api/models")).json()).model.routing.enabled;
+    assert.equal(await get(), false, "初期値はOFF(config未設定)");
+    await (await fetch(base + "/api/routing", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) })).json();
+    assert.equal(await get(), true, "POST直後のGETはtrue(同期)");
+    assert.equal(await modelsEnabled(), true, "/api/modelsも同期(UIがsyncRoutingSwitchで再取得しても表示が戻らない)");
+    await (await fetch(base + "/api/routing", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false }) })).json();
+    assert.equal(await get(), false, "OFFへの再POSTも同期");
+    assert.equal(await modelsEnabled(), false, "/api/modelsもOFFへ同期");
+    ui.close();
+  } finally {
+    if (prev === undefined) delete process.env.HIVE_DATA;
+    else process.env.HIVE_DATA = prev;
+    rmSync(ws, { recursive: true, force: true });
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
