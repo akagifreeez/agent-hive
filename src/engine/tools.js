@@ -256,16 +256,16 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
     },
     ...mcpSpecs, // MCPサーバーが提供する外部ツール(mcp__<サーバー>__<ツール>)
     {
-        name: "watchdog_toggle",
-        description: "自動再起動ウォッチドッグのON/OFFを切替する。ONにするとhiveプロセスが死んだとき外部ウォッチドッグ(1分間隔)が自動で再起動する(state/watchdog-on marker)。",
-        parameters: {
-          type: "object",
-          properties: {
-            on: { type: "boolean", description: "trueでON、falseでOFF" },
-          },
-          required: ["on"],
-          additionalProperties: false,
+      name: "watchdog_toggle",
+      description: "自動再起動ウォッチドッグのON/OFFを切替する。ONにするとhiveプロセスが死んだとき外部ウォッチドッグ(1分間隔)が自動で再起動する(state/watchdog-on marker)。",
+      parameters: {
+        type: "object",
+        properties: {
+          on: { type: "boolean", description: "trueでON、falseでOFF" },
         },
+        required: ["on"],
+        additionalProperties: false,
+      },
     },
     {
       name: "use_skill",
