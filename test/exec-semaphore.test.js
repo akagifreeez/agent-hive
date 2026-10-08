@@ -82,6 +82,8 @@ test("isTestCommand: npm test系・node --testにマッチし、テスト以外�
 
 test("セマフォ: 上限1でnpm test系2本の並列実行は直列化される(2本目は1本目完了まで待つ)", async () => {
   await withSemaphore(1, async () => {
+    setSemaphoreSelfBlockGuard(false); // 実セマフォで直列化を見る(ガードonだと素通しでrunningが立たない)
+    try {
     // 1本目は slow fixture(1.5秒・env明示で子のテスト実行コンテキストを断ち切る)で確実に
     // スロットを握らせる(emptyだと60ms以内に完了し、2本目発射前に走り終えて競合することがある)。
     const p1 = runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, env: { NODE_TEST_CONTEXT: undefined } });
@@ -98,6 +100,7 @@ test("セマフォ: 上限1でnpm test系2本の並列実行は直列化され�
     await p1;
     await p2;
     assert.equal(p2Done, true, "1本目の完了後に2本目が走っていない");
+    } finally { setSemaphoreSelfBlockGuard(true); }
   });
 });
 
