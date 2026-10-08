@@ -76,13 +76,14 @@ function drain() {
 /** セマフォを通してコマンドを実行する(runCommandと同契約)。
  * 上限超過時はFIFOで待ち、queueTimeoutMs(既定10分)を超えたら教師文面つきで失敗返し。
  * selfBlockGuardがonのプロセスでは待ち行列に入らず即実行する(テストの自縄自縛回避)。
- * @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number, queueTimeoutMs?: number, label?: string}} o
+ *   forceQueue: テスト専用。trueならselfBlockGuard中でもセマフォ待ち行列に入る(待ち挙動の単体検証用)。
+ * @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number, queueTimeoutMs?: number, label?: string, forceQueue?: boolean}} o
  * @param {(o: any) => Promise<{ok: boolean, text: string}>} run 実行本体(=runCommand)。DI可能
  * @returns {Promise<{ok: boolean, text: string}>} */
 export async function runTestCommand(o, run) {
   // テストの自縄自縛回避(上記selfBlockGuard参照): ガード中は素通し。
   // スロットを加算しないので外側のフル実行(自分の親プロセス)の状態を汚さない。
-  if (selfBlockGuard) {
+  if (selfBlockGuard && !o.forceQueue) {
     return run(o);
   }
   // 待ちタイムアウトは「待ち時間」で判定する(テスト本体のtimeoutMsは実行時間の予算)。

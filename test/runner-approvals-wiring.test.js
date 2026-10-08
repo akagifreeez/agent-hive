@@ -86,6 +86,7 @@ test("runner: requireSeparateApprove=trueのとき、実装者の保留中変更
 
     // openThread直後のkickoffラウンド(alpha/beta/gamma)が完走するのを待つ
     // (ラウンド実行中のpending投入は、進行中ラウンドのroundEndマージ判定に間に合わないため)
+    const threadHost2 = ctl.threadHost("apprwiring"); // 2つ目の観測点(使用位置より前で宣言)
     await waitUntil(() => ["apprwiring-alpha", "apprwiring-beta", "apprwiring-gamma"]
       .every((id) => { const st = threadHost.roundState.get(id); return st && !st.running; }), 60000);
 
