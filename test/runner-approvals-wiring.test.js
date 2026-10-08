@@ -84,6 +84,11 @@ test("runner: requireSeparateApprove=trueのとき、実装者の保留中変更
     writeFileSync(join(wtPath, "held.txt"), "検証待ちの変更\n");
     await commitIn(wtPath, "held");
 
+    // openThread直後のkickoffラウンド(alpha/beta/gamma)が完走するのを待つ
+    // (ラウンド実行中のpending投入は、進行中ラウンドのroundEndマージ判定に間に合わないため)
+    await waitUntil(() => ["apprwiring-alpha", "apprwiring-beta", "apprwiring-gamma"]
+      .every((id) => { const st = threadHost2.roundState.get(id); return st && !st.running; }), 60000);
+
     // alphaにタスクを割当て、finish_taskで保留(検証タスク起票)を作る — 実フローどおり
     // (runner経由なのでtoolsは本番配線。タスクはファイルボードに直接起票する)
     // 注: 本番のclaim/finishはモデルのツール呼出だが、ここでは保留作成を確定させるため
@@ -108,8 +113,10 @@ test("runner: requireSeparateApprove=trueのとき、実装者の保留中変更
     const threadHost = ctl.threadHost("apprwiring");
     assert.ok(threadHost, "スレッドのChatHostを取得できる(観測点)");
     ctl.say("[テスト] 保留中ラウンド", "apprwiring");
+    // (テスト内の2つ目の観測点用エイリアス)
+    const threadHost2 = threadHost;
     assert.ok(await waitUntil(() => {
-      const st = threadHost.roundState.get("alpha");
+      const st = threadHost.roundState.get("apprwiring-alpha"); // runner経由のメインidは<thread>-<worker>
       return st && !st.running;
     }, 60000), "alphaのラウンドが完走");
     assert.equal(existsSync(join(ws, "held.txt")), false, "保留中はmainへマージされない");
