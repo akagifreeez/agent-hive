@@ -128,6 +128,17 @@ export async function runAgentLoop({
   let autocompactFailures = 0;
   let lastPromptTokens = 0;
   let runTokens = 0; // このラン(ループ実行)自体の消費。予算判定はラン単位(セッション累積だと常駐chatが使い切りで brick する)
+  // このラン(ラウンド)自体のusage集計。ラウンド終了時にusage.roundへdeltaとして乗せ、
+  // aggregateUsageの二重計上(issue-33)を防ぐ。合算はledger.addと同じ加算方式。
+  const runUsage = { calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+  const noteUsage = (u) => {
+    if (!u) return;
+    runUsage.calls += 1;
+    runUsage.promptTokens += u.promptTokens ?? 0;
+    runUsage.completionTokens += u.completionTokens ?? 0;
+    runUsage.reasoningTokens += u.reasoningTokens ?? 0;
+    runUsage.costUsd += u.costUsd ?? 0;
+  };
   let lastToolSig = null; // 暴走検知: 直前のツール呼び出しシグネチャ
   let repeatStreak = 0;
   let toolFailStreak = 0; // 連続で失敗したツール呼び出しの回数(打ち切り判定用)
@@ -156,7 +167,7 @@ export async function runAgentLoop({
       board.post(agent.id, `[予算停止] このランのトークン予算(${budget.maxTokensPerRun})に達したため終了します。`);
       releaseClaims("予算停止");
       bus.emit("agent.status", { agent: agent.id, status: "budget-stop" });
-      return { ok: false, endedBy: "budget", seenBoard: seen };
+      return { ok: false, endedBy: "budget", seenBoard: seen, usage: { ...runUsage } };
     }
 
     // ボード新着の注入(既読位置以降だけ。seenはホストが保持して二重配信を防ぐ)
@@ -223,11 +234,12 @@ export async function runAgentLoop({
       releaseClaims("モデルエラー");
       bus.emit("agent.status", { agent: agent.id, status: "error" });
       bus.emit("agent.error", { agent: agent.id, turn, error: err.message });
-      return { ok: false, endedBy: "error", error: err.message, seenBoard: seen };
+      return { ok: false, endedBy: "error", error: err.message, seenBoard: seen, usage: { ...runUsage } };
     }
     const chatMs = Date.now() - chatStartedAt;
     if (ledger) {
       ledger.add(agent.id, res.usage, { ms: chatMs });
+      noteUsage(res.usage);
       bus.emit("usage", { agent: agent.id, usage: res.usage });
     }
     runTokens += (res.usage?.promptTokens ?? 0) + (res.usage?.completionTokens ?? 0);
@@ -317,7 +329,7 @@ export async function runAgentLoop({
           releaseClaims("ツール失敗の連続");
           board.post(agent.id, `[停止] ツール呼び出しが${toolFailStreak}回連続で失敗したため終了します。同じ入力では同じ結果になります。`);
           bus.emit("agent.status", { agent: agent.id, status: "tool-fail-loop" });
-          return { ok: false, endedBy: "tool-fail-loop", error: `ツール失敗が${toolFailStreak}回連続`, seenBoard: seen };
+          return { ok: false, endedBy: "tool-fail-loop", error: `ツール失敗が${toolFailStreak}回連続`, seenBoard: seen, usage: { ...runUsage } };
         }
         // idle強制終了: 連続3回の請求失敗はプロンプトでなくエンジンが数える
         if (tc.name === "claim_next_task") {
@@ -350,7 +362,7 @@ export async function runAgentLoop({
         releaseClaims("idle待機終了");
         board.post(agent.id, `[待機終了] 請求できるタスクが${claimMissesLimit}回連続で無かったため終了します。`);
         bus.emit("agent.status", { agent: agent.id, status: "done" });
-        return { ok: true, endedBy: "idle", seenBoard: seen };
+        return { ok: true, endedBy: "idle", seenBoard: seen, usage: { ...runUsage } };
       }
       toolTurnsSinceCompact += 1;
       continue;
@@ -371,6 +383,7 @@ export async function runAgentLoop({
         compactReq = buildCompactRequest(messages, { taskContext: currentTaskContext(tasks, agent, messages), hasMemory: Boolean(memory) });
         const summary = await model.chat({ messages: compactReq });
         if (ledger) ledger.add(agent.id, summary.usage, { ms: Date.now() - acStartedAt });
+        noteUsage(summary.usage);
         runTokens += (summary.usage?.promptTokens ?? 0) + (summary.usage?.completionTokens ?? 0);
         const text = (summary.content ?? "").trim();
         if (!text) throw new Error("要約が空でした");
@@ -398,7 +411,7 @@ export async function runAgentLoop({
           releaseClaims("コンテキスト圧縮が追いつかない");
           board.post(agent.id, `[停止] 圧縮してもコンテキストが肥大し続けるため終了します。作業状態は保持されています。`);
           bus.emit("agent.status", { agent: agent.id, status: "compact-loop" });
-          return { ok: false, endedBy: "compact-rapid-refill", seenBoard: seen };
+          return { ok: false, endedBy: "compact-rapid-refill", seenBoard: seen, usage: { ...runUsage } };
         }
       } catch (err) {
         autocompactFailures += 1;
@@ -419,7 +432,7 @@ export async function runAgentLoop({
       emptyStreak += 1;
       if (emptyStreak > 3) {
         bus.emit("agent.status", { agent: agent.id, status: "empty-loop" });
-        return { ok: false, error: "空応答が連続しました", seenBoard: seen };
+        return { ok: false, error: "空応答が連続しました", seenBoard: seen, usage: { ...runUsage } };
       }
       messages.push({ role: "user", content: "[システム] 応答が空でした。次に行うべき行動をツール呼び出しで実行してください。" });
       continue;
@@ -433,9 +446,9 @@ export async function runAgentLoop({
     }
     board.post(agent.id, finalText);
     bus.emit("agent.status", { agent: agent.id, status: "done" });
-    return { ok: true, finalText, seenBoard: seen };
+    return { ok: true, finalText, seenBoard: seen, usage: { ...runUsage } };
   }
 
   bus.emit("agent.status", { agent: agent.id, status: "turn-limit" });
-  return { ok: false, endedBy: "turn-limit", error: `ターン上限(${maxTurns})に達しました`, seenBoard: seen };
+  return { ok: false, endedBy: "turn-limit", error: `ターン上限(${maxTurns})に達しました`, seenBoard: seen, usage: { ...runUsage } };
 }
