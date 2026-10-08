@@ -127,11 +127,16 @@ test("セマフォ: 上限超過の待ちがタイムアウトを過ぎると教
     // forceWaitなら待ち行列への参加だけをこの呼び出しで行い、ガードプロセス内で完結する
     // (スロット独占は下のblockerが同じプロセス内で行うため、外側に一切依存しない)。
     setSemaphoreSelfBlockGuard(true); // 念のため明示(withSemaphoreの既定と同じ)
-    // 1本目を軽量フィクスチャで握り(guard on中だがセマフォ経路は通る)、
-    // 2本目を forceWait + 短い待ちタイムアウトで失敗させる。
+    // 1本目を軽量フィクスチャで握り(forceWaitで実スロットを掴ませる)、
+    // 2本目を forceWait + 短い待ちタイムアウトで失敗させる。ブロック側もforceWaitで
+    // 実セマフォスロットを確保しないと、ガードon中の素通し実行はスロットを加算しないため
+    // waiterが「空き」扱いになり待ちが誘発されない(プロセス内で完結させる両輪)。
     // runCommand()は待ち上限にセマフォ既定(10分)を使う契約のため(queueTimeoutMs:null固定)、
     // 待ちタイムアウトの誘発はrunTestCommand()直呼びで行う(本番経路のセマフォ実体は共用)。
-    const blocker = runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000 });
+    const blocker = runTestCommand(
+      { command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, forceWait: true },
+      (o) => runCommand(o),
+    );
     for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
       await new Promise((r) => setTimeout(r, 10));
     }
@@ -200,11 +205,15 @@ test("セマフォ(ガード解除): 待ちタイムアウトで失敗しても�
   // 旧来のガード解除方式はフル実行中に外側セマフォの待ち行列が詰まっており、300msの待ちが
   // 自分の順番に遠く及んでタイムアウトしていた。forceWaitなら待ちの誘発をプロセス内で完結できる。
   await withSemaphore(1, async () => {
-    setSemaphoreSelfBlockGuard(true); // 念のため明示(ガードon中でもblockerは素通りしつつ実行される)
+    setSemaphoreSelfBlockGuard(true); // 念のため明示
     // slow(1.5秒)を握らせた直後だと、環境によっては runCommandInner の起動が遅れて
     // 2本目の到着時点でまだ空き扱い(走り出す)ことがある。確実に保持させるため
     // slow がスロットを掴むのを十分待つ(空き状況はテスト用APIで確認)。
-    const hold = runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000 });
+    // hold側もforceWaitで実スロットを掴ませる(素通しだとスロット加算が無く待ちが誘発されない)。
+    const hold = runTestCommand(
+      { command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, forceWait: true },
+      (o) => runCommand(o),
+    );
     for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
       await new Promise((r) => setTimeout(r, 10));
     }
