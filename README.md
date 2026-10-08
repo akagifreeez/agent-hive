@@ -112,6 +112,27 @@ node bin/hive.js pause <スレッド> / resume <スレッド>   # トークン�
 node bin/hive.js feedback <taskId> <コメント>          # マージ済み差分への修正依頼
 ```
 
+### 自動再起動ウォッチドッグ(Windows・任意)
+
+hiveプロセスが死んだときに自動で再起動する監視スクリプト(`scripts/watchdog.mjs`)を同梱しています。
+再起動は**ユーザーがONにしているときだけ**動きます(marker: `state/watchdog-on`。UIからは `watchdog_toggle` ツール、CLIからは `node scripts/watchdog.mjs on|off|status` で切替)。
+
+Windowsタスクスケジューラへの**ユーザーレベル登録**手順(管理者権限不要):
+
+```bat
+rem 登録
+schtasks /create /tn "agent-hive-watchdog" /tr "node C:\path\to\agent-hive\scripts\watchdog.mjs" /sc minute /mo 1 /f
+rem 解除
+schtasks /delete /tn "agent-hive-watchdog" /f
+```
+
+- 疎通先はUIポート(`HIVE_UI_PORT`環境変数、既定7789)の `/api/state`。稼働中なら何もしない
+- ダウン + marker有り のときだけ `node src/index.js --chat` をデタッチ起動し、`state/watchdog.log` へ1行JSONで記録
+- タスクスケジューラが使えない環境は `node scripts/watchdog.mjs --loop`(常駐・60秒間隔)で代替可
+- 実登録はシステム設定変更に当たるため**自動では行いません**。上記コマンドをユーザー自身が実行してください
+
+
+
 ## 開発
 
 ```bash
