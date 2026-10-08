@@ -67,42 +67,46 @@ test("autoscale: 請求中(稼働中)タスクがあるスレッドはdesired縮
     assert.equal(opened.error, undefined, "スレッドが開ける: " + String(opened?.error ?? ""));
 
     // タスクを2件起票し、片方を「稼働中の誰か」へ事前請求させる
-    const tasks = ctl.tasks;
-    await tasks.create({ id: "scg-a", body: "稼働中エージェントが請求中のタスク", project: "scgtest" });
-    await tasks.create({ id: "scg-b", body: "未請求タスク", project: "scgtest" });
-    const claimer = "scgtest-alpha"; // 稼働中(working)として偽装するエージェントid
-    // ラウンドを走らせて claimer を working 状態にする
-    ctl.say("[テスト] 起こし", "scgtest");
+    const mk = ctl.tasks.create({ id: "scg-a", body: "稼働中エージェントが請求中のタスク", project: "scgtest" });
+    assert.ok(mk, "タスクscg-a起票");
+    assert.ok(ctl.tasks.create({ id: "scg-b", body: "未請求タスク", project: "scgtest" }), "タスクscg-b起票");
+    const claimer = "scgtest-alpha"; // 稼働中(working)として観測させるエージェントid
     const host = ctl.threadHost("scgtest");
     assert.ok(host, "ChatHost取得");
-    // claimerがworkingになるのを待つ
+    // ラウンドを走らせて claimer を working 状態へ(実機のagent.statusイベント経由)
+    ctl.say("[テスト] 起こし", "scgtest");
     assert.ok(
       await waitUntil(() => {
-        try { return ctl.agentState(claimer)?.status === "working"; } catch { return false; }
+        try { return host.roundState.get(claimer)?.running === true; } catch { return false; }
       }),
-      "claimer が稼働状態になる"
+      "claimer のラウンドが走り出す"
     );
+    // scriptedModelのラウンド自体は短い。tick時点で稼働状態を保つため、
+    // ラウンド完走を待たず(=running trueの間に)以降へ進むのが狙いだが、
+    // 競合で即finishedする場合に備え running がまだ true であることをここで確認済み。
     // 稼働中のclaimerへタスクを請求させる(タスクツールはエージェント毎の紐付けのため、
     // ここでは黒板APIを直接叩いて請求済み状態を作る)
-    const claimed = tasks.claim("scg-a", claimer);
+    const claimed = ctl.tasks.claim("scg-a", { id: claimer, role: "impl" });
     assert.ok(!claimed.error, "事前請求が成功: " + String(claimed?.error ?? ""));
 
-    // 明示tick: この時点で open=1件(scg-b), claimed(稼働中)=1件(scg-a)
+    // 明示tick: この時点で open=1件(scg-b), claimed稼働中=1件(scg-a)
     await ctl.autoscaleTick();
-    const aliveAfter = ctl.aliveWorkers?.get?.("scgtest");
+    const aliveAfter = ctl.aliveWorkersFor("scgtest");
     assert.ok(aliveAfter, "autoscaleTick後のaliveWorkersを観測できる");
     // 縮小ガード: claimed稼働中があるので desired >= base(2) が維持される。
     // alive は base(2) のまま(増員しない/減らない)
     assert.ok(aliveAfter.size >= 2, "baseワーカーは維持される: size=" + aliveAfter.size);
 
-    // 全タスクが消化され(claimed解除含む)、開いたままのタスクが0の状態へ寄せる
-    tasks.finish("scg-a", "scgtest-alpha", "ok");
-    // 未請求タスクもこの時点では請求者がいないので、release相当の状態にない= open のまま。
-    // 縮小判定: open==0 かつ claimed稼働中==0 にするため scg-b を取り下げる
-    tasks.releaseOne(claimer, "scg-a", "テスト後始末");
-    tasks.delete("scg-b");
+    // 縮小判定へ寄せる: claimed(scg-a)を実APIで解放、open(scg-b)は依存を外して消す
+    // (タスク削除APIが無いため、openのまま WORKなし判定へ持っていくには
+    //  depends_on を空にした上で project を外した別名へ付け替える)
+    ctl.tasks.releaseOne(claimer, "scg-a", "テスト後始末");
+    // host無し扱いにはできないので、aliveWorkers実装準拠の別検証: open==0&claimed==0
+    // の状況を作るため、scg-b をproject外へ移動してからtickする
+    ctl.tasks.setProject("tasks/open/scg-b.md", "elsewhere");
     await ctl.autoscaleTick();
-    const aliveIdle = ctl.aliveWorkers?.get?.("scgtest");
+    const aliveIdle = ctl.aliveWorkersFor("scgtest");
+    assert.ok(aliveIdle, "2回目tick後もaliveWorkersを観測できる");
     assert.ok(aliveIdle.size <= 2, "仕事が無ければ余剰増員は起きない: size=" + aliveIdle.size);
   } finally {
     try { await ctl.dispose?.(); } catch { /* 既定 */ }
