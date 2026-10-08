@@ -68,7 +68,7 @@ test("McpHost: 不存在コマンド(ENOENT)でもuncaughtExceptionで落ちずo
   // 失敗がbusへ通知されていること(既存の失敗経路と同じ返却形の流儀)
   assert.ok(failures.some((p) => p.name === "enoent"), "busへmcp.failedが通知されること");
   // 切断状態として管理され、後続のrequest()はタイムアウトでなく即reject
-  await assert.rejects(host.request("tools/call", {}), /起動に失敗・切断済み/);
+  await assert.rejects(host.request("tools/call", {}), /接続できません/);
   host.stop(); // 切断後もstop()が例外を投げないこと
 });
 
