@@ -52,6 +52,7 @@
     ],
     "maxTurnsPerRound": 20,
     "autoContinueRounds": 6,
+    "autoResume": { "enabled": true, "delaySec": 120, "maxConsecutive": 3 },
     "requireSeparateApprove": true,
     "idleClaimWaitSec": 45,
     "autoscale": true,

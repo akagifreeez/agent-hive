@@ -26,7 +26,7 @@ import { hasOAuthEntry } from "./model/openai-auth.js";
 // re-exportで既存の参照(index.js等)の互換を維持する。
 export { createModelFactory };
 import { SpawnManager } from "./engine/spawn.js";
-import { ChatHost } from "./engine/chat.js";
+import { ChatHost, normalizeAutoResume } from "./engine/chat.js";
 import { buildMemoryContext, ensurePcRules } from "./engine/memory.js";
 import { buildSkillsIndex } from "./engine/skills.js";
 import { McpHost, mcpServersInfo } from "./engine/mcp.js";
@@ -266,6 +266,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       staggerMs: 0, // ユーザー入力時の全ワーカー同時起こしを遅延なく(2番目以降にstagger秒の純遅延が乗るバグのため0固定)
       project: name,
       autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
+      autoResume: normalizeAutoResume(config.chat?.autoResume),
       hooks,
       approvals, // ラウンド末マージの保留判定(イシュー#22)
     });
@@ -451,6 +452,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     staggerMs: config.chat?.staggerMs ?? 3000,
     project: null, // リーダーは請求しないので自動継続は実質発火しない
     autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
+      autoResume: normalizeAutoResume(config.chat?.autoResume),
     hooks,
     approvals, // ラウンド末マージの保留判定(イシュー#22)
   });
