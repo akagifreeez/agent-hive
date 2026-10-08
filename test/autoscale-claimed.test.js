@@ -84,8 +84,9 @@ test("autoscale: 請求中(稼働中)タスクがあるスレッドはdesired縮
       "claimer のラウンドが走り出す(起票wake経由)"
     );
     // 稼働中のclaimerへタスクを事前請求させる(黒板APIを直接叩いて請求済み状態を作る)
-    const claimed = ctl.tasks.claim("scg-a", { id: claimer, role: "impl" });
+    const claimed = ctl.tasks.claim({ id: claimer, role: "impl" }, { project: "scgtest" });
     assert.ok(claimed && !claimed.error, "事前請求が成功: " + String(claimed?.error ?? ""));
+    console.log("[debug] claimed files after claim =", readdirSync(join(ws, "tasks", "claimed")).join(","));
 
     // 明示tick: この時点で open=1件(scg-b), claimed稼働中=1件(scg-a)
     // 注: claim後もラウンドが回り続けている間にtickする(直後にrunning確認)
