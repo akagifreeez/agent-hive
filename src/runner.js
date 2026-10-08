@@ -347,6 +347,10 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     }
   };
   const autoscaleTimer = config.chat?.autoscale === false ? null : setInterval(() => { void autoscale(); }, (config.chat?.autoscaleIntervalSec ?? 30) * 1000);
+  // テスト/デバッグ用の明示tick(autoscaleをintervalの到達を待たず1回実行)
+  const autoscaleTick = () => autoscale();
+  // テスト/デバッグ用: スレッドごとの生きたワーカーid集合の観測点
+  const aliveWorkersFor = (threadName) => aliveWorkers.get(String(threadName)) ?? null;
   if (autoscaleTimer?.unref) autoscaleTimer.unref();
 
   // 前回実行で開いていたスレッドを無音で復元(ボード・メモリ・タブが復帰する)
@@ -647,6 +651,9 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       });
       return { ok: true, thread: name, participants: participants.map((p) => p.ref), notes };
     },
+    autoscaleTick,
+    aliveWorkersFor,
+    tasks,
     manager,
     mcpHosts,
     bus,
