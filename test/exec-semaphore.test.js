@@ -133,8 +133,11 @@ test("セマフォ: 上限超過の待ちがタイムアウトを過ぎると教
     // waiterが「空き」扱いになり待ちが誘発されない(プロセス内で完結させる両輪)。
     // runCommand()は待ち上限にセマフォ既定(10分)を使う契約のため(queueTimeoutMs:null固定)、
     // 待ちタイムアウトの誘発はrunTestCommand()直呼びで行う(本番経路のセマフォ実体は共用)。
+    // env NODE_TEST_CONTEXT上書きは必須: 全体実行時、このテスト自身が child-v8 コンテキストで
+    // 動くため、継承されたslowフィクスチャのnode --testは即帰りし1.5秒消費しない
+    // (blockerが即落ち→waiter素通り→タイムアウト誘発が壊れる。2026-10-08 診断で確定)。
     const blocker = runTestCommand(
-      { command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, forceWait: true },
+      { command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, forceWait: true, env: { NODE_TEST_CONTEXT: undefined } },
       (o) => runCommand(o),
     );
     let spins = 0;
