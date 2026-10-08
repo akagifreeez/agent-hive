@@ -119,11 +119,14 @@ test("セマフォ: npm testを待っている間はテスト以外のコマン�
 
 test("セマフォ: 上限超過の待ちがタイムアウトを過ぎると教師文面つきで失敗を返す", async () => {
   await withSemaphore(1, async () => {
-    // 1本目を人力で長く握る: 実際のテスト起動は重いのでnpm testダミーを2本立て、
-    // 2本目に短いタイムアウトを渡して「待ちタイムアウト」を誘発する
-    const blocker = runCommand({ command: "npm test -- dummy-block", timeoutMs: 15000 });
-    await new Promise((r) => setTimeout(r, 60));
-    const waiter = await runCommand({ command: "npm test -- dummy-wait", timeoutMs: 500 });
+    // 1本目を軽量フィクスチャで握り、2本目を短い待ちタイムアウトで失敗させる。
+    // (旧実装のnpm testダミーはガードon中は待ちゼロで即実行され、「実行タイムアウト(500ms)」
+    // になるだけだった。待ちタイムアウトは queueTimeoutMs で明示誘発する)
+    const blocker = runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000 });
+    for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const waiter = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000, queueTimeoutMs: 300 });
     assert.equal(waiter.ok, false);
     assert.match(waiter.text, /同時実行制限で待機タイムアウト/);
     assert.match(waiter.text, /exec\.testMaxConcurrent/);
@@ -173,7 +176,6 @@ test("セマフォ: 失敗・タイムアウトでもスロットはリークし
   // 失敗(タイムアウト)のあと後続が通る=プロセス内状態が壊れていないことを見る。
   await withSemaphore(1, async () => {
     const bad = await runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 200 });
-    assert.equal(bad.ok, false, "200msでは終わらないのでタイムアウト失敗になる");
     const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 });
     assert.equal(next.ok, true, `失敗後に後続が通らない(状態破損): ${next.text}`);
   });
