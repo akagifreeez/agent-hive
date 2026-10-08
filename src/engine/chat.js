@@ -25,6 +25,7 @@ export class ChatHost {
     chatConfig = null, // 直接渡すchat設定(memMaxMessages等)。config.chatより優先 // HiveConfig(会話メモリの上限設定chat.memMax*を読む)
     project = null, // スレッドスコープ(自動継続の「まだ仕事があるか」判定に使う)
     autoContinueRounds = 3, // ターン上限でも仕事が残っていれば自動で次ラウンドへ(0=従来どおり停止)
+    autoResume = null, // 停止後の自動再開({enabled,delaySec,maxConsecutive})。「続けて」待ちの無駄時間を解消する
     hooks = null, // Hooksインスタンス(roundEndフック)
     approvals = null, // 承認フロー状態(runner.jsの共有オブジェクト)。ラウンド末マージの保留判定に使う(イシュー#22)
     landingSignal = null, // テスト起点: () => 着地(タスクdone/マージ/コミット)を報せる。ラウンド中に真を返したら着地あり
@@ -48,9 +49,15 @@ export class ChatHost {
     this.chatConfig = chatConfig;
     this.project = project;
     this.autoContinueRounds = autoContinueRounds;
+    this.autoResume = normalizeAutoResume(autoResume); // 停止後の自動再開設定(無効時は従来どおり停止)
+    this.sessionLogCfg = config?.sessionLog ?? null; // session-logの世代数/上限(config.sessionLog)
+    this.autoResumes = new Map(); // id => 連続自動再開回数(着地で回復・外部起点のwakeでリセット)
+    this._autoResumeTimers = new Set(); // 待機中の再開タイマー(disposeで解除)
     this.hooks = hooks;
     this.worktreePaths = null; // runChatが後から設定できる(ラウンド終了マージ用)
     this.paused = false; // 一時停止中は新しい起床を潰す(実行中ラウンドはターン境界で自然終了)
+    this.disposed = false; // dispose後は閉鎖スレッド。新しい起床・sayを一切起こさない(イシュー#29)
+    this.unsubs = []; // bus購読の解除関数(disposeで全解除)
     const effChat = this.chatConfig ?? this.config?.chat ?? null; // chatConfig(直接)/config.chat の両対応
     this.memPrune = { // 会話メモリの刈り取り設定(イシュー#20)。0/nullで無効化可
       maxMessages: effChat?.memMaxMessages ?? 200,
@@ -63,25 +70,43 @@ export class ChatHost {
     this.landingSignal = landingSignal; // null可(未指定時はイベント購読のみ)
     this.landedThisRound = new Map(); // id => 直前ラウンドに着地(タスクdone/マージ完了)があったか(進捗ゲート用)
     this.approvals = approvals; // 承認フロー(null可=無効。ラウンド末マージの保留判定)
+    this._subscriptions = []; // 購読解除ハンドラ(unsubscribe()で解除。イシュー#29)
     for (const m of mains) {
       this.seen.set(m.id, board.lastId());
       this.landedThisRound.set(m.id, false); // 着地フラグの初期値(進捗ゲート)
     }
     // ボード上の@表示名でメインを起こす(横つながりの入口)
-    bus.on("board", (p) => this.handleBoardPost(p));
+    this._subscriptions.push(bus.on("board", (p) => this.handleBoardPost(p)));
     // 新タスクの投入で自分のスレッド(と、共通の自動仕事)のメンバーを起こす。
     // これがないと全員退出後の発見器起票タスクが誰にも消化されない。
-    bus.on("task.created", (p) => this.handleTaskCreated(p));
+    this._subscriptions.push(bus.on("task.created", (p) => this.handleTaskCreated(p)));
     // 進捗ゲート(自動継続の着地検出): タスク完了とラウンド末mainマージを着地として記録する。
     // landedThisRoundはwake()でリセットし、ラウンド中の実績だけを次判定に使う。
-    bus.on("task.finished", (p) => this.noteLanding(p.agent));
+    this._subscriptions.push(bus.on("task.finished", (p) => this.noteLanding(p.agent)));
     // テスト起点: ChatHost外(ユニットテスト等)から着地を直接報せる入口(進捗ゲートの観測点)。
-    bus.on("agent.merged", (p) => this.noteLanding(p.agent));
+    this._subscriptions.push(bus.on("agent.merged", (p) => this.noteLanding(p.agent)));
     // create_task(新しい仕事の発生)も着地として扱う: 「次にやることが生まれた」のは進捗。
     // これが無いと「探索ラウンドで新タスクを起票→次ラウンドで着手」の正当な循環が止まる。
-    bus.on("task.created", (p) => this.noteLanding(null));
+    this._subscriptions.push(bus.on("task.created", (p) => this.noteLanding(null)));
     // 解放(退場した担当者のタスクがopenへ戻る)でも同様に起こす。
-    bus.on("task.released", (p) => this.handleTaskReleased(p));
+    this._subscriptions.push(bus.on("task.released", (p) => this.handleTaskReleased(p)));
+  }
+
+  // 購読解除: 閉じたスレッドのHostがboard/taskイベントで再び動かないようにする(イシュー#29)。
+  // runner.jsのcloseThreadから呼ばれる。二重呼び出しは安全(no-op)。
+  // dispose: unsubscribeの別名(イシュー#29のテスト・runner.js双方から呼ばれる名称)。二重呼び出し安全。
+  dispose() { this.unsubscribe(); }
+
+  unsubscribe() {
+    if (this._unsubscribed) return;
+    this._unsubscribed = true;
+    this.disposed = true; // dispose()別名経路でも閉鎖フラグを立てる(say/wakeの二重防御)
+    for (const t of this._autoResumeTimers ?? []) clearTimeout(t);
+    this._autoResumeTimers?.clear();
+    for (const off of this._subscriptions ?? []) {
+      try { off?.(); } catch { /* 解除失敗は無視(既に外れている) */ }
+    }
+    this._subscriptions = [];
   }
 
   // 新タスク投入時の起床: 自分のprojectのタスク、または全スレッド共通の自動仕事(fix/review/distill)のみ
@@ -206,6 +231,7 @@ export class ChatHost {
   // イシュー#21: ボード側はslice(0,6000)打ち切り+seen進行を持ち、巨大worker投稿の影で
   // 質問本文は実行中ならsteering([入力])で、未実行ならkickoffへ載せて届ける(二重配信しない)。
   say(text) {
+    if (this.disposed) return { ok: false, error: `スレッド ${this.board.name} は閉じられています` }; // 閉鎖後の入力は無効(イシュー#29)
     // 破損入力(U+FFFD等)の検知(イシュー#20 提案3): 化けた入力をそのまま渡すと
     // リーダーが断片から主題を推測して答えてしまうため、注入文へ明示的に警告を載せる。
     const broken = detectBrokenInput(text)
@@ -266,7 +292,8 @@ export class ChatHost {
     return { ok: true, name: this.board.name, paused: this.paused };
   }
 
-  wake(main, kickoffText, delayMs = 0) {
+  wake(main, kickoffText, delayMs = 0, opts = {}) {
+    if (this.disposed) return; // 閉鎖済みスレッドの再循環を遮断(イシュー#29)
     if (this.paused) return; // 停止中の起床は握り潰す(再開後に改めて起こされる)
     const st = this.roundState.get(main.id) ?? { running: false, pending: [] };
     this.roundState.set(main.id, st);
@@ -277,6 +304,7 @@ export class ChatHost {
     st.running = true;
     st.lastKickoff = kickoffText; // 直近ラウンドの注入文(観測・テスト用)
     this.autoRounds.set(main.id, 0); // ユーザー/ボード起点のラウンドでは連続回数をリセット
+    if (!opts?.auto) this.autoResumes.set(main.id, 0); // 外部起点のwakeは自動再開の連続回数も回復させる
     this.landedThisRound.set(main.id, false); // ラウンド開始で着地フラグをリセット(ラウンド中の実績だけを見る)
     const run = async () => {
       if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
@@ -303,6 +331,8 @@ export class ChatHost {
             shellKind: this.shellKind,
             contextWindow: this.contextWindow,
             thresholdPercent: this.thresholdPercent,
+            sessionLogKeep: this.sessionLogCfg?.keep ?? null,
+            sessionLogMaxBytes: this.sessionLogCfg?.maxBytes ?? null,
           messages,
           seenBoard: this.seen.get(main.id) ?? null,
           memory: this.memoryFn?.() ?? null, // 圧縮時の権威分離判定に使う
@@ -335,7 +365,9 @@ export class ChatHost {
         // ラウンドごとの消費を運用データとして記録(state/usage.json)
         if (this.ledger) {
           try {
-            this.bus.emit("usage.round", { agent: main.id, thread: this.project ?? "__main__", endedBy: r?.endedBy ?? "ok", totals: this.ledger.agent(main.id) });
+                        // totalsは台帳エントリのスナップショット(UsageLedger.agentはライブ参照を返すため、
+            // そのまま乗せると後続ラウンドの更新で過去イベントのtotalsまで変異する)。
+            this.bus.emit("usage.round", { agent: main.id, thread: this.project ?? "__main__", endedBy: r?.endedBy ?? "ok", totals: { ...this.ledger.agent(main.id) }, delta: r?.usage ?? null });
           } catch {}
         }
           // メインが自ら直接作業した場合の受け皿: ラウンド終了時にmainへ自動マージ
@@ -387,6 +419,7 @@ export class ChatHost {
             const reason = landed ? "ハード上限" : "着地ゼロ(進捗なし)";
             this.board.post(main.id, `[自動継続停止(${reason})] ${this.autoContinueRounds}ラウンド進めて一旦停止します。続きがあれば「続けて」と送ってください。`);
             this.bus.emit("round.stalled", { agent: main.id, reason, rounds: this.autoContinueRounds }); // 通知経路(停止系)
+            this.scheduleAutoResume(main, landed); // 仕事が残る停止は自動再開で無駄時間を埋める(設定無効時は従来どおり)
           } else {
             // 仕事が無い場合もここで静止(着地ゼロと同じ経路。通知は出さない=元仕様)。
             this.autoRounds.set(main.id, 0);
@@ -416,15 +449,47 @@ export class ChatHost {
     }
   }
 
-  // 自動継続を続けるべきか: 請求中タスクが残る/自分のスレッド(project)に未着手タスクがある
+  // 自動継続を続けるべきか: 請求中タスクが残る/自分のスレッド(project)に「誰かが請求できる」未着手タスクがある。
+  // role一致も見る(検証役不在で宙吊りのrole:reviewタスクを実装役の仕事と数えない)。ただし
+  // リーダー(role:lead)はロール不問=検証役のスポーン自体が仕事なので全openを数える。
   hasWork(main) {
     try {
       if (this.tasks.claimedBy(main.id).length > 0) return true;
-      if (this.project) {
-        if (this.tasks.list().open.some((t) => (t.project || "") === this.project)) return true;
-      }
+      const roles = new Set(this.mains.map((m) => m.role).filter(Boolean));
+      const coord = this.mains.some((m) => m.role === "lead");
+      const open = this.tasks.list().open ?? [];
+      return open.some((t) => {
+        if (this.project && (t.project || "") !== this.project) return false;
+        if (!t.role) return true;
+        return coord || roles.has(t.role);
+      });
     } catch {}
     return false;
+  }
+
+  // 停止後の自動再開(無駄時間の解消): 「続けて」待ちで誰も動かない時間を埋める。
+  // 連続回数は着地(進捗)で回復・外部起点のwakeでも回復するため、進み続ける限り止まらない。
+  // 上限に達したら本当に停止し通知する(暴走はautoResume.maxConsecutiveで抑える)。
+  scheduleAutoResume(main, landed) {
+    const ar = this.autoResume;
+    if (!ar?.enabled) return;
+    if (landed) this.autoResumes.set(main.id, 0); // 進捗があった停止は予算を回復
+    const count = (this.autoResumes.get(main.id) ?? 0) + 1;
+    if (count > ar.maxConsecutive) {
+      this.autoResumes.set(main.id, 0);
+      this.board.post(main.id, `[自動再開停止] 自動再開${ar.maxConsecutive}回でも仕事が消化できませんでした。「続けて」で再開してください。`);
+      this.bus.emit("round.stalled", { agent: main.id, reason: "自動再開上限", rounds: ar.maxConsecutive });
+      return;
+    }
+    this.autoResumes.set(main.id, count);
+    const t = setTimeout(() => {
+      this._autoResumeTimers.delete(t);
+      if (this.disposed || this.paused) return; // 閉鎖・一時停止時は再開しない
+      if (!this.hasWork(main)) return; // 待機中に仕事が無くなったら何もしない
+      this.wake(main, `[システム] 自動再開(${count}/${ar.maxConsecutive})。未着手・請求中のタスクが残っているため作業を続けてください。`, 0, { auto: true });
+    }, ar.delaySec * 1000);
+    t.unref?.(); // タイマーでプロセスを保持しない(終了妨害の防止)
+    this._autoResumeTimers.add(t);
   }
 }
 
@@ -474,6 +539,20 @@ export function trimMemories(messages, opts = {}) {
 // U+FFFD(置換文字)を含むか。エンコード壊れの決定打。
 export function containsReplacementChar(text) {
   return typeof text === "string" && text.includes(String.fromCharCode(0xfffd));
+}
+
+// 自動再開設定の正規化(config.chat.autoResume)。既定は無効(従来どおり「続けて」待ち)。
+export function normalizeAutoResume(cfg) {
+  if (!cfg || typeof cfg !== "object") return { enabled: false, delaySec: 120, maxConsecutive: 3 };
+  const n = (v, d, lo, hi) => {
+    const x = Number(v);
+    return Number.isFinite(x) ? Math.min(hi, Math.max(lo, Math.floor(x))) : d;
+  };
+  return {
+    enabled: cfg.enabled === true,
+    delaySec: n(cfg.delaySec, 120, 0, 3600),
+    maxConsecutive: n(cfg.maxConsecutive, 3, 1, 10),
+  };
 }
 
 // UTF-8→cp932二重エンコードの兆候(置換文字なしでも化け型を拾う)。

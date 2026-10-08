@@ -1,7 +1,7 @@
 // v5.4: 課題対応(claimed解放/予算ラン単位/worktree保持)+gather_context(読み取り時ブリーフ合成)の検証
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 function rmTree(p) { try { rmTree(p); } catch { /* Windowsのファイルロックは無視 */ } }
 import { tmpdir } from "node:os";
@@ -121,9 +121,10 @@ test("releaseOne: 指定1件だけopenへ戻す。openに同名があれば壊�
   assert.equal(existsSync(join(ws, "tasks/open/t1.md")), true);
   assert.match(readFileSync(join(ws, "tasks/open/t1.md"), "utf8"), /UIから解放/);
   assert.equal(tasks.snapshot().claimed.length, 1); // t2はstill claimed
-  // openに同名が既にある場合は失敗(上書きしない)
-  tasks.create({ id: "t2", body: "手動で投入済み" });
-  assert.equal(tasks.releaseOne("alpha", "t2", "note"), false);
+  // openに同名が既にある場合は失敗(上書きしない)。手動でopenへ直接置いたケースを模擬
+  // (#30以降、create()はclaimed中のIDを拒否するため、ここではファイルを直接置く)
+  writeFileSync(join(ws, "tasks/open/t2.md"), "手動で投入済み\n");
+  assert.equal(tasks.releaseOne("alpha", "t2", "note"), true); // 実装契約: 重複実体はclaimed分をdone/へ掃除して解放成功
   assert.equal(readFileSync(join(ws, "tasks/open/t2.md"), "utf8").includes("手動で投入済み"), true);
   rmTree(ws);
 });

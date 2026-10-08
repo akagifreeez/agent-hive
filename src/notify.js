@@ -7,7 +7,7 @@
 import { stderr } from "node:process";
 
 /** 通知1件の形(bus由来の項目 + 種別/時刻)。/api/monitorのnotificationsとconsole出力で共用。
- * @typedef {{kind: "permission.request"|"merge.completed"|"task.finished.long"|"round.stall"|"tool.fail.stall"|"budget.stop"|"idle.stall", at: string, title: string, body: string, id?: number, taskId?: string, agent?: string}} NotifyItem
+ * @typedef {{kind: "permission.request"|"merge.completed"|"task.finished.long"|"round.stall"|"tool.fail.stall"|"budget.stop"|"idle.stall"|"crash.guarded"|"crash.rate", at: string, title: string, body: string, id?: number, taskId?: string, agent?: string}} NotifyItem
  */
 
 const ANSI = { yellow: "\x1b[33m", bold: "\x1b[1m", reset: "\x1b[0m" };

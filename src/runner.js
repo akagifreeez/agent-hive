@@ -10,7 +10,9 @@ import { createTools } from "./engine/tools.js";
 import { runAgentLoop } from "./engine/loop.js";
 import { PermissionGate } from "./engine/permissions.js";
 import { startDiscovery, ensureGitRepo } from "./engine/discover.js";
+import { applyTestSemaphoreConfig } from "./engine/exec.js";
 import { setupWorktrees } from "./engine/worktree.js";
+import { ensureMainCheckout } from "./engine/branch-guard.js";
 import { respawnUnfinishedWork } from "./engine/respawn.js";
 import { runCommand } from "./engine/exec.js";
 import { UsageLedger } from "./engine/usage.js";
@@ -24,7 +26,7 @@ import { hasOAuthEntry } from "./model/openai-auth.js";
 // re-exportで既存の参照(index.js等)の互換を維持する。
 export { createModelFactory };
 import { SpawnManager } from "./engine/spawn.js";
-import { ChatHost } from "./engine/chat.js";
+import { ChatHost, normalizeAutoResume } from "./engine/chat.js";
 import { buildMemoryContext, ensurePcRules } from "./engine/memory.js";
 import { buildSkillsIndex } from "./engine/skills.js";
 import { McpHost, mcpServersInfo } from "./engine/mcp.js";
@@ -54,9 +56,35 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   }
   await ensureGitRepo(config.workspace);
 
+  // 漂流チェック(runChat): チャット起動時も同様にmainワークスペースのチェックアウトを検査。
+  // 漂流+中断マージの残骸はゾンビ回収・ラウンド開始より先に片付ける(判定不能時は何もしない)。
+  try {
+    const gc = await ensureMainCheckout({ mainWorkspace: config.workspace });
+    if (gc.branch && gc.branch !== "main") {
+      const driftMsg = gc.ok
+        ? "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされていました。mainへ復帰しました。"
+        : "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされており、自動復帰できませんでした: " + (gc.reason ?? "");
+      mainBoard.post("system", driftMsg);
+      bus.emit("scenario.warn", { message: driftMsg });
+    }
+  } catch (err) {
+    bus.emit("scenario.warn", { message: "起動時ブランチチェックに失敗(起動は続行): " + (err instanceof Error ? err.message : err) });
+  }
+
   // 起動時のゾンビclaim回収: プロセス再起動で走行中ラウンドは全て死んでいるため、claimedのまま
   // 残ったタスクは誰にも進められない(idle-claim待ちのデッドロック)。起動直後なので全claimedは
   // ゾンビと見なして解放する(task.releasedが出るが、この時点でラウンドは無いので無害)
+  // プロセスガードのboard可視化(long-run-resilience): index.jsのwireCrashGuardが
+  // "crash.guarded"を出すので、ここでメインボードへ[システム]投稿する(黙殺防止)。
+  // 頻度警告(process.burst相当)も同じく可視化。
+  bus.on("crash.guarded", (e) => {
+    if (e.kind === "rate.warn") return; // 頻度警告は別メッセージで流す
+    try { mainBoard.post("system", `[プロセス警告] ${e.kind} を捕捉(プロセスは生存しています): ${String(e.message).slice(0, 300)}`); } catch { /* 投稿失敗でガードを止めない */ }
+  });
+  bus.on("crash.rate", (e) => {
+    try { mainBoard.post("system", `[プロセス警告][異常頻度] ガード対象エラーがしきい値を超えました。ログ run-chat.err.log を確認してください(${String(e.body ?? "").slice(0, 150)})`); } catch { /* 同上 */ }
+  });
+
   const zombies = tasks.list().claimed;
   for (const t of zombies) {
     tasks.release(t.agent, "[起動時回収] プロセス再起動により走行中ラウンドが消滅したため解放しました");
@@ -88,10 +116,12 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     return parts.length ? parts.join("\n\n") : null;
   };
 
+  applyTestSemaphoreConfig(config.exec);
   const discovery = startDiscovery({
     workspace: config.workspace, tasks, bus,
     intervalSec: config.discovery?.intervalSec ?? 30,
     testCommand: config.discovery?.testCommand,
+    probes: config.discovery?.probes,
   });
   bus.on("merge.completed", () => void discovery.tick());
 
@@ -233,10 +263,12 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       contextWindow: config.model.contextWindow ?? 200000,
       thresholdPercent: config.compact?.thresholdPercent,
       memoryFn,
-      staggerMs: config.chat?.staggerMs ?? 3000,
+      staggerMs: 0, // ユーザー入力時の全ワーカー同時起こしを遅延なく(2番目以降にstagger秒の純遅延が乗るバグのため0固定)
       project: name,
       autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
+      autoResume: normalizeAutoResume(config.chat?.autoResume),
       hooks,
+      approvals, // ラウンド末マージの保留判定(イシュー#22)
     });
     host.worktreePaths = wtPaths;
     threads.set(name, { name, goal, folder: folderName, host, board: threadBoard });
@@ -259,6 +291,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     for (const m of p.agents) { threadOfAgent.set(m.id, p.name); set.add(m.id); agentStatus.set(m.id, "idle"); }
     aliveWorkers.set(p.name, set);
   });
+  // thread.openedの同tick登録順問題: listener登録はemitより後でも動くよう、
+  // openThread内のemit(276行目)はここで受ける。ただしrunChat内のthreads.setが
+  // emitより先なので、復元(silent)で開かれたスレッドも同様に拾う。
   bus.on("agent.spawned", (p) => {
     agentStatus.set(p.agent.id, "working");
     const th = threadOfAgent.get(p.agent.parent);
@@ -279,11 +314,18 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     const globalCap = config.hierarchy?.maxConcurrent ?? 6;
     const list = tasks.list();
     // 再起動などで担当者が停止したままの請求を解放(作業が凍結するのを防ぐ)
+    // ChatHostラウンド実行中の担当者は稼働中とみなす(agent.status workingの発火が
+    // ラウンド開始より遅れる競合があり、直後tickで請求を誤解放するため)
+    const runningNow = new Set();
+    for (const [, th2] of threads) {
+      for (const m of th2.host?.mains ?? []) {
+        if (th2.host?.roundState?.get(m.id)?.running) runningNow.add(m.id);
+      }
+    }
     for (const t of list.claimed) {
       if (!t.agent) continue;
-      if (agentStatus.get(t.agent) !== "working") {
-        tasks.releaseOne(t.agent, t.id, "[自動解放] 担当者が稼働していないため再請求可能にしました。");
-      }
+      if (agentStatus.get(t.agent) === "working" || runningNow.has(t.agent)) continue;
+      tasks.releaseOne(t.agent, t.id, "[自動解放] 担当者が稼働していないため再請求可能にしました。");
     }
     const open = list.open;
     for (const [name, alive] of aliveWorkers) {
@@ -291,7 +333,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       // host無しスレッド(ディスカッション等・タスク請求なし)は増員対象外
       if (!th || !th.host || th.host.paused) continue; // 停止中スレッドは増員しない
       const nOpen = open.filter((t) => (t.project || "") === name).length;
-      const desired = nOpen === 0 ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil(nOpen / 2));
+      const nClaimedMine = list.claimed.filter((t) => (t.project || "") === name && agentStatus.get(t.agent) === "working").length;
+      // 請求中(稼働中)の仕事があるスレッドは縮小しない(open==0でも作業進行中ならbase維持)
+      const desired = nOpen === 0 && nClaimedMine === 0 ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil((nOpen + nClaimedMine) / 2));
       if (alive.size >= desired || manager.live.size >= globalCap) continue;
       const member = th.host?.mains?.[0];
       if (!member) continue;
@@ -313,6 +357,10 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     }
   };
   const autoscaleTimer = config.chat?.autoscale === false ? null : setInterval(() => { void autoscale(); }, (config.chat?.autoscaleIntervalSec ?? 30) * 1000);
+  // テスト/デバッグ用の明示tick(autoscaleをintervalの到達を待たず1回実行)
+  const autoscaleTick = () => autoscale();
+  // テスト/デバッグ用: スレッドごとの生きたワーカーid集合の観測点
+  const aliveWorkersFor = (threadName) => aliveWorkers.get(String(threadName)) ?? null;
   if (autoscaleTimer?.unref) autoscaleTimer.unref();
 
   // 前回実行で開いていたスレッドを無音で復元(ボード・メモリ・タブが復帰する)
@@ -331,7 +379,11 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     const t = threads.get(name);
     if (!t) return { error: `スレッド ${name} は開いていません` };
     threads.delete(name);
+    // 閉じたスレッドのホストを破棄(bus購読解除+起床遮断)。これが無いと
+    // 閉鎖後も task.created/task.released でワーカーが起こされ続ける(イシュー#29)。
+    try { t.host?.dispose?.(); } catch (e) { console.error("[closeThread] dispose失敗", e); }
     writeRegistry();
+    if (typeof t.host?.unsubscribe === "function") t.host.unsubscribe(); // 閉じたスレッドのHostはイベントで再起床しない(イシュー#29)
     bus.emit("thread.closed", { name });
     t.board.post("system", `[スレッド終了] ${name} を閉じました。成果物とログは保持されています(再open時は履歴ごと戻ります)。`);
     return { ok: true };
@@ -416,7 +468,9 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     staggerMs: config.chat?.staggerMs ?? 3000,
     project: null, // リーダーは請求しないので自動継続は実質発火しない
     autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
+      autoResume: normalizeAutoResume(config.chat?.autoResume),
     hooks,
+    approvals, // ラウンド末マージの保留判定(イシュー#22)
   });
   leadHost.worktreePaths = leadWt;
   bus.emit("thread.opened", { name: "__main__", goal: "メインチャット(壁打ちと計画)", agents: [{ id: lead.id, displayName: lead.displayName }] });
@@ -435,6 +489,10 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
   return {
 
     mcpList: () => mcpServersInfo(mcpHosts),
+    // デバッグ/テスト用: 承認フロー保留 Map(ラウンド末マージ保留判定が本番配線で生きていることの観測点)
+    approvalsPending: approvals.pending,
+    // デバッグ/テスト用: スレッド名ごとのChatHost(ラウンド状態の観測点。replyHost等の内部参照用)
+    threadHost: (name) => (name === "__main__" ? leadHost : threads.get(name)?.host ?? null),
     /** @param {{name?: string, command?: string, args?: string[], env?: Object.<string,string>}} o */
     mcpAdd: async ({ name, command, args, env } = {}) => {
       const id = String(name ?? "").trim();
@@ -464,6 +522,8 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       return { ok: true };
     },
     say: (text, thread = null) => {
+      // 引数順は(text, thread)。旧実装は h.say(text) に2引数をそのまま流し、
+      // threadがChatHost.sayの第2引数(delayMs滑落は無いがwake遅延の温床)へ混入していたため正規化。
       const t = thread ? threads.get(thread) : null;
       if (t) return t.host ? t.host.say(text) : { ok: false, error: `スレッド ${thread} はワーカーを持たないためsayできません` };
       return leadHost.say(text);
@@ -518,7 +578,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
         say: (text, thread) => {
           const h = thread ? threads.get(thread)?.host : leadHost;
           if (!h) return { ok: false, error: `スレッド ${thread} はワーカーを持たない(host無し)ため、sayできません` };
-          return h.say(text, thread);
+          return h.say(text); // ChatHost.sayの契約は(text)。thread解決は上で済んでいる
         },
         tasks,
         bus,
@@ -549,6 +609,13 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     setThreadFolder,
     setThreadPaused,
     listThreads: () => [...threads.keys()],
+    // プロセス警告の投稿先解決(long-run-resilience): スレッド名→そのスレッドのBoard。
+    // __main__はメインボード。開いていないスレッドはnull
+    boardOf: (threadName) => {
+      const name = String(threadName ?? "").trim();
+      if (name === mainBoard.name) return mainBoard;
+      return threads.get(name)?.board ?? null;
+    },
     runDiscussion: (req) => {
       // モデル横断ディスカッション: 接続済みプロバイダの代表モデル同士を1つのボードで議論させる。
       // host無しのBoard単体スレッド(タスク請求なし)なので、発言分のトークンだけで完結する
@@ -594,6 +661,9 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
       });
       return { ok: true, thread: name, participants: participants.map((p) => p.ref), notes };
     },
+    autoscaleTick,
+    aliveWorkersFor,
+    tasks,
     manager,
     mcpHosts,
     bus,
@@ -651,8 +721,31 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
     writeFileSync(p, f.content);
   }
   await ensureGitRepo(config.workspace);
+
+  // 起動時ブランチ漂流チェック(self-improve-lab-lessons): mainワークスペースのチェックアウトが
+  // agent/<id>等へ漂流していたら安全にmainへ復帰し、逸脱をボードへ警告(2026-10-07朝の本番実害)。
+  // 判定不能(git不在等)は起動を止めない(既存契約)。
+  try {
+    const gc = await ensureMainCheckout({ mainWorkspace: config.workspace });
+    if (gc.branch && gc.branch !== "main") {
+      const driftMsg = gc.ok
+        ? "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされていました。mainへ復帰しました。"
+        : "[ブランチ漂流] mainワークスペースが " + gc.branch + " にチェックアウトされており、自動復帰できませんでした: " + (gc.reason ?? "");
+      board.post("system", driftMsg);
+      bus.emit("scenario.warn", { message: driftMsg });
+    }
+  } catch (err) {
+    bus.emit("scenario.warn", { message: "起動時ブランチチェックに失敗(起動は続行): " + (err instanceof Error ? err.message : err) });
+  }
   tasks.seed(config.scenario.tasks);
   bus.emit("scenario.started", { name: config.scenario.name, tasks: config.scenario.tasks.map((t) => t.id) });
+
+  // 起動時のゾンビclaim回収(runScenario): チャット(runChat)と同じく、プロセス再起動で
+  // claimedのまま宙吊りになったタスクを解放する(2026-10-07 hive-lab-dash実害: alpha/delta
+  // 二重宙吊りでidle-claim待ちデッドロック)。seedより先に回収し、再投入と干渉しない。
+  for (const z of tasks.list().claimed) {
+    tasks.releaseOne(z.agent, z.id, "[起動時回収] 前回走行のラウンド消滅により解放しました(宙吊りclaim回収)");
+  }
 
   // v3: エージェント別worktree(作業の隔離)
   const worktreeRoot = resolve(ROOT, config.worktrees?.dir ?? "worktrees");
@@ -667,12 +760,14 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
   });
   bus.emit("worktrees.ready", { paths: Object.values(worktreePaths) });
 
+  applyTestSemaphoreConfig(config.exec);
   const discovery = startDiscovery({
     workspace: config.workspace,
     tasks,
     bus,
     intervalSec: config.discovery?.intervalSec ?? 30,
     testCommand: config.discovery?.testCommand,
+    probes: config.discovery?.probes,
   });
   // マージでmainが動くたびに即時プローブ(レビュータスクの立ち遅れ防止)
   bus.on("merge.completed", () => void discovery.tick());
@@ -697,6 +792,8 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       tasks,
       bus,
       gate,
+      // scenario実行でもモデル選択ポリシーを有効化(承認フロー競合の検証差し戻し経路で参照される)
+      modelPolicy: readModelPolicy(config),
       // scenario実行ではスレッド機構が無いので自分のボードのみ解決(他スレッド宛はok:false)
       resolveBoard: (name) => (String(name ?? "").trim() === board.name ? board : null),
     });
@@ -708,6 +805,8 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       maxTurns: config.loop.maxTurns, shellKind,
       contextWindow: config.model.contextWindow ?? 200000,
       thresholdPercent: config.compact?.thresholdPercent,
+      sessionLogKeep: config.sessionLog?.keep ?? null,
+      sessionLogMaxBytes: config.sessionLog?.maxBytes ?? null,
       memory: [buildMemoryContext(config.workspace), buildSkillsIndex(config.workspace)].filter(Boolean).join("\n\n") || null,
     });
   })());

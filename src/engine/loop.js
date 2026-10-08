@@ -14,6 +14,7 @@ import {
 } from "./compact.js";
 import { createSessionLog } from "./session-log.js";
 import { MODEL_SELECTION_POLICY } from "./model-policy.js";
+import { TEST_EXECUTION_RULES } from "./exec.js";
 
 const COMMON_RULES = `
 ## あなたの働き方(全エージェント共通)
@@ -31,7 +32,7 @@ const COMMON_RULES = `
 - 自分より前の経過が必要なときは gather_context でボードの全経過・完了タスクを読める。セッションをまたいだ決め事はシステムプロンプトの永続記憶(memory/)にある。
 - wait_for_board で起床したら、期待する報告(完了報告など)が揃っているか確認し、揃うまで再度待ってよい。
 - bashで拒否されたコマンドは、理由を読んで安全な別手段に切り替えること(再試行しない)。
-` + MODEL_SELECTION_POLICY;
+` + MODEL_SELECTION_POLICY + TEST_EXECUTION_RULES;
 
 // 暴走検知(ZCode runtime/helpers/model-anomaly.ts の移植): 同一ツール+同一引数の
 // 連続呼び出しを検知してリマインダを注入する。回数での打ち切りより先に効く保険。
@@ -112,6 +113,8 @@ export async function runAgentLoop({
   peekInput = null, // () => 未処理入力が待っているか(取り出さず覗くだけ)。idle退場の抑制に使う
   claimMissesLimit = 3, // 連続請求ミス何回でidle終了するか(追加ワーカーは1で早期退場)
   checkpointFn = null, // (messages) => void ツール実行済み地点でスナップショットを保存する(イシュー#4)
+  sessionLogKeep = null, // session-logの旧世代保持数(config.sessionLog.keep)。null=既定(3)
+  sessionLogMaxBytes = null, // session-logの1ファイル上限(config.sessionLog.maxBytes)。null=既定(64MB)
 }) {
   if (!messages) {
     const sys = buildSystemPrompt(agent, shellKind);
@@ -127,6 +130,17 @@ export async function runAgentLoop({
   let autocompactFailures = 0;
   let lastPromptTokens = 0;
   let runTokens = 0; // このラン(ループ実行)自体の消費。予算判定はラン単位(セッション累積だと常駐chatが使い切りで brick する)
+  // このラン(ラウンド)自体のusage集計。ラウンド終了時にusage.roundへdeltaとして乗せ、
+  // aggregateUsageの二重計上(issue-33)を防ぐ。合算はledger.addと同じ加算方式。
+  const runUsage = { calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0 };
+  const noteUsage = (u) => {
+    if (!u) return;
+    runUsage.calls += 1;
+    runUsage.promptTokens += u.promptTokens ?? 0;
+    runUsage.completionTokens += u.completionTokens ?? 0;
+    runUsage.reasoningTokens += u.reasoningTokens ?? 0;
+    runUsage.costUsd += u.costUsd ?? 0;
+  };
   let lastToolSig = null; // 暴走検知: 直前のツール呼び出しシグネチャ
   let repeatStreak = 0;
   let toolFailStreak = 0; // 連続で失敗したツール呼び出しの回数(打ち切り判定用)
@@ -137,6 +151,8 @@ export async function runAgentLoop({
   // board persistPathの親配下へ書き、persistPathが無い(単体テスト等)場合はno-op。
   const sessionLog = createSessionLog({
     dir: board.persistPath ? join(dirname(board.persistPath), "session-log") : null,
+    ...(sessionLogKeep != null ? { keep: sessionLogKeep } : {}),
+    ...(sessionLogMaxBytes != null ? { maxBytes: sessionLogMaxBytes } : {}),
   });
   bus.emit("agent.status", { agent: agent.id, status: "working" });
 
@@ -155,7 +171,7 @@ export async function runAgentLoop({
       board.post(agent.id, `[予算停止] このランのトークン予算(${budget.maxTokensPerRun})に達したため終了します。`);
       releaseClaims("予算停止");
       bus.emit("agent.status", { agent: agent.id, status: "budget-stop" });
-      return { ok: false, endedBy: "budget", seenBoard: seen };
+      return { ok: false, endedBy: "budget", seenBoard: seen, usage: { ...runUsage } };
     }
 
     // ボード新着の注入(既読位置以降だけ。seenはホストが保持して二重配信を防ぐ)
@@ -222,11 +238,12 @@ export async function runAgentLoop({
       releaseClaims("モデルエラー");
       bus.emit("agent.status", { agent: agent.id, status: "error" });
       bus.emit("agent.error", { agent: agent.id, turn, error: err.message });
-      return { ok: false, endedBy: "error", error: err.message, seenBoard: seen };
+      return { ok: false, endedBy: "error", error: err.message, seenBoard: seen, usage: { ...runUsage } };
     }
     const chatMs = Date.now() - chatStartedAt;
     if (ledger) {
       ledger.add(agent.id, res.usage, { ms: chatMs });
+      noteUsage(res.usage);
       bus.emit("usage", { agent: agent.id, usage: res.usage });
     }
     runTokens += (res.usage?.promptTokens ?? 0) + (res.usage?.completionTokens ?? 0);
@@ -250,6 +267,8 @@ export async function runAgentLoop({
         cached: res.usage?.cachedTokens ?? null,
         ms: chatMs,
         tokPerSec: chatMs > 0 ? (res.usage?.completionTokens ?? 0) / (chatMs / 1000) : null,
+        // モデルルーティングの判定根拠(RouterModel有効時のみセットされる)。無効時は省略(ログ肥大化防止)
+        ...(res.router ? { router: res.router } : {}),
         ctxChars, msgCount: messages.length,
       }) + "\n");
       // UIのリアルタイム表示用(イシュー#17): トレースと同じ値をbusへ流す。
@@ -264,6 +283,8 @@ export async function runAgentLoop({
       response: {
         content: res.content ?? null, reasoning: res.reasoning ?? null,
         toolCalls: res.toolCalls ?? [], usage: res.usage ?? null, searches: res.searches ?? null,
+        // モデルルーティングの判定根拠(選択+"flash"|"5.3"+理由1語)。RouterModel無効時は省略
+        ...(res.router ? { router: res.router } : {}),
       },
       ms: chatMs,
     });
@@ -312,7 +333,7 @@ export async function runAgentLoop({
           releaseClaims("ツール失敗の連続");
           board.post(agent.id, `[停止] ツール呼び出しが${toolFailStreak}回連続で失敗したため終了します。同じ入力では同じ結果になります。`);
           bus.emit("agent.status", { agent: agent.id, status: "tool-fail-loop" });
-          return { ok: false, endedBy: "tool-fail-loop", error: `ツール失敗が${toolFailStreak}回連続`, seenBoard: seen };
+          return { ok: false, endedBy: "tool-fail-loop", error: `ツール失敗が${toolFailStreak}回連続`, seenBoard: seen, usage: { ...runUsage } };
         }
         // idle強制終了: 連続3回の請求失敗はプロンプトでなくエンジンが数える
         if (tc.name === "claim_next_task") {
@@ -345,7 +366,7 @@ export async function runAgentLoop({
         releaseClaims("idle待機終了");
         board.post(agent.id, `[待機終了] 請求できるタスクが${claimMissesLimit}回連続で無かったため終了します。`);
         bus.emit("agent.status", { agent: agent.id, status: "done" });
-        return { ok: true, endedBy: "idle", seenBoard: seen };
+        return { ok: true, endedBy: "idle", seenBoard: seen, usage: { ...runUsage } };
       }
       toolTurnsSinceCompact += 1;
       continue;
@@ -366,6 +387,7 @@ export async function runAgentLoop({
         compactReq = buildCompactRequest(messages, { taskContext: currentTaskContext(tasks, agent, messages), hasMemory: Boolean(memory) });
         const summary = await model.chat({ messages: compactReq });
         if (ledger) ledger.add(agent.id, summary.usage, { ms: Date.now() - acStartedAt });
+        noteUsage(summary.usage);
         runTokens += (summary.usage?.promptTokens ?? 0) + (summary.usage?.completionTokens ?? 0);
         const text = (summary.content ?? "").trim();
         if (!text) throw new Error("要約が空でした");
@@ -393,7 +415,7 @@ export async function runAgentLoop({
           releaseClaims("コンテキスト圧縮が追いつかない");
           board.post(agent.id, `[停止] 圧縮してもコンテキストが肥大し続けるため終了します。作業状態は保持されています。`);
           bus.emit("agent.status", { agent: agent.id, status: "compact-loop" });
-          return { ok: false, endedBy: "compact-rapid-refill", seenBoard: seen };
+          return { ok: false, endedBy: "compact-rapid-refill", seenBoard: seen, usage: { ...runUsage } };
         }
       } catch (err) {
         autocompactFailures += 1;
@@ -414,7 +436,7 @@ export async function runAgentLoop({
       emptyStreak += 1;
       if (emptyStreak > 3) {
         bus.emit("agent.status", { agent: agent.id, status: "empty-loop" });
-        return { ok: false, error: "空応答が連続しました", seenBoard: seen };
+        return { ok: false, error: "空応答が連続しました", seenBoard: seen, usage: { ...runUsage } };
       }
       messages.push({ role: "user", content: "[システム] 応答が空でした。次に行うべき行動をツール呼び出しで実行してください。" });
       continue;
@@ -428,9 +450,9 @@ export async function runAgentLoop({
     }
     board.post(agent.id, finalText);
     bus.emit("agent.status", { agent: agent.id, status: "done" });
-    return { ok: true, finalText, seenBoard: seen };
+    return { ok: true, finalText, seenBoard: seen, usage: { ...runUsage } };
   }
 
   bus.emit("agent.status", { agent: agent.id, status: "turn-limit" });
-  return { ok: false, endedBy: "turn-limit", error: `ターン上限(${maxTurns})に達しました`, seenBoard: seen };
+  return { ok: false, endedBy: "turn-limit", error: `ターン上限(${maxTurns})に達しました`, seenBoard: seen, usage: { ...runUsage } };
 }

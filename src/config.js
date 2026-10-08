@@ -9,14 +9,15 @@ import { legacyModelSection } from "./model/catalog.js";
  * 統合し、パスを絶対解決した実行時の形。loadConfig()が返す。
  * @typedef {Object} HiveConfig
  * @property {{baseUrl: string, apiKeyEnv?: string|null, apiKeyFile?: string, apiKey: string|null, model: string, fallbackModels?: string[], temperature?: number, maxTokens?: number, timeoutMs?: number, contextWindow?: number, reasoningEffort?: string|null, webSearch?: boolean|object|null}} model OpenAI互換エンドポイントへの接続設定(apiKeyはenv/鍵ファイルから解決した実値)。旧形設定では生の値、新形models設定からは既定プロバイダから合成される
- * @property {{default: string|null, fallbacks: string[]|null, providers: Object.<string, Object>}} models 新形のモデル設定。providers.<id>={baseUrl, api(ワイヤ形式), auth:{env|file|value}, params, models[]}。旧modelセクションがある場合は"default"プロバイダとして読み替えて統合される
+ * @property {{default: string|null, fallbacks: string[]|null, providers: Object.<string, Object>, routing?: {enabled?: boolean, heavyPromptTokens?: number, roles?: string[], heavyModel?: string, lightModel?: string}}} models 新形のモデル設定。providers.<id>={baseUrl, api(ワイヤ形式), auth:{env|file|value}, params, models[]}。旧modelセクションがある場合は"default"プロバイダとして読み替えて統合される。routingはターン毎モデルルーティング(RouterModel)の設定。enabled未設定/falseなら全呼出が既定モデル(従来動作)
  * @property {string} workspace ワークスペースの絶対パス(開発時はリポジトリ直下・梱包時はuserData配下)
  * @property {{dir: string}} worktrees エージェント作業用worktreeのルート
  * @property {Array<{id: string, displayName: string, role: string, persona?: string, personaPath?: string}>} agents 参加エージェントの定義
  * @property {{maxTurns?: number}} loop
  * @property {{timeoutSec?: number}} runner
  * @property {{port: number, monitorPort: number, monitorHost: string}} ui UI/モニタのポート(HIVE_UI_PORT/HIVE_MONITOR_PORTで上書き可)
- * @property {{intervalSec?: number, testCommand?: string|null}} discovery 発見器(テストプローブ等)の設定
+ * @property {{intervalSec?: number, testCommand?: string|null, probes?: {tests?: "smoke"|"full"|"off"}}} discovery 発見器(テストプローブ等)の設定。testCommand省略時は軽量スモーク(単一テスト)を回す。probes.tests="full"でフルスイート(旧挙動=テストコマンド明示と同義)、"off"で停止
+ * @property {{testMaxConcurrent?: number}} exec テスト実行系の設定。testMaxConcurrentはテスト系コマンドのプロセス横断同時実行上限(既定1=直列)。複数ワーカーの検証+発見器プローブの重なりでマシンが飽和するのを防ぐ
  * @property {{askTimeoutSec?: number}} permissions
  * @property {{maxTokensPerRun?: number}} budget 1ランあたりのトークン上限
  * @property {{thresholdPercent?: number, keepRecentToolResults?: number}} compact 圧縮の設定
@@ -57,7 +58,9 @@ export function loadConfig(configPath) {
     agents: (raw.agents ?? []).map((a) => ({ ...a, personaPath: resolve(ROOT, a.persona ?? `agents/${a.id}.md`) })),
     loop: { maxTurns: 30, ...(raw.loop ?? {}) },
     runner: { timeoutSec: 480, ...(raw.runner ?? {}) },
-    ui: { port: 7789, monitorPort: 7791, monitorHost: "0.0.0.0", ...(raw.ui ?? {}) },    discovery: { intervalSec: 30, testCommand: null, ...(raw.discovery ?? {}) },
+    ui: { port: 7789, monitorPort: 7791, monitorHost: "0.0.0.0", ...(raw.ui ?? {}) },
+    discovery: { intervalSec: 30, testCommand: null, probes: { tests: "smoke" }, ...(raw.discovery ?? {}) },
+    exec: { testMaxConcurrent: 1, ...(raw.exec ?? {}) },
     permissions: {
       askTimeoutSec: 120,
       ...(raw.permissions ?? {}),
@@ -73,7 +76,7 @@ export function loadConfig(configPath) {
     commands: raw.commands ?? {},
     scenario: { seedFiles: [], ...raw.scenario },
   };
-  cfg.models = buildModelsCfg(raw);
+  cfg.models = buildModelsCfg(raw, local);
   // cfg.modelは旧形設定があればそのまま、無ければ新形modelsから合成する。
   // ui/server.js・monitor・index.html がconfig.modelを参照し続けるための橋。
   if (!raw.model?.baseUrl) {
@@ -88,11 +91,14 @@ export function loadConfig(configPath) {
 
 /** 旧形modelセクションを新形modelsへ読み替えて統合する。
  * 旧形は"default"プロバイダ(ベアIDの補完先)として合成し、既定ref・フォールバックも補う。 */
-function buildModelsCfg(raw) {
+function buildModelsCfg(raw, local = {}) {
   const out = {
     default: raw.models?.default ?? null,
     fallbacks: raw.models?.fallbacks ?? null,
     providers: { ...(raw.models?.providers ?? {}) },
+    // ターン毎モデルルーティング(RouterModel)。hive.config.jsonのmodels.routingを基本とし、
+    // hive.local.jsonの同名キーで上書きする(設定UIスイッチの永続化先)。無ければundefined=無効
+    routing: local.models?.routing ?? raw.models?.routing,
   };
   const m = raw.model;
   if (m?.baseUrl) {
