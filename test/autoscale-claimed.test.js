@@ -7,7 +7,7 @@
 // autoscaleTick()をrunnerに追加して呼び出す(interval依存を避け確定的に検証する)。
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runChat } from "../src/runner.js";
@@ -100,7 +100,7 @@ test("autoscale: 請求中(稼働中)タスクがあるスレッドはdesired縮
     console.log("[debug] evLog =", JSON.stringify(evLog));
     console.log("[debug] roundState running =", host.roundState.get(claimer)?.running);
     console.log("[debug] roundState keys =", [...host.roundState.keys()].join(","));
-    console.log("[debug] aliveWorkersFor now =", [...(ctl.aliveWorkersFor("scgtest") ?? [])].join(","));
+    console.log("[debug] claimed files =", readdirSync(join(ws, "tasks", "claimed")).join(","));
     // 縮小ガード: claimed稼働中があるので desired >= base(2) が維持される。
     // alive は base(2) のまま(増員しない/減らない)
     assert.ok(aliveAfter.size >= 2, "baseワーカーは維持される: size=" + aliveAfter.size);
@@ -108,7 +108,9 @@ test("autoscale: 請求中(稼働中)タスクがあるスレッドはdesired縮
     // 縮小判定へ寄せる: claimed(scg-a)を実APIで解放、open(scg-b)は依存を外して消す
     // (タスク削除APIが無いため、openのまま WORKなし判定へ持っていくには
     //  depends_on を空にした上で project を外した別名へ付け替える)
+    console.log("[debug] claimed before release =", readdirSync(join(ws, "tasks", "claimed")).join(","));
     ctl.tasks.releaseOne(claimer, "scg-a", "テスト後始末");
+    console.log("[debug] claimed after release =", readdirSync(join(ws, "tasks", "claimed")).join(","));
     // host無し扱いにはできないので、aliveWorkers実装準拠の別検証: open==0&claimed==0
     // の状況を作るため、scg-b をproject外へ移動してからtickする
     ctl.tasks.setProject("tasks/open/scg-b.md", "elsewhere");

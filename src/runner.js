@@ -314,11 +314,18 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     const globalCap = config.hierarchy?.maxConcurrent ?? 6;
     const list = tasks.list();
     // 再起動などで担当者が停止したままの請求を解放(作業が凍結するのを防ぐ)
+    // ChatHostラウンド実行中の担当者は稼働中とみなす(agent.status workingの発火が
+    // ラウンド開始より遅れる競合があり、直後tickで請求を誤解放するため)
+    const runningNow = new Set();
+    for (const [, th2] of threads) {
+      for (const m of th2.host?.mains ?? []) {
+        if (th2.host?.roundState?.get(m.id)?.running) runningNow.add(m.id);
+      }
+    }
     for (const t of list.claimed) {
       if (!t.agent) continue;
-      if (agentStatus.get(t.agent) !== "working") {
-        tasks.releaseOne(t.agent, t.id, "[自動解放] 担当者が稼働していないため再請求可能にしました。");
-      }
+      if (agentStatus.get(t.agent) === "working" || runningNow.has(t.agent)) continue;
+      tasks.releaseOne(t.agent, t.id, "[自動解放] 担当者が稼働していないため再請求可能にしました。");
     }
     const open = list.open;
     for (const [name, alive] of aliveWorkers) {
