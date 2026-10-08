@@ -2,7 +2,7 @@
 // 仕事そのもの。claimは「open→claimedへのrename」=同一ボリュームで原子的なので、
 // 複数エージェントが同時に請求しても二重請求が起きない。
 import { mkdirSync, readdirSync, renameSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 
 /**
  * タスク1件の契約(list()/UI/LLM注入の共通形)。実体は tasks/{open,claimed,done} のMarkdown。
@@ -32,29 +32,50 @@ export class TaskBlackboard {
   }
 
   seed(tasks) {
-    for (const t of tasks ?? []) this.create(t);
+    for (const t of tasks ?? []) {
+      // done/の完了済みidは再起票しない(blog lab実害: 再実行時にdoneタスクがopenへ
+      // 複製され、dependsOnの依存解決が「openの複製」に阻まれて後続タスクが永遠に
+      // 請求不能になる)。claimed中はcreateの既存重複判定に従う(従来どおり拒否)。
+      if (readdirSync(this.done).some((f) => f.endsWith('--' + t.id + '.md'))) continue;
+      this.create(t);
+    }
   }
 
   /**
    * 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
    * acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
    * @param {{id: string, role?: string|null, body?: string, project?: string, acceptance?: string, dependsOn?: string[], createdBy?: string|null, model?: string|null}} t
-   * @returns {boolean} 既存のidならfalse
+   * @returns {boolean} 既存のid・不正なidならfalse
    */
   // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
   // acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
   create({ id, role, body, project = "", acceptance = "", dependsOn = [], createdBy = null, model = null }) {
-    const f = join(this.open, `${id}.md`);
-    if (existsSync(f)) return false;
+    // 一意性はopenとclaimedの両方で守る(イシュー#30)。openだけだと請求中のIDを
+    // 別本文で再createでき、2人のagentが同じIDを同時請求できてしまう。
+    // doneは参照しないので「完了済みIDの再利用(自動再投入等)」は従来どおり許可。
+    if (this.existsOpenOrClaimed(id)) return false;
+    // id検証(欠落/空/文字種外は拒否してfalse): 検証漏れだと tasks/undefined.md のような残骸
+    // ファイルが生成され、busへも不正なtask.createdが流れる。tools(UI)側は事前検証ありだが、
+    // 発見器・seed・スクリプトからの直接呼び出しはここが最後の砦。
+    const key = String(id ?? "").trim();
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(key)) return false;
+    // done済みIDの再createは許可(自動再投入・reopen運用の後方互換)。seed再実行での再起票防止は
+    // seed()側のdone参照で防御(blog lab実害: dependsOn依存解決の永久ブロック)。
+    const f = join(this.open, `${key}.md`);
     const meta = metaLines(project, role, acceptance, dependsOn, model);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
-    if (createdBy) this.createdBy.set(id, createdBy);
-    this.bus?.emit("task.created", { taskId: id, project: String(project ?? "") });
+    if (createdBy) this.createdBy.set(key, createdBy);
+    this.bus?.emit("task.created", { taskId: key, project: String(project ?? "") });
     return true;
   }
 
   // スポーンなどで最初から請求済みとしてタスクを投入する(ブリーフ=そのエージェントの担当)
   assign({ agentId, taskId, body, project = "", model = null }) {
+    // 同じIDがopenに残っている/他者請求中なら二重請求になるので拒否(イシュー#30)。
+    // 自分自身の同ID再assignは最後のexistsSyncで false(冪等)。
+    if (existsSync(join(this.open, `${taskId}.md`))) return false;
+    const held = readdirSync(this.claimed).some((n) => n !== `${agentId}--${taskId}.md` && (n === `${taskId}.md` || n.endsWith(`--${taskId}.md`)));
+    if (held) return false;
     const f = join(this.claimed, `${agentId}--${taskId}.md`);
     if (existsSync(f)) return false;
     const meta = metaLines(project, null, "", [], model);
@@ -290,8 +311,18 @@ export class TaskBlackboard {
     const src = join(this.claimed, `${agentId}--${taskId}.md`);
     const dst = join(this.open, `${taskId}.md`);
     try {
+      if (!existsSync(src)) return true; // 既に無い=解放済みとして成功(べき等)
       if (note) appendNote(src, note);
-      if (existsSync(dst)) return false; // 同idのopenが既にある(手動投入等)場合は壊さない
+      if (existsSync(dst)) {
+        // 同idのopenが既にある(二重宙吊りの先着分/手動投入等)場合はrenameせず、
+        // この重複実体をdone/へ掃除する(dash lab実害: alpha/delta二重宙吊りで解放時に
+        // 1件だけ戻り、残り1件がclaimedのまま宙吊り続行→idle-claim待ちデッドロック)。
+        // basenameはWindows安全に: split(/[\/]/)はバックスラッシュ区切りを分割できず
+        // フルパス連結→ENOENTになる実害。path.basenameを使う。
+        renameSync(src, join(this.done, basename(src)));
+        this.bus?.emit("task.released", { agent: agentId, taskId });
+        return true;
+      }
       renameSync(src, dst);
       this.bus?.emit("task.released", { agent: agentId, taskId });
       return true;

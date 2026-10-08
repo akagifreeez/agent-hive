@@ -1,5 +1,6 @@
 // 仕事の発見器(blackboardへの自動投入)。
 // ① テストプローブ: 定期実行し、失敗→fix-test-failuresタスク生成/復旧→自動解決。
+//    既定は軽量スモーク(単一テストファイル)を回す(フルスイートは検証タスク/設定明示時だけ。perf-probe)。
 //    ただしimpl等の通常タスクが残っている間はテスト失敗を仕事化しない(未マージ起因の偽失敗防止)。
 // ② diffプローブ: `git diff reviewed main`(前回レビュー済み地点〜現main)に変化があれば
 //    review-changesタスク生成。レビュー完了でreviewedタグをmainへ前進させる。
@@ -10,6 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "./exec.js";
+import { parseTap, classifyFailures, buildFixCandidates, deriveArea } from "./test-triage.js";
 import { detectStaleSections, genCliCommands, genRepoLayout, extractHelp } from "./readme-auto.js";
 
 export const FIX_TASK_ID = "fix-test-failures";
@@ -18,7 +20,24 @@ export const DISTILL_TASK_ID = "distill-learnings";
 export const README_TASK_ID = "update-readme";
 const DISTILL_MARKER = "memory/.distilled"; // workspace起点。1行=処理済みのdoneタスクid
 
-export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCommand, exec = runCommand }) {
+// プローブ構成(discovery配下で上書き可)。既定は軽量スモーク: 高速な単一テストを
+// intervalSec毎に回してmainの健在性だけを見張る。フルスイート(probes.tests="full")は
+// 検証タスク(verify)や設定明示時だけ回す(マシン飽和対策: perf-probe-and-semaphore)。
+const SMOKE_TEST_FILE = "test/exec.test.js"; // 高速(2秒前後)・依存ゼロの実テスト
+/**
+ * @param {Object} o
+ * @param {string} o.workspace
+ * @param {import("./tasks.js").TaskBlackboard} o.tasks
+ * @param {import("./board.js").Bus} o.bus
+ * @param {number} [o.intervalSec]
+ * @param {string|null} [o.testCommand] テストプローブのコマンド(未指定なら既定スモーク)
+ * @param {{tests?: "smoke"|"full"|"off"}} [o.probes] プローブ種別(discovery.probes)
+ * @param {(o: any) => Promise<{ok: boolean, text: string}>} [o.exec]
+ */
+export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCommand, probes = null, exec = runCommand }) {
+  const mode = String(probes?.tests ?? (testCommand ? "custom" : "smoke")); // "smoke"|"full"|"custom"|"off"
+  // smoke=軽量スモーク(既定) / full=旧挙動のフルスイート / custom=testCommand明示 / off=プローブ停止
+  const command = testCommand ?? (mode === "smoke" ? `node --test ${SMOKE_TEST_FILE}` : mode === "full" ? "npm test" : null);
   let stopped = false;
   let busy = false;
 
@@ -42,8 +61,8 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
   }
 
   async function probeTests() {
-    if (!testCommand) return;
-    const r = await exec({ command: testCommand, cwd: workspace, timeoutMs: 120000, outputLimit: 3000 });
+    if (mode === "off" || !command) return;
+    const r = await exec({ command, cwd: workspace, timeoutMs: 120000, outputLimit: 3000 });
     if (r.ok) {
       if (tasks.autoResolve(FIX_TASK_ID, "自動解決: テストが通るようになった(発見器が確定)")) {
         bus.emit("discovery.resolved", { taskId: FIX_TASK_ID });
@@ -57,7 +76,7 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
     }
     tasks.create({
       id: FIX_TASK_ID,
-      body: `mainブランチでテストが失敗している。失敗出力を読み、原因を特定して修正し、テストを通せ。\n\n## 発見器が捉えた最新の失敗出力(末尾)\n\`\`\`\n${r.text.slice(-2500)}\n\`\`\`\n- 自分の作業ディレクトリで \`git merge main\` して最新を取り込んでから着手すること。\n- 修正後 \`${testCommand}\` を通し、ボードへ報告して finish_task。`,
+      body: `mainブランチでテストが失敗している。失敗出力を読み、原因を特定して修正し、テストを通せ。\n\n## 発見器が捉えた最新の失敗出力(末尾)\n\`\`\`\n${r.text.slice(-2500)}\n\`\`\`\n- 自分の作業ディレクトリで \`git merge main\` して最新を取り込んでから着手すること。\n- 修正後 \`${command}\` を通し、ボードへ報告して finish_task。`,
     });
     bus.emit("discovery.created", { taskId: FIX_TASK_ID });
   }
@@ -127,6 +146,46 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
     bus.emit("discovery.created", { taskId: README_TASK_ID });
   }
 
+  // ⑤ トリアージプローブ: フルスイート(または指定コマンド)を実行し、失敗を既知/新規へ分類。
+  //    新規失敗だけをエリア別のfix候補タスクへ起票する(既知リストはconfig管理・TDD途中領域の区別)。
+  //    重いフル実行は既定off(discovery.probes.triage.mode)。exec-test-semaphore着地後に有効化する想定。
+  let triageBusy = false;
+  async function probeTriage() {
+    const t = probes?.triage;
+    const mode = String(t?.mode ?? "off");
+    if (mode === "off" || triageBusy) return;
+    if (hasOutstandingWork()) {
+      bus.emit("discovery.skip", { reason: "通常タスクが残っているため、重いトリアージ実行を飛ばす" });
+      return;
+    }
+    triageBusy = true;
+    try {
+      const command = t.command ?? "npm test";
+      // keep=tail: 失敗節(failing tests)は出力の末尾に出るため、末尾側を保持する
+      const r = await exec({ command, cwd: workspace, timeoutMs: t.timeoutMs ?? 300000, outputLimit: 120000, keep: "tail" });
+      const report = parseTap(r.text ?? "");
+      const known = Array.isArray(t.knownFailures) ? t.knownFailures : [];
+      if (r.ok && report.failures.length === 0) return; // 全緑: 仕事なし
+      const cls = classifyFailures(report, known);
+      const fresh = cls.fresh.filter((f) => !tasks.existsOpenOrClaimed("fix-triage-" + areaSlug(deriveAreaSafe(f))));
+      const candidates = buildFixCandidates(fresh);
+      for (const c of candidates) {
+        if (tasks.existsOpenOrClaimed(c.id)) continue; // 重複起票防止
+        tasks.create(c);
+        bus.emit("discovery.created", { taskId: c.id });
+      }
+    } finally {
+      triageBusy = false;
+    }
+  }
+  // エリア名をタスクidに安全な形へ(小文字英数字とハイフン)
+  function areaSlug(a) {
+    return String(a ?? "unknown").toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+  }
+  function deriveAreaSafe(f) {
+    return deriveArea(f.file, f.name, f.errorType);
+  }
+
   // bin/hive.jsのHELPを取り出してcli-commandsセクション本文を作るラッパ
   function genCliCommandsFromRoot(root) {
     const hivePath = join(root, "bin", "hive.js");
@@ -142,6 +201,7 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
       await probeDiffs();
       await probeMemory();
       await probeReadme();
+      await probeTriage();
       return true;
     } catch (err) {
       bus.emit("discovery.error", { error: err.message });

@@ -498,6 +498,11 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           return { ok: false, text: "task_idは英小文字数字とハイフンで付けてください。" };
         }
         const dependsOn = Array.isArray(args.depends_on) ? args.depends_on.map((s) => String(s ?? "").trim()).filter(Boolean) : [];
+        // 依存タスクがopenのままなら起票を拒否(fail-fast。依存が全doneになるまで請求不可なのに起票すると永遠に請求できない幽霊タスクになる。イシュー#25)
+        if (dependsOn.length) {
+          const openDeps = tasks.list().open.filter((t) => dependsOn.includes(t.id));
+          if (openDeps.length > 0) return { ok: false, text: `依存タスクが未完了のため起票できません: ${openDeps.map((t) => t.id).join(", ")}。完了を待つか、depends_onを外して再起票してください。` };
+        }
         // 代替モデル指定(#12): 基本は既定モデル。リーダー(スレッド開設権持ち)だけ特例で指定可
         const modelArg = String(args.model ?? "").trim() || null;
         if (modelArg && !threadOpener) {
