@@ -62,7 +62,7 @@ export function normalizeTestFile(raw) {
 
 /** エラー種別を抽出する("AssertionError [ERR_ASSERTION]: ..." → "AssertionError") */
 export function extractErrorType(line) {
-  const m = String(line ?? "").match(/^\s*((?:[A-Za-z_$][\w$]*)?(?:Error|Exception))(?:\s*\[[A-Z_]+\])?/);
+  const m = String(line ?? "").match(/^\s*([A-Za-z_$][\w$]*(?:Error|Exception))\s*(?:\[[A-Z_]+\])?/);
   return m ? m[1] : "Error";
 }
 
