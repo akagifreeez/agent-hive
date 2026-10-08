@@ -137,9 +137,18 @@ test("セマフォ: 上限超過の待ちがタイムアウトを過ぎると教
       { command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, forceWait: true },
       (o) => runCommand(o),
     );
-    for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
+    let spins = 0;
+    for (let i = 0; i < 3000 && testSemaphoreState().running < 1; i++) {
       await new Promise((r) => setTimeout(r, 10));
+      spins++;
     }
+    // blockerが実際にスロットを掴んだことまで保証する(掴めないまま進むとwaiterが
+    // 「空き」扱いで素通りし、タイムアウト誘発ではなくなる。フル実行時の高負担で
+    // 起歩が遅れるケースをここで検知する)。
+    assert.ok(
+      testSemaphoreState().running >= 1,
+      `ブロッカーがスロットを掴めない(待ち${spins}回・state=${JSON.stringify(testSemaphoreState())})`,
+    );
     const waiter = await runTestCommand(
       { command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000, queueTimeoutMs: 300, forceWait: true },
       (o) => runCommand(o),
@@ -214,9 +223,17 @@ test("セマフォ(ガード解除): 待ちタイムアウトで失敗しても�
       { command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, forceWait: true },
       (o) => runCommand(o),
     );
-    for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
+    let spins = 0;
+    for (let i = 0; i < 3000 && testSemaphoreState().running < 1; i++) {
       await new Promise((r) => setTimeout(r, 10));
+      spins++;
     }
+    // holdが実際にスロットを掴んだことを保証(掴めないまま進むとwaiterが素通りし、
+    // リーク検証としても無意味になる。フル実行時の起歩遅れをここで検知)。
+    assert.ok(
+      testSemaphoreState().running >= 1,
+      `ホルダーがスロットを掴めない(待ち${spins}回・state=${JSON.stringify(testSemaphoreState())})`,
+    );
     // runCommand()は待ち上限にセマフォ既定(10分)を使う契約のため(queueTimeoutMs:null固定)、
     // 待ちタイムアウトの誘発はrunTestCommand()直呼びで行う(本番経路のセマフォ実体は共用)。
     const waiter = await runTestCommand(
