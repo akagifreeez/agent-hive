@@ -14,7 +14,7 @@ import { tokenedFetchOn, startUiTokenized } from "../helpers/hf-token.js";
 tokenedFetchOn();
 
 
-const CLI = join(fileURLToPath(new URL("../bin/hive.js", import.meta.url)));
+const CLI = join(fileURLToPath(new URL("../../bin/hive.js", import.meta.url)));
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-cli-"));
