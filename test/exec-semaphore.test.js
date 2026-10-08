@@ -122,7 +122,10 @@ test("セマフォ: npm testを待っている間はテスト以外のコマン�
 test("セマフォ: 上限超過の待ちがタイムアウトを過ぎると教師文面つきで失敗を返す", async () => {
   await withSemaphore(1, async () => {
     // 1本目を軽量フィクスチャで握り、2本目を短い待ちタイムアウトで失敗させる。
-    // 待ちタイムアウトは queueTimeoutMs で明示誘発する。runCommand経由だと待ち上限は
+    // (旧実装のnpm testダミーはガードon中は待ちゼロで即実行され、「実行タイムアウト(500ms)」
+    // になるだけだった。待ちタイムアウトは queueTimeoutMs で明示誘発する)
+    // ガードOFFにして実セマフォでスロットを握る(guard ONだとrunTestCommandが素通しし
+    // runningが立たず「待ち」が発生しない)。待ちタイムアウトは queueTimeoutMs で明示誘発し、
     // セマフォ既定(10分)固定(2026-10-08 9d35dc4: timeoutMsは実行予算、待ちへ転用しない)のため、
     // 待ちタイムアウト面の検証は runTestCommand 直叩きで行う(検証したい契約の直接経路)。
     const blocker = runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000 });
