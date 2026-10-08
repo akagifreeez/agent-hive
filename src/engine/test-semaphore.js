@@ -10,6 +10,27 @@ let running = 0;
 const queue = []; // FIFO待ちキュー
 const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラベル)
 
+// 自縄自縛回避スイッチ(プロセス内)。テスト(exec-semaphore.test.js)は自分自身が
+// runCommand("npm test ...")を発射するため、フルnpm test実行中は自分の外側のプロセスが
+// すでにセマフォスロットを掴んでおり、直列化検証が即タイムアウトで落ちる
+// (2026-10-08 fix-semaphore-self-block)。テストから setSemaphoreSelfBlockGuard(true) を
+// 呼ぶと、このプロセス内での「待ち」だけを解消する(=新規テスト系コマンドは待たずに走る)。
+// 本番経路の既定挙動は変えない(スイッチはテストのみが使う、ランタイムでは常にoff)。
+let selfBlockGuard = false;
+
+/** 自縄自縛ガードのon/off(テスト専用)。on中はこのプロセス内のテスト系コマンドが
+ * セマフォ待ちをせず即実行される(スロット加算もしない=外側の状態に影響しない)。
+ * @param {boolean} [on=true] */
+export function setSemaphoreSelfBlockGuard(on = true) {
+  selfBlockGuard = Boolean(on);
+  if (selfBlockGuard) drain(); // 待ちが居たら流す(ガード有効化の瞬間に解消)
+}
+
+/** 自縄自縛ガードの現在値(テスト・診断用)。 */
+export function semaphoreSelfBlockGuard() {
+  return selfBlockGuard;
+}
+
 /** テスト系コマンド判定。runCommandのcommand文字列を見る。
  * 起動セグメント(行頭または && ; | ( の直後)に始まるnpm test系・node --testにだけ
  * マッチさせ、文中の"test"語には反応しない。npmフラグ(--silent等)も語レベルで読み飛ばす。 */
@@ -54,10 +75,16 @@ function drain() {
 
 /** セマフォを通してコマンドを実行する(runCommandと同契約)。
  * 上限超過時はFIFOで待ち、queueTimeoutMs(既定10分)を超えたら教師文面つきで失敗返し。
+ * selfBlockGuardがonのプロセスでは待ち行列に入らず即実行する(テストの自縄自縛回避)。
  * @param {{command: string, cwd?: string, env?: Object, outputLimit?: number, timeoutMs?: number, queueTimeoutMs?: number, label?: string}} o
  * @param {(o: any) => Promise<{ok: boolean, text: string}>} run 実行本体(=runCommand)。DI可能
  * @returns {Promise<{ok: boolean, text: string}>} */
 export async function runTestCommand(o, run) {
+  // テストの自縄自縛回避(上記selfBlockGuard参照): ガード中は素通し。
+  // スロットを加算しないので外側のフル実行(自分の親プロセス)の状態を汚さない。
+  if (selfBlockGuard) {
+    return run(o);
+  }
   // 待ちタイムアウトは「待ち時間」で判定する(テスト本体のtimeoutMsは実行時間の予算)。
   // 明示がなければ timeoutMs を待ち上限に転用する(呼び出し側のタイムアウト意図を尊重:
   // timeoutMs=500で待たせたら500ms待ちで諦める、が直感どおりの挙動)。
