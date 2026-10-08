@@ -172,9 +172,7 @@ export class TaskBlackboard {
           try {
             renameSync(src, dst);
             const id = f.replace(/\.md$/, "");
-            const agentIdNorm = String(agent?.id ?? "undefined"); // 観測: undefinedクレーム検出用
-            this.bus?.emit("task.claimed", { agent: agentIdNorm, taskId: id });
-            console.log("[claim-debug] claimed file =", agentIdNorm + "--" + f);
+            this.bus?.emit("task.claimed", { agent: agent.id, taskId: id });
             return { id, body: readFileSync(dst, "utf8") };
           } catch {
             // 先を越された。次の候補へ。
