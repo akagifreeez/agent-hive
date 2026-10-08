@@ -55,6 +55,7 @@ export class McpHost {
     this.buf = "";
     /** @type {string | null} 起動失敗(子のerrorイベント)の記録。失敗後のrequestは即座に拒否する */
     this.childError = null;
+    this.spawnError = null; // spawn由来の失敗通知済みフラグ(catchの二重emit防止)
   }
 
   async start() {
@@ -73,9 +74,10 @@ export class McpHost {
     // 飛んでくる。ハンドラが無いとUnhandled 'error' eventでhive全体が落ちる(イシュー#27)。
     // → ここで捕捉してbus通知+pending全reject+切断状態へ。以後のrequest()は即rejectする。
     this.connected = false;
-    /** @type {Array<{name: string, description?: string, inputSchema?: any}>} */
     this.child.on("error", (err) => {
       this.connected = false;
+      this.childError = err.message;
+      this.spawnError = err;
       this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
@@ -110,28 +112,15 @@ export class McpHost {
       }
     });
     this.child.stderr.on("data", () => {}); // サーバーのログは捨てる
+    // stdin側のEPIPE等もUnhandled 'error' eventの火種になるため握りつぶす(write側はrequestでガード)
+    this.child.stdin.on("error", () => {});
     // 子のstdioパイプがイベントループを握ってプロセスが終わらなくならないようにする
     this.child.unref?.();
     /** @type {any} */ (this.child.stdout).unref?.();
     /** @type {any} */ (this.child.stderr).unref?.();
+    this.connected = true; // 'error'イベントでfalseへ(起動失敗・早期終了の切断状態)
     this.child.on("exit", (code) => {
-      for (const p of this.pending.values()) {
-        clearTimeout(p.timer);
-        p.reject(new Error(`MCPサーバー ${this.name} が終了しました(code=${code})`));
-      }
-      this.pending.clear();
-    });
-    // #27: 起動コマンドが存在しない等の子プロセスの非同期error(ENOENT等)。ここを捕まえないと
-    // Unhandled 'error' event でhiveプロセス全体が落ちる。起動失敗してもhiveは続行する(契約)。
-    // pending要求は全てok:false系のrejectへ回し、以後のrequestも即座に失敗させる(不整合防止)。
-    this.child.on("error", (err) => {
-      this.childError = err.message;
-      this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
-      for (const p of this.pending.values()) {
-        clearTimeout(p.timer);
-        p.reject(new Error("MCPサーバー " + this.name + " の起動に失敗: " + err.message));
-      }
-      this.pending.clear();
+      this.failPending(`MCPサーバー ${this.name} が終了しました(code=${code})`);
     });
     // stdinへの書き込みもEPIPEで投げることがある(error伝播を止めるだけが目的)
     this.child.stdin?.on?.("error", () => {});
@@ -148,8 +137,9 @@ export class McpHost {
       this.bus?.emit("mcp.started", { name: this.name, tools: this.tools.map((t) => t.name) });
       return { ok: true, tools: this.tools.length };
     } catch (err) {
-      this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
-      try { this.child.kill(); } catch {}
+      // spawn由来の失敗(ENOENT等)はerrorハンドラが通知済み。二重emitしない
+      if (!this.spawnError) this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
+      try { this.child?.kill(); } catch { /* 既に終了 */ }
       return { ok: false, error: err.message };
     }
   }
@@ -169,7 +159,12 @@ export class McpHost {
 
   async call(name, args) {
     const local = name.slice(`mcp__${this.name}__`.length);
-    const r = await this.request("tools/call", { name: local, arguments: args ?? {} });
+    let r;
+    try {
+      r = await this.request("tools/call", { name: local, arguments: args ?? {} });
+    } catch (err) {
+      return { ok: false, text: "MCP呼び出しに失敗しました: " + err.message };
+    }
     const text = (r.content ?? [])
       .filter((c) => c.type === "text")
       .map((c) => c.text)
@@ -177,9 +172,23 @@ export class McpHost {
     return { ok: !r.isError, text: text || "(空の結果)" };
   }
 
+  // pending中の全要求をrejectして切断状態へ(起動失敗・終了の共通経路)
+  failPending(message) {
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(new Error(message));
+    }
+    this.pending.clear();
+  }
+
   request(method, params) {
     const id = this.nextId++;
     const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
+    if (this.connected === false || this.spawnError) {
+      // 起動失敗(ENOENT等)後の切断状態。pendingに積んでも応答は来ないので即reject
+      const reason = this.spawnError?.message ?? this.childError ?? "起動直後の切断";
+      return Promise.reject(new Error("MCPサーバー " + this.name + " に接続できません(起動失敗済み): " + (this.spawnError?.message ?? this.childError ?? "起動直後の切断")));
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -193,7 +202,14 @@ export class McpHost {
         reject(new Error("MCPサーバー " + this.name + " は起動失敗済み: " + this.childError));
         return;
       }
-      this.child.stdin.write(msg);
+      try {
+        this.child.stdin.write(msg);
+      } catch (err) {
+        // 書き込み失敗(破損したパイプ)も契約どおりreject(プロセスは落とさない)
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(new Error("MCPサーバー " + this.name + " への書き込みに失敗: " + err.message));
+      }
     });
   }
 
