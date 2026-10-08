@@ -23,7 +23,7 @@ export function buildCatalog(modelsCfg = {}) {
   for (const [id, p] of Object.entries(modelsCfg.providers ?? {})) {
     providers[id] = { ...providers[id], id, ...p, models: (p.models ?? providers[id]?.models ?? []).map((m) => ({ ...m })) };
   }
-  return { providers, defaultRef: modelsCfg.default ?? null, fallbackRefs: modelsCfg.fallbacks ?? [] };
+  return { providers, defaultRef: modelsCfg.default ?? null, fallbackRefs: modelsCfg.fallbacks ?? [], routing: modelsCfg.routing };
 }
 
 /** ベアIDのときの既定プロバイダを推定する(内蔵+設定の一意一致 → 既定ref、の順)。
