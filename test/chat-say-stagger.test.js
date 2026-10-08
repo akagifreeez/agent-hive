@@ -72,14 +72,15 @@ test("runner: say(text, thread)はstagger遅延なしで全メインへ注入さ
     const r = ctl.say("[テスト] stagger検証", "saystagger");
     assert.ok(r === undefined || r?.error === undefined, "sayが成功: " + String(r?.error ?? r));
     // 全メイン(alpha/beta/gamma)のラウンドが即座に始まる(stagger遅延がない)
-    for (const id of ["alpha", "beta", "gamma"]) {
+    // 注: runner経由ではメインidは「<thread>-<worker>」形式
+    for (const id of ["saystagger-alpha", "saystagger-beta", "saystagger-gamma"]) {
       assert.ok(
         await waitUntil(() => host.roundState.get(id)?.running === true, 5000),
         `${id} のラウンドが5秒以内に開始(遅延なしが観測できる)`
       );
     }
     // ラウンド完走を待つ(テスト終了時の残留タイマー防止)
-    for (const id of ["alpha", "beta", "gamma"]) {
+    for (const id of ["saystagger-alpha", "saystagger-beta", "saystagger-gamma"]) {
       assert.ok(
         await waitUntil(() => host.roundState.get(id)?.running === false, 60000),
         `${id} のラウンドが完走`
