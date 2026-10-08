@@ -41,7 +41,7 @@ function scriptedModel(steps, calls) {
   };
 }
 
-function mkHost({ steps, project, autoResume, maxTurnsPerRound = 1, landingSignal = null }) {
+function mkHost({ steps, project, autoResume, maxTurnsPerRound = 1, landingSignal = null, mains = null }) {
   const ws = mktmp();
   const bus = new Bus();
   const board = new Board(bus, "aresume");
@@ -49,7 +49,7 @@ function mkHost({ steps, project, autoResume, maxTurnsPerRound = 1, landingSigna
   const calls = [];
   const agent = { id: "alpha", displayName: "アルファ", role: "impl", personaText: "# A" };
   const host = new ChatHost({
-    mains: [agent],
+    mains: mains ?? [agent],
     mainWorkspace: null,
     project,
     autoContinueRounds: 3,
@@ -137,4 +137,65 @@ test("自動再開: 設定の正規化(無効既定・範囲clamp)", () => {
   assert.equal(normalizeAutoResume({ enabled: true, maxConsecutive: 99 }).maxConsecutive, 10, "上限10にclamp");
   const d = normalizeAutoResume({ enabled: true });
   assert.deepEqual([d.delaySec, d.maxConsecutive], [120, 3], "既定値");
+});
+
+test("hasWork拡張: ロール不一致のopenだけでは再開しない(impl単独スレッド)", async () => {
+  const { host, tasks, calls, cleanup } = mkHost({
+    project: "ar-rolemiss",
+    steps: [{ toolCalls: [] }],
+    autoResume: { enabled: true, delaySec: 0, maxConsecutive: 3 },
+  });
+  try {
+    // role:reviewのタスクだけがある=implには請求できない→仕事なし扱いで再開しない
+    tasks.create({ id: "v1", body: "検証仕事", project: "ar-rolemiss", role: "review" });
+    host.say("着手してください");
+    assert.ok(await waitUntil(() => {
+      const st = host.roundState.get("alpha");
+      return st && !st.running;
+    }), "ラウンド完走");
+    const before = calls.length;
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(calls.length, before, "請求不能なopenでは再開しない");
+  } finally {
+    host.dispose();
+    cleanup();
+  }
+});
+
+test("hasWork拡張: リーダーはreview系openタスクを仕事とみなして再開する", async () => {
+  const lead = { id: "lead", displayName: "リーダー", role: "lead", personaText: "# L" };
+  const { host, tasks, calls, cleanup } = mkHost({
+    project: null, // リーダースレッド(project不問=全openを見る)
+    steps: [{ toolCalls: [] }],
+    autoResume: { enabled: true, delaySec: 0, maxConsecutive: 3 },
+    mains: [lead],
+  });
+  try {
+    tasks.create({ id: "v2", body: "検証仕事", project: "どこかのスレッド", role: "review" });
+    host.say("着手してください");
+    // リーダーは検証役をスポーンできるので role:review のopenも仕事=自動再開が発火する
+    assert.ok(await waitUntil(() => calls.length >= 2), "review系openでも再開する: " + calls.length);
+  } finally {
+    host.dispose();
+    cleanup();
+  }
+});
+
+test("hasWork拡張: role一致の検証タスクがあるimpl+review構成は再開する", async () => {
+  const beta = { id: "beta", displayName: "ベータ", role: "review", personaText: "# B" };
+  const { host, tasks, calls, cleanup } = mkHost({
+    project: "ar-review",
+    steps: [{ toolCalls: [] }],
+    autoResume: { enabled: true, delaySec: 0, maxConsecutive: 3 },
+    mains: [{ id: "alpha", displayName: "アルファ", role: "impl", personaText: "# A" }, beta],
+  });
+  try {
+    tasks.create({ id: "v3", body: "検証仕事", project: "ar-review", role: "review" });
+    host.say("着手してください");
+    // ベータ(review)が請求できる検証タスク=仕事あり→自動再開が発火する
+    assert.ok(await waitUntil(() => calls.length >= 2), "role一致の検証タスクで再開する: " + calls.length);
+  } finally {
+    host.dispose();
+    cleanup();
+  }
 });

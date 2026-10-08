@@ -446,13 +446,20 @@ export class ChatHost {
     }
   }
 
-  // 自動継続を続けるべきか: 請求中タスクが残る/自分のスレッド(project)に未着手タスクがある
+  // 自動継続を続けるべきか: 請求中タスクが残る/自分のスレッド(project)に「誰かが請求できる」未着手タスクがある。
+  // role一致も見る(検証役不在で宙吊りのrole:reviewタスクを実装役の仕事と数えない)。ただし
+  // リーダー(role:lead)はロール不問=検証役のスポーン自体が仕事なので全openを数える。
   hasWork(main) {
     try {
       if (this.tasks.claimedBy(main.id).length > 0) return true;
-      if (this.project) {
-        if (this.tasks.list().open.some((t) => (t.project || "") === this.project)) return true;
-      }
+      const roles = new Set(this.mains.map((m) => m.role).filter(Boolean));
+      const coord = this.mains.some((m) => m.role === "lead");
+      const open = this.tasks.list().open ?? [];
+      return open.some((t) => {
+        if (this.project && (t.project || "") !== this.project) return false;
+        if (!t.role) return true;
+        return coord || roles.has(t.role);
+      });
     } catch {}
     return false;
   }
