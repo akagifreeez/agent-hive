@@ -365,6 +365,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     // 閉鎖後も task.created/task.released でワーカーが起こされ続ける(イシュー#29)。
     try { t.host?.dispose?.(); } catch (e) { console.error("[closeThread] dispose失敗", e); }
     writeRegistry();
+    if (typeof t.host?.unsubscribe === "function") t.host.unsubscribe(); // 閉じたスレッドのHostはイベントで再起床しない(イシュー#29)
     bus.emit("thread.closed", { name });
     t.board.post("system", `[スレッド終了] ${name} を閉じました。成果物とログは保持されています(再open時は履歴ごと戻ります)。`);
     return { ok: true };
@@ -582,6 +583,13 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     setThreadFolder,
     setThreadPaused,
     listThreads: () => [...threads.keys()],
+    // プロセス警告の投稿先解決(long-run-resilience): スレッド名→そのスレッドのBoard。
+    // __main__はメインボード。開いていないスレッドはnull
+    boardOf: (threadName) => {
+      const name = String(threadName ?? "").trim();
+      if (name === mainBoard.name) return mainBoard;
+      return threads.get(name)?.board ?? null;
+    },
     runDiscussion: (req) => {
       // モデル横断ディスカッション: 接続済みプロバイダの代表モデル同士を1つのボードで議論させる。
       // host無しのBoard単体スレッド(タスク請求なし)なので、発言分のトークンだけで完結する

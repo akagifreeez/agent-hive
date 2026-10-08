@@ -3,7 +3,7 @@
 // 2エージェントが同じIDを同時請求できていた。done済みIDの再利用は許す(自動再投入の運用)。
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bus } from "../src/engine/board.js";
@@ -36,14 +36,18 @@ test("#30: 2人のagentが同じIDを同時請求できない", () => {
   rmTree(ws);
 });
 
-test("#30: done済みIDの再createは通る(自動再投入の運用を壊さない)", () => {
+test("#30: done済みIDの再createは許可(現行契約・自動再投入運用)", () => {
+  // 現行契約(477bdde): create()はopen/claimedのみ一意性を見る。done再createは自動再投入・
+  // reopen運用の後方互換として許可。seed再実行での再起票防止はseed()側のdone参照で防御
+  // (blog lab実害: dependsOn依存解決の永久ブロック)。
   const ws = mktmp();
   const tasks = new TaskBlackboard(ws, new Bus());
   tasks.create({ id: "reuse", body: "1回目" });
   tasks.claim({ id: "alpha", role: null });
   tasks.finish({ id: "alpha" }, "reuse");
   const recreated = tasks.create({ id: "reuse", body: "2回目(再投入)" });
-  assert.equal(recreated, true, "doneは再利用可能");
+  assert.equal(recreated, true, "done済みIDの再createは許可(後方互換)");
+  assert.equal(existsSync(join(ws, "tasks", "open", "reuse.md")), true, "openへ再起票される");
   rmTree(ws);
 });
 

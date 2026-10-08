@@ -16,6 +16,15 @@ export function applyTestSemaphoreConfig(execCfg) {
 // 数値を渡された場合はconfigureTestSemaphore側で既定(1)扱いになる。
 export const applyTestMaxConcurrent = applyTestSemaphoreConfig;
 
+// テスト(exec-semaphore.test.js)から直接いじれるようにセマフォ側のAPIを再公開する。
+// (テストはモジュール状態をリセット/上限変更して並列汚染を避ける)
+export {
+  setTestMaxConcurrent,
+  getTestMaxConcurrent,
+  resetTestSemaphore,
+  testSemaphoreState,
+} from "./test-semaphore.js";
+
 let cachedShell = null;
 let bashCommand = "bash";
 
