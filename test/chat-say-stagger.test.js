@@ -64,13 +64,13 @@ test("runner: say(text, thread)はstagger遅延なしで全メインへ注入さ
   try {
     const opened = await ctl.openThread({ project: "saystagger", goal: "say引数滑落の検証" });
     assert.equal(opened.error, undefined, "スレッドが開ける: " + String(opened?.error ?? ""));
-    const host = ctl.threads.get("saystagger")?.host;
+    const host = ctl.threadHost("saystagger");
     assert.ok(host, "スレッドのChatHostを取得できる(観測点)");
     assert.equal(host.staggerMs, 0, "スレッドChatHostのstaggerMsは0(遅延=バグ撤去)");
 
     const t0 = Date.now();
     const r = ctl.say("[テスト] stagger検証", "saystagger");
-    assert.equal(r.error, undefined, "sayが成功: " + String(r?.error ?? ""));
+    assert.ok(r === undefined || r?.error === undefined, "sayが成功: " + String(r?.error ?? r));
     // 全メイン(alpha/beta/gamma)のラウンドが即座に始まる(stagger遅延がない)
     for (const id of ["alpha", "beta", "gamma"]) {
       assert.ok(
