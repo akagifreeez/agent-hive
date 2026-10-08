@@ -133,8 +133,10 @@ export async function detectShell() {
 export async function runCommand({ command, cwd, timeoutMs = 30000, outputLimit = 8 * 1024, env = null, keep = "head" }) {
   // テスト系コマンド(npm test / node --test 等にマッチ)だけプロセス横断セマフォで
   // 直列化する(exec-test-semaphore)。非テストコマンドは従来どおり即実行(影響ゼロ)。
+  // queueTimeoutMs: null を明示=待ち上限はセマフォ既定(10分)。timeoutMs(実行予算)を
+  // 待ちに転用しない(runCommand経由のタイムアウトは「実行」の予算という契約を保つ)。
   if (isTestCommand(command)) {
-    return runTestCommand({ command, cwd, timeoutMs, outputLimit, env, keep }, runCommandInner);
+    return runTestCommand({ command, cwd, timeoutMs, outputLimit, env, keep, queueTimeoutMs: null }, runCommandInner);
   }
   return runCommandInner({ command, cwd, timeoutMs, outputLimit, env, keep });
 }
