@@ -34,7 +34,7 @@ async function main() {
   void crashGuard; // 起動中は常に配線(プロセス寿命と同じ)
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) return usage();
-  // プロセス生存ガード(long-run-resilience): 未捕捉rejection/例外で落ちない。
+  const config = loadConfig(args.includes("--config") ? args[args.indexOf("--config") + 1] : undefined);
   const bus = new Bus();
   wireConsoleLog(bus);
 

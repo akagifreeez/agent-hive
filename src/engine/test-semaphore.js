@@ -12,10 +12,18 @@ const runningIds = new Set(); // デバッグ/テスト用(現在実行中のラ
 
 /** テスト系コマンド判定。runCommandのcommand文字列を見る。
  * 起動セグメント(行頭または && ; | ( の直後)に始まるnpm test系・node --testにだけ
- * マッチさせ、文中の"test"語には反応しない。 */
+ * マッチさせ、文中の"test"語には反応しない。npmフラグ(--silent等)も語レベルで読み飛ばす。 */
 export function isTestCommand(command) {
   const c = String(command ?? "");
-  return /(^|[;&|(]\s*)npm\s+(run\s+)?test/.test(c) || /(^|[;&|(]\s*)node\s+--test/.test(c);
+  // npm test系: 起動セグメント開始の npm[フラグ群] (run[フラグ群])? test[:接尾]? [引数...]
+  //   - ^ (行頭)または && ; | ( の直後(セグメント開始)のみで始まるトークンに限定
+  //   - testの直前が区切りでないパターン(npmtest / npm audit / npm run lint test)は不該当
+  //   - test[:接尾](test:smoke等)と後続引数(npm test -- tests/x.js)は許容
+  //   - node --test: node[フラグ群] --test(test-force-exit等の追加フラグ可)
+  const seg = "(^|[;&|(]\\s*)";
+  return new RegExp(seg + "npm\\s+(--[^\\s;&|()]+\\s+)*(run\\s+)?(--[^\\s;&|()]+\\s+)*(run\\s+)?test(?::[A-Za-z0-9._-]+)?([\\s]|$)").test(c)
+    || new RegExp(seg + "npm\\s+(--[^\\s;&|()]+\\s+)*--test([\\s]|$)").test(c)
+    || new RegExp(seg + "node\\s+(--[^\\s;&|()]+\\s+)*--test([\\s]|$)").test(c);
 }
 
 class QueueTimeout extends Error {
@@ -50,7 +58,10 @@ function drain() {
  * @param {(o: any) => Promise<{ok: boolean, text: string}>} run 実行本体(=runCommand)。DI可能
  * @returns {Promise<{ok: boolean, text: string}>} */
 export async function runTestCommand(o, run) {
-  const queueTimeoutMs = o.queueTimeoutMs ?? 600000; // 既定10分
+  // 待ちタイムアウトは「待ち時間」で判定する(テスト本体のtimeoutMsは実行時間の予算)。
+  // 明示がなければ timeoutMs を待ち上限に転用する(呼び出し側のタイムアウト意図を尊重:
+  // timeoutMs=500で待たせたら500ms待ちで諦める、が直感どおりの挙動)。
+  const queueTimeoutMs = o.queueTimeoutMs ?? (Number.isFinite(o.timeoutMs) ? o.timeoutMs : 600000);
   const label = o.label ?? String(o.command ?? "").slice(0, 80);
   if (!isFree()) {
     const entry = enqueue(label);

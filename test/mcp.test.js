@@ -69,7 +69,7 @@ test("McpHost: 不存在コマンド(非同期ENOENT)でもuncaughtExceptionで�
   assert.equal(ok, true, "busへmcp.failedが流れる");
   assert.equal(failed[0].name, "noent");
   // 失敗後のrequest()は切断状態として即reject(プロセスは落とさない)
-  await assert.rejects(() => host.request("initialize", {}), /切断|起動できません/);
+  await assert.rejects(() => host.request("initialize", {}), /切断|起動できません|接続できません/);
 });
 
 test("runChat: MCPツールがエージェントから使え、cron定期実行が走る", async () => {

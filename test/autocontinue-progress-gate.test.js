@@ -3,7 +3,7 @@
 // 着地の3経路(タスクdone=task.finished / ラウンド末mainマージ=agent.merged / landingSignal)を検証する。
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Board, Bus } from "../src/engine/board.js";
@@ -175,6 +175,37 @@ test("進捗ゲート: agent.merged/task.finishedで着地フラグが立ち、�
     // noteLanding()で手動消費の確認(判定経路と同じAPI)
     host.noteLanding(null);
     assert.equal(host.landedThisRound.get("alpha"), true, "noteLanding(全体)でフラグが立つ");
+  } finally {
+    cleanup();
+  }
+});
+
+test("tasks.create(): id無し/不正idは拒否され、残骸ファイルもtask.createdも出さない", async () => {
+  const { tasks, bus, ws, cleanup } = mkHost({ project: "pgate-id", steps: ["応答"] });
+  try {
+    const events = [];
+    bus.on("task.created", (p) => events.push(p));
+    assert.equal(tasks.create({ body: "id無し" }), false, "id欠落は拒否");
+    assert.equal(tasks.create({ id: "", body: "空id" }), false, "空idは拒否");
+    assert.equal(tasks.create({ id: "悪い_id", body: "文字種外" }), false, "文字種外は拒否");
+    assert.equal(tasks.create({ id: "ok-task-1", body: "正常" }), true, "正常idは作れる");
+    assert.deepEqual(events, [{ taskId: "ok-task-1", project: "" }], "task.createdは正idで1件だけ");
+    const openFiles = readdirSync(join(ws, "tasks", "open"));
+    assert.ok(!openFiles.some((f) => !/^[a-z0-9][a-z0-9-]*\.md$/.test(f)), "open配下に不正名ファイル(undefined.md等)を作らない");
+    assert.ok(openFiles.includes("ok-task-1.md"), "正常タスクのファイルは生成される");
+  } finally {
+    cleanup();
+  }
+});
+
+test("tasks.seed(): 正常idのseedはtask.createdを発火させる(先行者報告の非再現を固定)", async () => {
+  const { tasks, bus, cleanup } = mkHost({ project: "pgate-seed", steps: ["応答"] });
+  try {
+    const events = [];
+    bus.on("task.created", (p) => events.push(p));
+    tasks.seed([{ id: "seed-a", body: "A" }]); // project省略("")で起床副作用を避け、発火のみ観測
+    assert.equal(events.length, 1, "seed経路でもtask.createdは1件発火する");
+    assert.equal(events[0].taskId, "seed-a");
   } finally {
     cleanup();
   }

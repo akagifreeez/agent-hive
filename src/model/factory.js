@@ -6,6 +6,8 @@ import { ROOT, dataDir } from "../config.js";
 import { OpenAIModel, FallbackModel } from "./openai.js";
 import { AnthropicModel } from "./anthropic-messages.js";
 import { ChatGPTModel } from "./openai-chatgpt.js";
+import { RouterModel } from "./router.js";
+import { normalizeRoutingConfig } from "./router-config.js";
 import { buildCatalog, resolveModel, resolveAuthValue, specRef } from "./catalog.js";
 import {
   openCallbackServer, buildAuthorizeUrl, createPKCE,
@@ -88,7 +90,24 @@ export function createModelFactory(config) {
     // フォールバック列(config.models.fallbacks)があれば、終端エラー時に順に試す。
     // effortはフォールバック側にagent値を引き継がない(旧実装と同じ=設定既定で動く)
     const fallbacks = (catalog.fallbackRefs ?? []).map((r) => mk(resolveModel(catalog, r)));
-    return fallbacks.length ? new FallbackModel({ primary, fallbacks }) : primary;
+    const withFallback = fallbacks.length ? new FallbackModel({ primary, fallbacks }) : primary;
+    // ターン毎モデルルーティング(RouterModel): 有効時だけ軽量/重量の2実体へ振り分ける。
+    // ここで1回差すだけでループの全経路(主呼出・圧縮要約呼出)に効く(両経路ともmodel.chatを通る)。
+    // 無効(config未設定)なら何も包まず従来どおり(回帰)。既定モデルがheavy側と同じrefのときも
+    // 振り分けの意味が無いので無効扱い(実体を1つに保つ)
+    const routing = normalizeRoutingConfig(catalog.routing);
+    const strongRef = routing.heavyModelRef;
+    if (routing.enabled && strongRef && resolveModel(catalog, strongRef).model.id !== spec.model.id) {
+      const strongSpec = resolveModel(catalog, strongRef);
+      const strong = mk(strongSpec, agent.reasoningEffort ?? null);
+      return new RouterModel({
+        primary: withFallback,
+        strong,
+        routing,
+        role: agent.role ?? null,
+      });
+    }
+    return withFallback;
   };
 }
 

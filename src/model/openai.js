@@ -28,6 +28,13 @@ function isRetryableNetworkError(err) {
   const code = String(err.code ?? err.cause?.code ?? "");
   return ABORT_CODE_RE.test(code) || isAbortRelated(err);
 }
+// stream系の汎用Error(stall監視のreject等・code無し)も切断の可能性がある。
+// 中断語(stall/terminated/aborted/timeout)を含むメッセージはリトライ契約へ乗せる。
+function isRetryableStreamError(err) {
+  if (!err || err.code) return false; // code持ち・code無し非Errorは中断扱いしない
+  const m = String(err.message ?? "");
+  return /stall|terminated|aborted|timeout|premature|socket hang up|other side closed/i.test(m);
+}
 // 中断観測の痕跡(HIVE_DEBUG_FILE指定時に採取。依存ゼロ・既定は無効)
 function noteAborted(err) {
   if (!process.env.HIVE_DEBUG_FILE) return;
@@ -102,7 +109,9 @@ export class OpenAIModel {
         // ネットワーク系(タイムアウト含む)はリトライ可(ZCode: NetworkError)。
         // undiciのTypeError: terminated(中断系)も瞬断として同じリトライ経路へ正規化する
         if (isAbortRelated(err)) noteAborted(err);
-        if (isRetryableNetworkError(err) && attempt <= RETRY_MAX_RETRIES) {
+        // 中断/瞬断系に加え、コードを持たない汎用Errorもstall/切断の可能性があるため
+        // メッセージ照合でリトライ契約へ乗せる(v6.6 stall復旧の回帰。2026-10-07 gamma)
+        if ((isRetryableNetworkError(err) || isRetryableStreamError(err)) && attempt <= RETRY_MAX_RETRIES) {
           await modelSleep(computeRetryDelay(attempt));
           continue;
         }
@@ -150,7 +159,9 @@ export class OpenAIModel {
           // 2026-10-04のプロセス死対策)。中断観測の痕跡も採る(HIVE_DEBUG_FILE時)。
           // リトライし切ったら行動化エラー(ループが次の行動を決められる形)として投げる
           if (isAbortRelated(err)) noteAborted(err);
-          if (isRetryableNetworkError(err) && attempt <= RETRY_MAX_RETRIES) {
+          // 中断/瞬断系に加え、コードを持たない汎用Errorもstall/切断の可能性があるため
+          // メッセージ照合でリトライ契約へ乗せる(v6.6 stall復旧の回帰。2026-10-07 gamma)
+          if ((isRetryableNetworkError(err) || isRetryableStreamError(err)) && attempt <= RETRY_MAX_RETRIES) {
             await modelSleep(computeRetryDelay(attempt));
             continue;
           }

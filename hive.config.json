@@ -131,7 +131,12 @@
       "git clean",
       "git push",
       "npm publish",
-      "curl "
+      "curl ",
+      "Stop-Process",
+      "taskkill",
+      "kill -9",
+      "pkill",
+      "wmic process delete"
     ]
   },
   "ui": {
