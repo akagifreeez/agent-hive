@@ -186,8 +186,7 @@ export class McpHost {
     const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
     if (this.connected === false || this.spawnError) {
       // 起動失敗(ENOENT等)後の切断状態。pendingに積んでも応答は来ないので即reject
-      const reason = this.spawnError?.message ?? this.childError ?? "起動直後の切断";
-      return Promise.reject(new Error("MCPサーバー " + this.name + " に接続できません(起動失敗済み): " + (this.spawnError?.message ?? this.childError ?? "起動直後の切断")));
+            return Promise.reject(new Error("MCPサーバー " + this.name + " に接続できません(起動失敗済み): " + (this.spawnError?.message ?? this.childError ?? "起動直後の切断")));
     }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
