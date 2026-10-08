@@ -57,6 +57,12 @@ export {
   semaphoreSelfBlockGuard,
 } from "./test-semaphore.js";
 
+// テスト(exec-semaphore.test.js)の待ちタイムアウト誘発用にrunCommandInnerを再公開
+// (DI対象。本番はrunCommand→runTestCommand(opts, runCommandInner)でこの実体を渡す)
+export {
+  runCommandInner,
+};
+
 let cachedShell = null;
 let bashCommand = "bash";
 

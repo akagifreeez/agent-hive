@@ -88,7 +88,7 @@ export async function runTestCommand(o, run) {
   // 待ちタイムアウトは「待ち時間」で判定する(テスト本体のtimeoutMsは実行時間の予算)。
   // 明示がなければ timeoutMs を待ち上限に転用する(呼び出し側のタイムアウト意図を尊重:
   // timeoutMs=500で待たせたら500ms待ちで諦める、が直感どおりの挙動)。
-  const queueTimeoutMs = o.queueTimeoutMs ?? (Number.isFinite(o.timeoutMs) ? o.timeoutMs : 600000);
+  const queueTimeoutMs = o.queueTimeoutMs === null ? 600000 : (o.queueTimeoutMs ?? (Number.isFinite(o.timeoutMs) ? o.timeoutMs : 600000));
   const label = o.label ?? String(o.command ?? "").slice(0, 80);
   if (!isFree()) {
     const entry = enqueue(label);
