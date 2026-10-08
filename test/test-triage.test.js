@@ -56,6 +56,7 @@ const REAL_SUMMARY_TAIL = [
   "test at test" + BS + "retry.test.js:142:1",
   "✖ chat(stream): stall検知でリトライし、2回目で成功する (97ms)",
   "  Error: ストリームが途切れました: ストリームが0秒間無出力です(stall)",
+  // 裸Error行(識別子なし)でもメッセージを取れること(fix-parsetap-bare-error)
 ].join(NL);
 
 test("normalizeTestFile: バックスラッシュ・行番号接尾・絶対パスを正規化する", () => {
@@ -95,6 +96,9 @@ test("parseTap: 実ログ形式(verboseサマリ+failing tests節)から8失敗�
   const errTypes = r.failures.map((f) => f.errorType);
   assert.ok(errTypes.includes("AssertionError"));
   assert.ok(errTypes.includes("TypeError"));
+  const retryEntry = r.failures.find((f) => f.file === "test/retry.test.js");
+  assert.equal(retryEntry.errorType, "Error", "裸Error行の種別はError");
+  assert.ok(retryEntry.message.includes("ストリームが途切れました"), "裸Error行でもメッセージを取れる(fix-parsetap-bare-error)");
   assert.ok(r.failures.every((f) => f.message.length > 0), "エラーメッセージが1行で取れる");
 });
 

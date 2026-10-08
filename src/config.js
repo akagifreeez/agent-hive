@@ -9,7 +9,7 @@ import { legacyModelSection } from "./model/catalog.js";
  * 統合し、パスを絶対解決した実行時の形。loadConfig()が返す。
  * @typedef {Object} HiveConfig
  * @property {{baseUrl: string, apiKeyEnv?: string|null, apiKeyFile?: string, apiKey: string|null, model: string, fallbackModels?: string[], temperature?: number, maxTokens?: number, timeoutMs?: number, contextWindow?: number, reasoningEffort?: string|null, webSearch?: boolean|object|null}} model OpenAI互換エンドポイントへの接続設定(apiKeyはenv/鍵ファイルから解決した実値)。旧形設定では生の値、新形models設定からは既定プロバイダから合成される
- * @property {{default: string|null, fallbacks: string[]|null, providers: Object.<string, Object>}} models 新形のモデル設定。providers.<id>={baseUrl, api(ワイヤ形式), auth:{env|file|value}, params, models[]}。旧modelセクションがある場合は"default"プロバイダとして読み替えて統合される
+ * @property {{default: string|null, fallbacks: string[]|null, providers: Object.<string, Object>, routing?: {enabled?: boolean, heavyPromptTokens?: number, roles?: string[], heavyModel?: string, lightModel?: string}}} models 新形のモデル設定。providers.<id>={baseUrl, api(ワイヤ形式), auth:{env|file|value}, params, models[]}。旧modelセクションがある場合は"default"プロバイダとして読み替えて統合される。routingはターン毎モデルルーティング(RouterModel)の設定。enabled未設定/falseなら全呼出が既定モデル(従来動作)
  * @property {string} workspace ワークスペースの絶対パス(開発時はリポジトリ直下・梱包時はuserData配下)
  * @property {{dir: string}} worktrees エージェント作業用worktreeのルート
  * @property {Array<{id: string, displayName: string, role: string, persona?: string, personaPath?: string}>} agents 参加エージェントの定義
@@ -76,7 +76,7 @@ export function loadConfig(configPath) {
     commands: raw.commands ?? {},
     scenario: { seedFiles: [], ...raw.scenario },
   };
-  cfg.models = buildModelsCfg(raw);
+  cfg.models = buildModelsCfg(raw, local);
   // cfg.modelは旧形設定があればそのまま、無ければ新形modelsから合成する。
   // ui/server.js・monitor・index.html がconfig.modelを参照し続けるための橋。
   if (!raw.model?.baseUrl) {
@@ -91,11 +91,14 @@ export function loadConfig(configPath) {
 
 /** 旧形modelセクションを新形modelsへ読み替えて統合する。
  * 旧形は"default"プロバイダ(ベアIDの補完先)として合成し、既定ref・フォールバックも補う。 */
-function buildModelsCfg(raw) {
+function buildModelsCfg(raw, local = {}) {
   const out = {
     default: raw.models?.default ?? null,
     fallbacks: raw.models?.fallbacks ?? null,
     providers: { ...(raw.models?.providers ?? {}) },
+    // ターン毎モデルルーティング(RouterModel)。hive.config.jsonのmodels.routingを基本とし、
+    // hive.local.jsonの同名キーで上書きする(設定UIスイッチの永続化先)。無ければundefined=無効
+    routing: local.models?.routing ?? raw.models?.routing,
   };
   const m = raw.model;
   if (m?.baseUrl) {

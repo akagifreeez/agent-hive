@@ -20,7 +20,11 @@ export function guardRateWindowMs() {
 }
 
 /**
- * @typedef {{logFile?: string|null, onEvent?: (e: object) => void, onNotify?: (n: object) => void, onPost?: (text: string) => void, rateLimit?: number, rateWindowMs?: number}} CrashGuardOpts
+ * @typedef {{kind: "crash.guarded"|"crash.rate", at: string, title: string, body: string}} CrashNotifyItem
+ */
+
+/**
+ * @typedef {{logFile?: string|null, onEvent?: (e: object) => void, onNotify?: (n: CrashNotifyItem) => void, onPost?: (text: string) => void, rateLimit?: number, rateWindowMs?: number}} CrashGuardOpts
  */
 
 /**
@@ -107,7 +111,7 @@ export function installCrashGuard(opts = {}) {
 /**
  * index.jsから呼ぶ配線済みガード: bus(→board[システム]投稿)+notify+ログファイルを繋ぐ。
  * board本体に依存せずコールバックで受ける(循環importとテストの重装備を避ける)。
- * @param {{bus?: import("./board.js").Bus|null, logFile?: string|null, onNotify?: (n: object) => void}} [o]
+ * @param {{bus?: import("./board.js").Bus|null, logFile?: string|null, onNotify?: (n: CrashNotifyItem) => void}} [o]
  * @returns {{unwire: () => void}}
  */
 export function wireCrashGuard(o = {}) {
