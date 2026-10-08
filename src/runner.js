@@ -263,7 +263,7 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       contextWindow: config.model.contextWindow ?? 200000,
       thresholdPercent: config.compact?.thresholdPercent,
       memoryFn,
-      staggerMs: config.chat?.staggerMs ?? 3000,
+      staggerMs: 0, // ユーザー入力時の全ワーカー同時起こしを遅延なく(2番目以降にstagger秒の純遅延が乗るバグのため0固定)
       project: name,
       autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
       hooks,
