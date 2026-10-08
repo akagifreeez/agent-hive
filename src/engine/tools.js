@@ -8,6 +8,7 @@ import { mergeAgentWork } from "./worktree.js";
 import { readMeta, detectTaskOverlap } from "./tasks.js";
 import { noteRejection } from "./model-policy.js";
 import { readSkill } from "./skills.js";
+import { setWatchdog } from "./watchdog.js";
 import { browserFetch, browserExtract, browserSubmit } from "./browser.js";
 
 const READ_LIMIT = 120 * 1024;
@@ -254,6 +255,19 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
       },
     },
     ...mcpSpecs, // MCPサーバーが提供する外部ツール(mcp__<サーバー>__<ツール>)
+    {
+        name: "watchdog_toggle",
+        description: "自動再起動ウォッチドッグのON/OFFを切替する。ONにするとhiveプロセスが死んだとき外部ウォッチドッグ(1分間隔)が自動で再起動する(state/watchdog-on marker)。",
+        parameters: {
+          type: "object",
+          properties: {
+            on: { type: "boolean", description: "trueでON、falseでOFF" },
+          },
+          required: ["on"],
+          additionalProperties: false,
+        },
+      },
+    },
     {
       name: "use_skill",
       description: "スキル(skills/配下のノウハウ文書)を読み込む。該当する作業があるときは着手前に読むこと。",
@@ -682,6 +696,13 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         const text = readSkill(workspace, String(args.name ?? ""));
         if (!text) return { ok: false, text: `スキルが見つかりません: ${args.name}(索引にある名前を指定してください)` };
         return { ok: true, text };
+      }
+      case "watchdog_toggle": {
+        const on = Boolean(args.on);
+        const r = setWatchdog(on, mainWorkspace || workspace);
+        return { ok: true, text: r.enabled
+          ? "自動再起動ウォッチドッグを ON にしました。hiveがダウンすると外部監視(1分間隔)が自動で再起動します(marker: state/watchdog-on)。"
+          : "自動再起動ウォッチドッグを OFF にしました。ユーザーが止めている間は起こされません。" };
       }
       case "web_search": {
         const query = String(args.query ?? "").trim();
