@@ -62,7 +62,6 @@ test("イシュー#33: 実ChatHostの2ラウンド各$0.1がusage.roundのdelta�
   assert.ok(await waitUntil(() => chats >= 2), "2ラウンド目が走る");
   assert.ok(await waitUntil(() => !host.roundState.get("u33-lead")?.running), "2ラウンド目完了");
   assert.ok(rounds.length >= 2, "usage.roundが2回発火する");
-  console.log("ROUNDS:", JSON.stringify(rounds.map(r => ({ d: r.delta?.calls, t: r.totals.calls }))));
 
   // delta(ラウンド単位): ラウンド完了ごとの発火は1 call/$0.1。
   // 余分な発火(wake経由の観測ノイズ)があっても壊れないよう、総加算で契約を見る。
@@ -74,8 +73,11 @@ test("イシュー#33: 実ChatHostの2ラウンド各$0.1がusage.roundのdelta�
   assert.equal(rounds[0].totals.calls, 1);
   assert.equal(rounds[1].totals.calls, 2, "totalsはセッション累積のまま(契約維持)");
 
-  // aggregateUsage: delta優先で集計 → 2 calls/$0.2(旧実装だと3 calls/$0.3)
-  const agg = aggregateUsage(rounds, { days: 0 });
+  // aggregateUsage: delta優先で集計 → 2 calls/$0.2(旧実装だと3 calls/$0.3)。
+  // 実運用ではpersistUsage(ui/server.js)がat/dateを付けてusage.jsonへ蓄積するため、
+  // ここでも同じ形状(at付き)に整えてから集計する。
+  const history = rounds.map((r) => ({ ...r, at: new Date().toISOString() }));
+  const agg = aggregateUsage(history, { days: 0 });
   const th = agg.byThread.find((r) => r.thread === "u33");
   assert.ok(th, "スレッド行が作られる");
   assert.equal(th.calls, 2, "2ラウンド=2 calls(delta集計)");
