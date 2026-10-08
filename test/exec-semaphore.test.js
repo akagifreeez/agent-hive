@@ -122,15 +122,22 @@ test("セマフォ: 上限超過の待ちがタイムアウトを過ぎると教
     // 1本目を軽量フィクスチャで握り、2本目を短い待ちタイムアウトで失敗させる。
     // (旧実装のnpm testダミーはガードon中は待ちゼロで即実行され、「実行タイムアウト(500ms)」
     // になるだけだった。待ちタイムアウトは queueTimeoutMs で明示誘発する)
-    const blocker = runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000 });
-    for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
-      await new Promise((r) => setTimeout(r, 10));
+    // ガードOFFにして実セマフォでスロットを握る(guard ONだとrunTestCommandが素通しし
+    // runningが立たない=「待ち」が発生せずqueueTimeoutMsを誘発できない。実測: ベータ2026-10-08)
+    setSemaphoreSelfBlockGuard(false);
+    try {
+      const blocker = runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000 });
+      for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      const waiter = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000, queueTimeoutMs: 300 });
+      assert.equal(waiter.ok, false);
+      assert.match(waiter.text, /同時実行制限で待機タイムアウト/);
+      assert.match(waiter.text, /exec.testMaxConcurrent/);
+      await blocker;
+    } finally {
+      setSemaphoreSelfBlockGuard(true); // ファイル方針へ戻す(withSemaphoreのfinallyでも二重に戻る)
     }
-    const waiter = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000, queueTimeoutMs: 300 });
-    assert.equal(waiter.ok, false);
-    assert.match(waiter.text, /同時実行制限で待機タイムアウト/);
-    assert.match(waiter.text, /exec\.testMaxConcurrent/);
-    await blocker;
   });
 });
 
