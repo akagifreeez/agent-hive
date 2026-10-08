@@ -222,8 +222,10 @@ test("セマフォ(ガード解除): 待ちタイムアウトで失敗しても�
     // 2本目の到着時点でまだ空き扱い(走り出す)ことがある。確実に保持させるため
     // slow がスロットを掴むのを十分待つ(空き状況はテスト用APIで確認)。
     // hold側もforceWaitで実スロットを掴ませる(素通しだとスロット加算が無く待ちが誘発されない)。
+    // hold側にもenv NODE_TEST_CONTEXT上書きが必須(全体実行時はchild-v8継承でslowが即帰りし、
+    // holdがスロットを保持できずwaiterが素通りする。T4と同根・2026-10-08 fix-semaphore-self-block)。
     const hold = runTestCommand(
-      { command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, forceWait: true },
+      { command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, forceWait: true, env: { NODE_TEST_CONTEXT: undefined } },
       (o) => runCommand(o),
     );
     let spins = 0;
