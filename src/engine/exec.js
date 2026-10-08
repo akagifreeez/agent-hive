@@ -37,6 +37,15 @@ export function bashTimeoutConfig() {
   return { ...bashTimeoutCfg };
 }
 
+/** テスト実行の恒久ルール(COMMON_RULESへ差し込む文面。新規spawnの全エージェントに効く)。
+ * ボード投稿の運用指示はrespawnで継承されないため、システムプロンプト経路で固定する。 */
+export const TEST_EXECUTION_RULES = `
+## テスト実行の運用(全エージェント共通)
+- bashのタイムアウトは既定60秒・上限600秒。npm test(フルスイート)など長い処理は timeout_ms=600000 を明示する。
+- 待ち時間稼ぎの \`sleep N;\` 前置きは禁止。テスト系コマンドはセマフォが自動で順番待ちするので、そのまま実行して結果を待つ。
+- テスト結果の集計を \`| grep\` で行うときは文末に \`; echo exit=$?\` を付け、テスト失敗とgrep不一致を区別する。
+`;
+
 // テスト(exec-semaphore.test.js)から直接いじれるようにセマフォ側のAPIを再公開する。
 // (テストはモジュール状態をリセット/上限変更して並列汚染を避ける)
 export {
@@ -152,7 +161,7 @@ async function runCommandInner({ command, cwd, timeoutMs = 30000, outputLimit = 
   return await new Promise((res) => {
     const timer = setTimeout(() => {
       child.kill();
-      res({ ok: false, text: `タイムアウト(${timeoutMs}ms)で中断:\n${out.slice(0, outputLimit)}` });
+      res({ ok: false, text: `タイムアウト(${timeoutMs}ms)で中断:\n${out.slice(0, outputLimit)}\n[hint] timeout_ms パラメータで最大 ${bashTimeoutConfig().capMs || 120000}ms まで指定できます。テスト系コマンドはセマフォが自動で順番待ちするため sleep N; の前置きは不要です。` });
     }, timeoutMs);
     if (timer.unref) timer.unref();
     child.on("error", (err) => {

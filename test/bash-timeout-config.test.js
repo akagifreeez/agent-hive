@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyBashTimeoutConfig, bashTimeoutConfig } from "../src/engine/exec.js";
 import { createTools } from "../src/engine/tools.js";
+import { buildSystemPrompt } from "../src/engine/loop.js";
 
 function mktmp() {
   return mkdtempSync(join(tmpdir(), "hive-bashto-"));
@@ -30,6 +31,9 @@ test("bash timeout: config注入で既定と上限が変わり、timeout_ms省�
     const r = await tools.execute("bash", { command: "sleep 3" });
     assert.equal(r.ok, false);
     assert.ok(r.text.includes("タイムアウト(1000ms)"), "既定1000msで打ち切り: " + r.text.slice(0, 60));
+    // 教師文面が自説威する: timeout_msの指定可とsleep前置き不要を失敗の瞬間に伝える
+    assert.ok(r.text.includes("timeout_ms"), "hintにtimeout_ms誘導: " + r.text.slice(-120));
+    assert.ok(r.text.includes("sleep N;"), "hintにsleep前置き不要: " + r.text.slice(-120));
   } finally {
     applyBashTimeoutConfig({ maxBashMs: 30000, maxBashCapMs: 120000 });
     rmTree(ws);
@@ -70,4 +74,12 @@ test("bash timeout: 未設定(既定0)のときはインスタンス既定へフ
     applyBashTimeoutConfig(null);
     rmTree(ws);
   }
+});
+
+test("COMMON_RULES: テスト実行の恒久ルールが全エージェントのシステムプロンプトに乗る", () => {
+  const sys = buildSystemPrompt({ personaText: "# A" });
+  assert.ok(sys.includes("テスト実行の運用"), "ルール節が存在する");
+  assert.ok(sys.includes("timeout_ms=600000"), "フルスイートのtimeout_ms明示を指示");
+  assert.ok(sys.includes("sleep N;"), "sleep前置き禁止を指示");
+  assert.ok(sys.includes("echo exit=$?"), "grep集計のexit区別を指示");
 });
