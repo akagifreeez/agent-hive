@@ -3,7 +3,7 @@
 // 承認制ゲート(gate)を通す。
 import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, existsSync, renameSync, realpathSync } from "node:fs";
 import { resolve, join, dirname, sep } from "node:path";
-import { runCommand, detectShell } from "./exec.js";
+import { runCommand, detectShell, bashTimeoutConfig } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
 import { readMeta, detectTaskOverlap } from "./tasks.js";
 import { noteRejection } from "./model-policy.js";
@@ -434,11 +434,16 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
             const verifyId = `verify-${taskId}`;
             if (reviewer && reviewer.id !== agent.id) {
               const claimedTask = tasks.claimedBy(agent.id).find((t) => t.id === taskId);
+              // 速度改善: 実装が既にmainへ反映済み(ラウンド末マージ等)なら検証は軽量でよい
+              const merged = await isImplMergedIntoMain({ mainWorkspace, worktreePath: workspace });
+              const lightNote = merged
+                ? `\n[軽量検証可] この実装は既にmainへ反映済みです(差分ゼロ)。main HEADでの該当箇所確認+関連する単一テストの実行だけで完了判定してよい(フルスイート不要)。`
+                : "";
               const created = tasks.create({
                 id: verifyId,
                 role: reviewer.role,
                 project: claimedTask?.project ?? "",
-                body: `検証: タスク ${taskId}(${agent.id} 実装)の差分をレビューしてください。\n動作確認(テスト実行など)を行い、問題なければ finish_task (task_id: "${verifyId}") で検証完了としてください。承認後、成果が main へマージされます。`,
+                body: `検証: タスク ${taskId}(${agent.id} 実装)の差分をレビューしてください。\n動作確認(テスト実行など)を行い、問題なければ finish_task (task_id: "${verifyId}") で検証完了としてください。承認後、成果が main へマージされます。${lightNote}`,
                 createdBy: agent.id,
               });
               approvals.pending.set(taskId, { agentId: agent.id, worktreePath: workspace });
@@ -456,7 +461,12 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
               text: `マージが競合しました。あなたの作業ディレクトリで \`git merge main\` を実行し、競合ファイルを編集して解決 → \`git add -A && git commit\` → 再度 finish_task してください。\n\ngitの出力:\n${m.text.slice(0, 1500)}`,
             };
           }
-          if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
+          // #28: コミット失敗(pre-commitフック等)は競合と同じく失敗として伝播する。
+          // 成果がmainに入らないまま成功扱いにしない。
+          if (!m.ok) {
+            bus.emit("merge.conflict", { agent: agent.id, taskId });
+            return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 800)}\n\nタスクは完了していません。原因を取り除いてから再度 finish_task してください。` };
+          }
           bus.emit("merge.completed", { agent: agent.id, taskId, stat: m.stat ?? "", patch: m.patch ?? "", summary: m.summary ?? "" });
           board.post("system", `[マージ] ${agent.displayName}(${agent.id}) がタスク ${taskId} の成果を main へ取り込みました${m.summary ? `(${m.summary})` : ""}。`);
         }
@@ -772,8 +782,12 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         writeFileSync(p, src.replace(oldText, String(args.new_text ?? "")));
         return { ok: true, text: `${args.path} を編集しました。` };
       }
-      case "bash":
-        return await gatedBash(String(args.command ?? ""), clamp(Number(args.timeout_ms) || maxBashMs, 1000, 120000));
+      case "bash": {
+        // タイムアウトは config.exec.maxBashMs/maxBashCapMs(モジュール既定)→インスタンス既定 の順で解決。
+        // フルスイート(約3.5分)が上限120秒で絶対に通らなかったため上限をconfigへ出した
+        const bt = bashTimeoutConfig();
+        return await gatedBash(String(args.command ?? ""), clamp(Number(args.timeout_ms) || bt.defaultMs || maxBashMs, 1000, bt.capMs || 120000));
+      }
       case "post_to_board": {
 
         const dest = String(args.to_thread ?? "").trim();
@@ -986,6 +1000,23 @@ function decodeEntities(s) {
     .replace(/&quot;/g, '"')
     .replace(/&#x27;|&#39;/g, "'")
     .replace(/&nbsp;/g, " ");
+}
+
+// 検証の軽量化: 実装ブランチのHEADが既にmainの先祖(=ラウンド末マージ等で反映済み)なら
+// 差分ゼロ扱いとし、検証タスクに軽量パスを注記する。git不備時はfalse(従来どおり重めに検証)。
+export async function isImplMergedIntoMain({ mainWorkspace, worktreePath }) {
+  try {
+    if (!mainWorkspace || !worktreePath) return false;
+    const head = await runCommand({ command: "git rev-parse HEAD", cwd: worktreePath, timeoutMs: 15000 });
+    if (!head.ok) return false;
+    // 出力にはexitコード行が前置されることがあるため、ハッシュ行だけを拾う
+    const hash = (String(head.text || "").match(/^[0-9a-f]{7,40}\b/m) || [])[0];
+    if (!hash) return false;
+    const anc = await runCommand({ command: `git merge-base --is-ancestor ${hash} main`, cwd: mainWorkspace, timeoutMs: 15000 });
+    return anc.ok;
+  } catch {
+    return false;
+  }
 }
 
 // ワークスペースのファイル一覧(UI共用)。node_modulesと隠しファイルは除外。

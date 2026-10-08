@@ -1,6 +1,6 @@
 import { loadConfig } from "./config.js";
 import { createModelFactory } from "./model/factory.js";
-import { applyTestSemaphoreConfig } from "./engine/exec.js";
+import { applyTestSemaphoreConfig, applyBashTimeoutConfig } from "./engine/exec.js";
 import { runScenario, runChat } from "./runner.js";
 import { Bus } from "./engine/board.js";
 import { startUi } from "./ui/server.js";
@@ -34,7 +34,7 @@ async function main() {
   void crashGuard; // 起動中は常に配線(プロセス寿命と同じ)
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) return usage();
-  // プロセス生存ガード(long-run-resilience): 未捕捉rejection/例外で落ちない。
+  const config = loadConfig(args.includes("--config") ? args[args.indexOf("--config") + 1] : undefined);
   const bus = new Bus();
   wireConsoleLog(bus);
 
@@ -43,6 +43,8 @@ async function main() {
   // テスト系コマンドのプロセス横断セマフォ上限(hive.config.json の exec.testMaxConcurrent)。
   // exec.js はモジュール単一インスタンスなのでここで1回注入すれば全呼び出し経路に効く
   applyTestSemaphoreConfig(config.exec);
+  // bashタイムアウトの既定/上限(exec.maxBashMs / exec.maxBashCapMs)。未設定はインスタンス既定(30秒/120秒)
+  applyBashTimeoutConfig(config.exec);
 
   // CLI通知(#11): UIを立てない実行(--run/シナリオ直実行)はコンソール配信だけ。
   // --chat/--serve はstartUi側で同じbusへ配線する(コンソール+監視/monitor配信)ので二重にやらない

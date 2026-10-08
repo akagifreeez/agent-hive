@@ -25,27 +25,27 @@ const REAL_SUMMARY_TAIL = [
   "ℹ skipped 7",
   "✖ failing tests:",
   "",
-  "test at test" + BS + "cli.test.js:103:1",
+  "test at test" + BS + "heavy" + BS + "cli.test.js:103:1",
   "✖ CLI: cancel/release/reopen/auditが実サーバーに対して動く (1505ms)",
   "  AssertionError [ERR_ASSERTION]: Expected \"actual\" to be strictly unequal to: 0",
   "",
-  "test at test" + BS + "long-run-resilience.test.js:35:1",
+  "test at test" + BS + "heavy" + BS + "long-run-resilience.test.js:35:1",
   "✖ ストリーム途中切断(TypeError: terminated)はリトライされて成功する(プロセスは落ちない) (2ms)",
   "  TypeError: Cannot read properties of null (reading 'message')",
   "",
-  "test at test" + BS + "long-run-resilience.test.js:100:1",
+  "test at test" + BS + "heavy" + BS + "long-run-resilience.test.js:100:1",
   "✖ 子プロセス: ガード付きはunhandledRejection後に生存しログへ残る (659ms)",
   "  AssertionError [ERR_ASSERTION]: ガード無しの対照はrejectionで死ぬ(exit 1)",
   "",
-  "test at test" + BS + "long-run-resilience.test.js:129:1",
+  "test at test" + BS + "heavy" + BS + "long-run-resilience.test.js:129:1",
   "✖ ガードはuncaughtExceptionも捕捉し、必ずログへ残す (603ms)",
   "  AssertionError [ERR_ASSERTION]: 生存(er=Command failed)",
   "",
-  "test at test" + BS + "long-run-resilience.test.js:153:1",
+  "test at test" + BS + "heavy" + BS + "long-run-resilience.test.js:153:1",
   "✖ 異常頻度: 1時間の窓でしきい値超過したら「異常頻度」警告を1回だけ出す (8ms)",
   "  TypeError: t0",
   "",
-  "test at test" + BS + "long-run-resilience.test.js:175:1",
+  "test at test" + BS + "heavy" + BS + "long-run-resilience.test.js:175:1",
   "✖ onEvent/onPostフック経由でbusに流れ、board投稿に使える (6ms)",
   "  TypeError: terminated",
   "",
@@ -56,10 +56,11 @@ const REAL_SUMMARY_TAIL = [
   "test at test" + BS + "retry.test.js:142:1",
   "✖ chat(stream): stall検知でリトライし、2回目で成功する (97ms)",
   "  Error: ストリームが途切れました: ストリームが0秒間無出力です(stall)",
+  // 裸Error行(識別子なし)でもメッセージを取れること(fix-parsetap-bare-error)
 ].join(NL);
 
 test("normalizeTestFile: バックスラッシュ・行番号接尾・絶対パスを正規化する", () => {
-  assert.equal(normalizeTestFile("test" + BS + "cli.test.js:103:1"), "test/cli.test.js");
+  assert.equal(normalizeTestFile("test" + BS + "heavy" + BS + "cli.test.js:103:1"), "test/heavy/cli.test.js");
   assert.equal(normalizeTestFile("D:" + BS + "ws" + BS + "test" + BS + "a.test.js:12:3"), "test/a.test.js");
   assert.equal(normalizeTestFile("test/foo.test.js"), "test/foo.test.js");
   assert.equal(normalizeTestFile(""), "");
@@ -71,10 +72,10 @@ test("extractErrorType / deriveArea: エラー種別とエリアを推定する"
   assert.equal(extractErrorType("何もない"), "Error");
   assert.equal(deriveArea("test/crash-guard.test.js", "x", "Error"), "crash-guard");
   assert.equal(deriveArea("test/hooks.test.js", "何かのテスト", "Error"), "hooks");
-  assert.equal(deriveArea("test/long-run-resilience.test.js", "onEvent/onPostフック経由でbusに流れ、board投稿に使える", "TypeError"), "long-run-resilience");
+  assert.equal(deriveArea("test/heavy/long-run-resilience.test.js", "onEvent/onPostフック経由でbusに流れ、board投稿に使える", "TypeError"), "heavy/long-run-resilience");
   assert.equal(deriveArea("test/x.test.js", "承認フロー競合経路: 差し戻し記録", "AssertionError"), "approval-conflict");
   assert.equal(deriveArea("test/retry.test.js", "chat(stream): stall検知でリトライ", "Error"), "stream-stall");
-  assert.equal(deriveArea("test/cli.test.js", "CLI: 何か", "AssertionError"), "cli");
+  assert.equal(deriveArea("test/heavy/cli.test.js", "CLI: 何か", "AssertionError"), "cli"); // /cli/一致はパス全体で効く
 });
 
 test("parseTap: 実ログ形式(verboseサマリ+failing tests節)から8失敗を列挙する", () => {
@@ -85,8 +86,8 @@ test("parseTap: 実ログ形式(verboseサマリ+failing tests節)から8失敗�
   assert.equal(r.skipped, 7);
   assert.equal(r.failures.length, 8);
   const files = r.failures.map((f) => f.file);
-  assert.ok(files.includes("test/cli.test.js"));
-  assert.equal(files.filter((f) => f === "test/long-run-resilience.test.js").length, 5);
+  assert.ok(files.includes("test/heavy/cli.test.js"));
+  assert.equal(files.filter((f) => f === "test/heavy/long-run-resilience.test.js").length, 5);
   assert.ok(files.includes("test/model-policy.test.js"));
   assert.ok(files.includes("test/retry.test.js"));
   const names = r.failures.map((f) => f.name);
@@ -95,6 +96,9 @@ test("parseTap: 実ログ形式(verboseサマリ+failing tests節)から8失敗�
   const errTypes = r.failures.map((f) => f.errorType);
   assert.ok(errTypes.includes("AssertionError"));
   assert.ok(errTypes.includes("TypeError"));
+  const retryEntry = r.failures.find((f) => f.file === "test/retry.test.js");
+  assert.equal(retryEntry.errorType, "Error", "裸Error行の種別はError");
+  assert.ok(retryEntry.message.includes("ストリームが途切れました"), "裸Error行でもメッセージを取れる(fix-parsetap-bare-error)");
   assert.ok(r.failures.every((f) => f.message.length > 0), "エラーメッセージが1行で取れる");
 });
 
@@ -161,10 +165,10 @@ test("buildFixCandidates: エリア別に集約し、単一ファイルなら絞
     assert.ok(c.body.includes("git merge main"));
     assert.ok(c.body.includes("件を修正せよ"));
   }
-  const single = buildFixCandidates([{ name: "CLI: 何かが壊れる", file: "test/cli.test.js", errorType: "AssertionError", message: "boom", source: "summary" }]);
+  const single = buildFixCandidates([{ name: "CLI: 何かが壊れる", file: "test/heavy/cli.test.js", errorType: "AssertionError", message: "boom", source: "summary" }]);
   assert.equal(single.length, 1);
   assert.equal(single[0].id, "fix-triage-cli");
-  assert.ok(single[0].body.includes("node --test test/cli.test.js"), "単一ファイルは絞り込みコマンド");
+  assert.ok(single[0].body.includes("node --test test/heavy/cli.test.js"), "単一ファイルは絞り込みコマンド");
 });
 // プローブ別に応答を返すfakeExec(smoke→失敗は返さない・diff→差分なし・triage→フィクスチャ)
 function makeProbeAwareExec(fixtures) {

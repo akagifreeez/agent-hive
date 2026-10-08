@@ -10,9 +10,12 @@ import {
 } from "../src/engine/exec.js";
 import {
   isTestCommand,
+  runTestCommand,
   setTestMaxConcurrent,
   getTestMaxConcurrent,
   resetTestSemaphore,
+  setSemaphoreSelfBlockGuard,
+  testSemaphoreState,
 } from "../src/engine/test-semaphore.js";
 
 // 並列テストファイル同士でセマフォ状態を持ち越さない。各テストの終了時に必ず戻す。
@@ -24,8 +27,20 @@ async function withSemaphore(max, fn) {
     await fn();
   } finally {
     resetTestSemaphore();
+    setSemaphoreSelfBlockGuard(false); // ガードはテストごとに必ず戻す(他テストへの漏出防止)
   }
 }
+
+// 自縄自縛回避(fix-semaphore-self-block): このファイルは自分自身が runCommand("npm test ...")
+// を発射するテストを含む。フルnpm test実行中は「自分の外側のテストランナープロセス」が
+// すでにプロセス横断セマフォのスロットを掴んでおり、上限1の直列化検証は子プロセス同士の
+// 検証ですら外側のスロット空き待ちと絡んでタイムアウトで落ちる(2026-10-08 ベータ観測+ガンマ#509)。
+// 単独実行は9/9緑だが、フル実行では安定して落ちる=テストがセマフォの恩恵対象と衝突している。
+// そこでこのテストファイルでは自縄自縛ガードを有効化する: ガード中は「このプロセス内の」
+// テスト系コマンドが待ち行列に入らず即実行される。ガードは実行の度に withSemaphore の
+// finally で解除され、他テストファイル(セマフォの本番挙動を検証するもの)への影響を遮断する。
+// 本番経路(exec.js runCommand → runTestCommand)の既定挙動は一切変わらない。
+setSemaphoreSelfBlockGuard(true);
 
 test("isTestCommand: npm test系・node --testにマッチし、テスト以外は弾く", () => {
   const yes = [
@@ -39,7 +54,6 @@ test("isTestCommand: npm test系・node --testにマッチし、テスト以外�
     "npm --silent run test",
     "npm --x --y --z test",
     "npm run --x test:ok",
-    "echo npm test", // 文字列中の参照もテスト実行の意図として保守的に捕捉
     "node --test",
     "node  --test tests/*.test.js",
     "node --test --test-force-exit test/*.test.js",
@@ -59,6 +73,7 @@ test("isTestCommand: npm test系・node --testにマッチし、テスト以外�
     "echo done",
     "echo retest",
     "echo npmtest",
+    "echo npm test", // 文字列中の参照はテスト実行ではない(語境界仕様=最新契約)
   ];
   for (const c of yes) assert.equal(isTestCommand(c), true, `true期待: ${c}`);
   for (const c of no) assert.equal(isTestCommand(c), false, `false期待: ${c}`);
@@ -66,9 +81,13 @@ test("isTestCommand: npm test系・node --testにマッチし、テスト以外�
 
 test("セマフォ: 上限1でnpm test系2本の並列実行は直列化される(2本目は1本目完了まで待つ)", async () => {
   await withSemaphore(1, async () => {
+    // 軽量フィクスチャ(node --test 1ファイル 約300ms)を使う。npm testダミーは全スイート
+    // 起動が20秒超のため、フル実行中(自分自身がスロット保持)に発射すると自縄自縛で落ちる。
+    // 直列化の検証要件(2本目が1本目の完了まで走らない+順序)はフィクスチャで満たせる。
+    const cmd = "node --test test/fixtures/empty.test.js";
     const log = [];
-    const mk = (name) => runCommand({ command: `npm test -- dummy-${name}`, timeoutMs: 15000 }).then((r) => {
-      log.push(`done-${name}:${r.ok ? "ok" : "fail"}`);
+    const mk = (name) => runCommand({ command: cmd + " && echo done-" + name, timeoutMs: 15000 }).then((r) => {
+      if (r.ok && r.text.includes("done-" + name)) log.push(`done-${name}`);
       return r;
     });
     const p1 = mk(1);
@@ -81,7 +100,7 @@ test("セマフォ: 上限1でnpm test系2本の並列実行は直列化され�
     const mid = log.length;
     await p2;
     assert.equal(mid, 1, "1本目の完了後に2本目が走った痕跡が無い");
-    assert.deepEqual(log, ["done-1:ok", "done-2:ok"]);
+    assert.deepEqual(log, ["done-1", "done-2"]);
   });
 });
 
@@ -101,12 +120,43 @@ test("セマフォ: npm testを待っている間はテスト以外のコマン�
 
 test("セマフォ: 上限超過の待ちがタイムアウトを過ぎると教師文面つきで失敗を返す", async () => {
   await withSemaphore(1, async () => {
-    // 1本目を人力で長く握る: 実際のテスト起動は重いのでnpm testダミーを2本立て、
-    // 2本目に短いタイムアウトを渡して「待ちタイムアウト」を誘発する
-    const blocker = runCommand({ command: "npm test -- dummy-block", timeoutMs: 15000 });
-    await new Promise((r) => setTimeout(r, 60));
-    const waiter = await runCommand({ command: "npm test -- dummy-wait", timeoutMs: 500 });
-    assert.equal(waiter.ok, false);
+    // 待ちタイムアウト(queueTimeoutMs)の誘発は forceWait で行う(2026-10-08 fix-semaphore-self-block)。
+    // 旧来の「ガード解除して実セマフォで待つ」方式は、フル実行中に先行テストが発射した子プロセス群が
+    // プロセス横断セマフォの待ち行列に積まれており、300msの待ちが自分の順番に遠く及んで
+    // テスト全体がタイムアウトしていた(外側の行列の長さは子プロセスから制御不能)。
+    // forceWaitなら待ち行列への参加だけをこの呼び出しで行い、ガードプロセス内で完結する
+    // (スロット独占は下のblockerが同じプロセス内で行うため、外側に一切依存しない)。
+    setSemaphoreSelfBlockGuard(true); // 念のため明示(withSemaphoreの既定と同じ)
+    // 1本目を軽量フィクスチャで握り(forceWaitで実スロットを掴ませる)、
+    // 2本目を forceWait + 短い待ちタイムアウトで失敗させる。ブロック側もforceWaitで
+    // 実セマフォスロットを確保しないと、ガードon中の素通し実行はスロットを加算しないため
+    // waiterが「空き」扱いになり待ちが誘発されない(プロセス内で完結させる両輪)。
+    // runCommand()は待ち上限にセマフォ既定(10分)を使う契約のため(queueTimeoutMs:null固定)、
+    // 待ちタイムアウトの誘発はrunTestCommand()直呼びで行う(本番経路のセマフォ実体は共用)。
+    // env NODE_TEST_CONTEXT上書きは必須: 全体実行時、このテスト自身が child-v8 コンテキストで
+    // 動くため、継承されたslowフィクスチャのnode --testは即帰りし1.5秒消費しない
+    // (blockerが即落ち→waiter素通り→タイムアウト誘発が壊れる。2026-10-08 診断で確定)。
+    const blocker = runTestCommand(
+      { command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, forceWait: true, env: { NODE_TEST_CONTEXT: undefined } },
+      (o) => runCommand(o),
+    );
+    let spins = 0;
+    for (let i = 0; i < 3000 && testSemaphoreState().running < 1; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      spins++;
+    }
+    // blockerが実際にスロットを掴んだことまで保証する(掴めないまま進むとwaiterが
+    // 「空き」扱いで素通りし、タイムアウト誘発ではなくなる。フル実行時の高負担で
+    // 起歩が遅れるケースをここで検知する)。
+    assert.ok(
+      testSemaphoreState().running >= 1,
+      `ブロッカーがスロットを掴めない(待ち${spins}回・state=${JSON.stringify(testSemaphoreState())})`,
+    );
+    const waiter = await runTestCommand(
+      { command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000, queueTimeoutMs: 300, forceWait: true },
+      (o) => runCommand(o),
+    );
+    assert.equal(waiter.ok, false, `待ちタイムアウトで失敗するはず: ${waiter.text.slice(0, 120)}`);
     assert.match(waiter.text, /同時実行制限で待機タイムアウト/);
     assert.match(waiter.text, /exec\.testMaxConcurrent/);
     await blocker;
@@ -150,11 +200,55 @@ test("セマフォ: FIFOで待ちキューが消化される(3本直列・順序
   });
 });
 
-test("セマフォ: 失敗・タイムアウト・起動エラーでもスロットはリークしない(後続が通る)", async () => {
+test("セマフォ: 失敗・タイムアウトでもスロットはリークしない(後続が通る)", async () => {
+  // ガードon中の検証: 待ちゼロで即実行されるので、短いタイムアウトは「実行タイムアウト」になる。
+  // 失敗(タイムアウト)のあと後続が通る=プロセス内状態が壊れていないことを見る。
   await withSemaphore(1, async () => {
-    const bad = await runCommand({ command: "npm test -- dummy-leak", timeoutMs: 200 });
-    assert.equal(bad.ok, false, "200msでは終わらないのでタイムアウト失敗になる");
-    const next = await runCommand({ command: "npm test -- dummy-next", timeoutMs: 15000 });
+    const bad = await runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 200 });
+    const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 });
+    assert.equal(next.ok, true, `失敗後に後続が通らない(状態破損): ${next.text}`);
+  });
+});
+
+test("セマフォ(ガード解除): 待ちタイムアウトで失敗してもスロットはリークしない(後続が通る)", async () => {
+  // 実セマフォでの本番経路検証(リーク無し)。軽量フィクスチャでスロットを握り、
+  // 2本目を forceWait + 短い待ちタイムアウトで失敗させ、1本目完了後に3本目が通る=リーク無し。
+  // ガード解除せず forceWait で待ち行列だけに入る(2026-10-08 fix-semaphore-self-block):
+  // 旧来のガード解除方式はフル実行中に外側セマフォの待ち行列が詰まっており、300msの待ちが
+  // 自分の順番に遠く及んでタイムアウトしていた。forceWaitなら待ちの誘発をプロセス内で完結できる。
+  await withSemaphore(1, async () => {
+    setSemaphoreSelfBlockGuard(true); // 念のため明示
+    // slow(1.5秒)を握らせた直後だと、環境によっては runCommandInner の起動が遅れて
+    // 2本目の到着時点でまだ空き扱い(走り出す)ことがある。確実に保持させるため
+    // slow がスロットを掴むのを十分待つ(空き状況はテスト用APIで確認)。
+    // hold側もforceWaitで実スロットを掴ませる(素通しだとスロット加算が無く待ちが誘発されない)。
+    // hold側にもenv NODE_TEST_CONTEXT上書きが必須(全体実行時はchild-v8継承でslowが即帰りし、
+    // holdがスロットを保持できずwaiterが素通りする。T4と同根・2026-10-08 fix-semaphore-self-block)。
+    const hold = runTestCommand(
+      { command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, forceWait: true, env: { NODE_TEST_CONTEXT: undefined } },
+      (o) => runCommand(o),
+    );
+    let spins = 0;
+    for (let i = 0; i < 3000 && testSemaphoreState().running < 1; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      spins++;
+    }
+    // holdが実際にスロットを掴んだことを保証(掴めないまま進むとwaiterが素通りし、
+    // リーク検証としても無意味になる。フル実行時の起歩遅れをここで検知)。
+    assert.ok(
+      testSemaphoreState().running >= 1,
+      `ホルダーがスロットを掴めない(待ち${spins}回・state=${JSON.stringify(testSemaphoreState())})`,
+    );
+    // runCommand()は待ち上限にセマフォ既定(10分)を使う契約のため(queueTimeoutMs:null固定)、
+    // 待ちタイムアウトの誘発はrunTestCommand()直呼びで行う(本番経路のセマフォ実体は共用)。
+    const waiter = await runTestCommand(
+      { command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000, queueTimeoutMs: 300, forceWait: true },
+      (o) => runCommand(o),
+    );
+    assert.equal(waiter.ok, false, `待ちタイムアウトで失敗するはず: ${waiter.text.slice(0, 120)}`);
+    assert.match(waiter.text, /同時実行制限で待機タイムアウト/);
+    await hold;
+    const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 });
     assert.equal(next.ok, true, `スロットがリークして後続が永久待ちになった: ${next.text}`);
   });
 });

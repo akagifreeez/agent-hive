@@ -28,13 +28,6 @@ function isRetryableNetworkError(err) {
   const code = String(err.code ?? err.cause?.code ?? "");
   return ABORT_CODE_RE.test(code) || isAbortRelated(err);
 }
-// stream系の汎用Error(stall監視のreject等・code無し)も切断の可能性がある。
-// 中断語(stall/terminated/aborted/timeout)を含むメッセージはリトライ契約へ乗せる。
-function isRetryableStreamError(err) {
-  if (!err || err.code) return false; // code持ち・code無し非Errorは中断扱いしない
-  const m = String(err.message ?? "");
-  return /stall|terminated|aborted|timeout|premature|socket hang up|other side closed/i.test(m);
-}
 // 中断観測の痕跡(HIVE_DEBUG_FILE指定時に採取。依存ゼロ・既定は無効)
 function noteAborted(err) {
   if (!process.env.HIVE_DEBUG_FILE) return;
@@ -109,9 +102,7 @@ export class OpenAIModel {
         // ネットワーク系(タイムアウト含む)はリトライ可(ZCode: NetworkError)。
         // undiciのTypeError: terminated(中断系)も瞬断として同じリトライ経路へ正規化する
         if (isAbortRelated(err)) noteAborted(err);
-        // 中断/瞬断系に加え、コードを持たない汎用Errorもstall/切断の可能性があるため
-        // メッセージ照合でリトライ契約へ乗せる(v6.6 stall復旧の回帰。2026-10-07 gamma)
-        if ((isRetryableNetworkError(err) || isRetryableStreamError(err)) && attempt <= RETRY_MAX_RETRIES) {
+        if (isRetryableNetworkError(err) && attempt <= RETRY_MAX_RETRIES) {
           await modelSleep(computeRetryDelay(attempt));
           continue;
         }
@@ -153,19 +144,14 @@ export class OpenAIModel {
           parsed = await consumeStream(res, onDelta);
         } catch (err) {
           // ストリーム途中切断もリトライ対象(再試行は最初から)。
-          // ストリーム途中切断もリトライ対象(再試行は最初から)。
-          // undiciの中断系(TypeError: terminated / Fetch.onAborted / ECONNRESET等)を
-          // ネットワーク系として正規化してリトライ契約へ乗せる(long-run-resilience:
-          // 2026-10-04のプロセス死対策)。中断観測の痕跡も採る(HIVE_DEBUG_FILE時)。
-          // リトライし切ったら行動化エラー(ループが次の行動を決められる形)として投げる
+          // undiciのTypeError: terminated(Fetch.onAborted・TLS切断)はここで例外として観測されるため、
+          // 未捕捉rejectionへ抜けさせずリトライ契約へ正規化して飲み込む
           if (isAbortRelated(err)) noteAborted(err);
-          // 中断/瞬断系に加え、コードを持たない汎用Errorもstall/切断の可能性があるため
-          // メッセージ照合でリトライ契約へ乗せる(v6.6 stall復旧の回帰。2026-10-07 gamma)
-          if ((isRetryableNetworkError(err) || isRetryableStreamError(err)) && attempt <= RETRY_MAX_RETRIES) {
+          if (isRetryableNetworkError(err) && attempt <= RETRY_MAX_RETRIES) {
             await modelSleep(computeRetryDelay(attempt));
             continue;
           }
-          throw new Error(translateStreamAbortError(err));
+          throw new Error(`ストリームが途切れました: ${err.message}`);
         }
         msg = { content: parsed.content || null, tool_calls: parsed.rawToolCalls, reasoning: parsed.reasoning ?? undefined };
         usage = parsed.usage;
@@ -284,13 +270,8 @@ function readChunkWithIdleTimeout(reader) {
     timer = setTimeout(() => reject(new Error(`ストリームが${Math.round(idle / 1000)}秒間無出力です(stall)`)), idle);
   });
   const readP = reader.read();
-  // read側がrejectしてもタイマーを解放する(放置するとプロセスが終了しない)。
-  // finally()の派生Promise自体がrejectすると誰も処理しない拒否(unhandledRejection→
-  // プロセス死)になるため、thenの両分岐で潰す(long-run-resilience)。
-  readP.then(
-    () => clearTimeout(timer),
-    () => clearTimeout(timer),
-  );
+  // read側がrejectしてもタイマーを解放する(放置するとプロセスが終了しない)
+  readP.finally(() => clearTimeout(timer));
   return Promise.race([readP, timeout]);
 }
 
@@ -418,39 +399,4 @@ function translateHttpError(status, text = "") {
   if (status === 404) return `モデルまたはURLが見つかりません(404)。model/baseUrlを確認。${short}`;
   if (status === 429) return `レート制限(429)。時間を置くかモデルを見直し。${short}`;
   return `モデルAPIエラー(${status}): ${short}`;
-}
-
-// ストリーム中断系エラーの正規化(long-run-resilience)。
-// undici(内蔵fetch)の切断は種々の形で出る: TypeError: terminated(Fetch.onAborted)、
-// TypeError: fetch failed(causeにECONNRESET/EPIPE等)、AbortError(タイムアウト)。
-// どれもネットワーク系として分類し、行動化できる1文にまとめる(プロセスは落とさない)。
-const STREAM_ABORT_HINTS = ["terminated", "aborted", "aborterror", "econnreset", "epipe", "econnaborted", "fetch failed", "network", "socket", "premature close", "other side closed"];
-
-/**
- * 中断系エラーかを判定する(メッセージ+cause連鎖をさかのぼって探査)。
- * @param {unknown} err
- * @returns {boolean}
- */
-export function isStreamAbortError(err) {
-  let cur = err;
-  for (let depth = 0; cur && depth < 5; depth++) {
-    const msg = String(/** @type {any} */ (cur).message ?? cur).toLowerCase();
-    if (STREAM_ABORT_HINTS.some((h) => msg.includes(h))) return true;
-    if (/** @type {any} */ (cur).name && String(/** @type {any} */ (cur).name).toLowerCase() === "aborterror") return true;
-    cur = /** @type {any} */ (cur).cause;
-  }
-  return false;
-}
-
-/**
- * ストリーム中断をリトライし切ったときの行動化エラー文面。
- * @param {unknown} err
- * @returns {string}
- */
-export function translateStreamAbortError(err) {
-  const detail = String(/** @type {any} */ (err)?.message ?? err).slice(0, 200);
-  if (isStreamAbortError(err)) {
-    return `ストリームが切断されました(ネットワーク瞬断の可能性)。リトライ${RETRY_MAX_RETRIES}回で不調。モデル呼び出しを諦めて次の行動を決めてください(待機/他タスク/ボード報告): ${detail}`;
-  }
-  return `ストリームが途切れました: ${detail}`;
 }

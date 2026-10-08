@@ -55,6 +55,7 @@ export class McpHost {
     this.buf = "";
     /** @type {string | null} 起動失敗(子のerrorイベント)の記録。失敗後のrequestは即座に拒否する */
     this.childError = null;
+    this.spawnError = null; // spawn由来の失敗通知済みフラグ(catchの二重emit防止)
   }
 
   async start() {
@@ -76,6 +77,7 @@ export class McpHost {
     this.child.on("error", (err) => {
       this.connected = false;
       this.childError = err.message;
+      this.spawnError = err;
       this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
@@ -135,8 +137,9 @@ export class McpHost {
       this.bus?.emit("mcp.started", { name: this.name, tools: this.tools.map((t) => t.name) });
       return { ok: true, tools: this.tools.length };
     } catch (err) {
-      this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
-      try { this.child.kill(); } catch {}
+      // spawn由来の失敗(ENOENT等)はerrorハンドラが通知済み。二重emitしない
+      if (!this.spawnError) this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
+      try { this.child?.kill(); } catch { /* 既に終了 */ }
       return { ok: false, error: err.message };
     }
   }
@@ -181,9 +184,9 @@ export class McpHost {
   request(method, params) {
     const id = this.nextId++;
     const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
-    if (this.connected === false) {
+    if (this.connected === false || this.spawnError) {
       // 起動失敗(ENOENT等)後の切断状態。pendingに積んでも応答は来ないので即reject
-      return Promise.reject(new Error(`MCPサーバー ${this.name} は起動失敗済みで切断されています(${this.childError ?? "起動直後の切断"})`));
+        return Promise.reject(new Error("MCPサーバー " + this.name + " に接続できません(起動失敗済み): " + (this.spawnError?.message ?? this.childError ?? "起動直後の切断")));
     }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -215,14 +218,6 @@ export class McpHost {
     } catch {}
   }
 
-  // 起動失敗・切断時に全pending要求を失敗させる(タイマーも解放)
-  failPending(message) {
-    for (const p of this.pending.values()) {
-      clearTimeout(p.timer);
-      p.reject(new Error(message));
-    }
-    this.pending.clear();
-  }
   stop() {
     try { this.child?.kill(); } catch {}
   }
