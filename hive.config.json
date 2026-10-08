@@ -12,6 +12,15 @@
           { "id": "glm-5.3-flash", "name": "GLM-5.3-Flash", "reasoning": true, "contextWindow": 200000, "maxTokens": 4000 },
           { "id": "glm-5.3", "name": "GLM-5.3", "reasoning": true, "contextWindow": 200000, "maxTokens": 4000 }
         ]
+      },
+      "bonsai": {
+        "baseUrl": "http://127.0.0.1:8080/v1",
+        "api": "openai-completions",
+        "auth": { "value": "local" },
+        "params": { "temperature": 1.0, "maxTokens": 4096, "timeoutMs": 300000 },
+        "models": [
+          { "id": "bonsai-27b", "name": "Bonsai-27B(ローカル)", "contextWindow": 32768, "maxTokens": 4096 }
+        ]
       }
     }
   },
@@ -41,7 +50,7 @@
       "beta",
       "gamma"
     ],
-    "maxTurnsPerRound": 12,
+    "maxTurnsPerRound": 20,
     "autoContinueRounds": 6,
     "requireSeparateApprove": true,
     "idleClaimWaitSec": 45,
@@ -79,11 +88,33 @@
   "loop": {
     "maxTurns": 40
   },
+  "exec": {
+    "testMaxConcurrent": 2,
+    "maxBashMs": 60000,
+    "maxBashCapMs": 600000
+  },
   "runner": {
     "timeoutSec": 900
   },
   "discovery": {
     "intervalSec": 120,
+    "probes": {
+      "triage": {
+        "mode": "off",
+        "command": "npm test",
+        "timeoutMs": 300000,
+        "knownFailures": [
+          { "file": "test/heavy/long-run-resilience.test.js", "name": "ストリーム途中切断(TypeError: terminated)はリトライされて成功する(プロセスは落ちない)", "area": "stream-stall", "note": "TDD途中領域: 非同期後始末の競合。10-04時点の既知失敗" },
+          { "file": "test/heavy/long-run-resilience.test.js", "name": "子プロセス: ガード付きはunhandledRejection後に生存しログへ残る", "area": "crash-guard", "note": "TDD途中領域: 子プロセス生存検証" },
+          { "file": "test/heavy/long-run-resilience.test.js", "name": "ガードはuncaughtExceptionも捕捉し、必ずログへ残す", "area": "crash-guard", "note": "TDD途中領域: 子プロセス生存検証" },
+          { "file": "test/heavy/long-run-resilience.test.js", "name": "異常頻度: 1時間の窓でしきい値超過したら「異常頻度」警告を1回だけ出す", "area": "crash-guard", "note": "TDD途中領域" },
+          { "file": "test/heavy/long-run-resilience.test.js", "name": "onEvent/onPostフック経由でbusに流れ、board投稿に使える", "area": "hooks", "note": "TDD途中領域: hooks経路" },
+          { "file": "test/retry.test.js", "name": "chat(stream): stall検知でリトライし、2回目で成功する", "area": "stream-stall", "note": "TDD途中領域: stall検知のタイミング依存" },
+          { "file": "test/model-policy.test.js", "name": "承認フロー競合経路: 差し戻し記録がtools.jsから呼ばれてもReferenceErrorしない(modelPolicy未指定=既定動作)", "area": "approval-conflict", "note": "一時gitリポジトリ初期化の競合" },
+          { "file": "test/heavy/cli.test.js", "name": "CLI: cancel/release/reopen/auditが実サーバーに対して動く", "area": "cli", "note": "実サーバー系の負荷依存" }
+        ]
+      }
+    },
     "testCommand": "npm test"
   },
   "permissions": {
@@ -105,7 +136,12 @@
       "git clean",
       "git push",
       "npm publish",
-      "curl "
+      "curl ",
+      "Stop-Process",
+      "taskkill",
+      "kill -9",
+      "pkill",
+      "wmic process delete"
     ]
   },
   "ui": {

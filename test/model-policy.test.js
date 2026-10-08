@@ -148,10 +148,12 @@ test("承認フロー競合経路: 差し戻し記録がtools.jsから呼ばれ�
     };
     const lead = { id: "lead", displayName: "リーダー", role: "lead", personaText: "# L" };
     // modelPolicyは未指定(null)=二重正規化・既定値経路。runner経路は readModelPolicy(config) 済みのオブジェクトを渡す
-    const leadTools = createTools({ agent: lead, workspace: wt, mainWorkspace: main, board, tasks, bus, approvals });
+    // workspaceには実worktree(wtA)を渡す。mergeAgentWorkはリポジトリ内でのみ正しく動く
+    // (イシュー#28ステップ分解により、非リポジトリでのgit add失敗はok:falseで可視化されるようになったため)
+    const leadTools = createTools({ agent: lead, workspace: wtA, mainWorkspace: main, board, tasks, bus, approvals });
     tasks.create({ id: "c1", body: "競合する仕事" });
     assert.ok((await leadTools.execute("claim_next_task", {})).ok);
-    (await import("node:fs")).writeFileSync(join(wt, "conflict.txt"), "wt side\n");
+    (await import("node:fs")).writeFileSync(join(wtA, "conflict.txt"), "wt side\n");
     const fin = await leadTools.execute("finish_task", { task_id: "c1" });
     assert.match(fin.text, /検証タスク verify-c1/, "マージは保留され検証タスクが起票する");
 

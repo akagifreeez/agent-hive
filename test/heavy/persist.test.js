@@ -118,13 +118,20 @@ test("v6.1: 再起動してもボード投稿・スレッド・会話メモリ�
   // 無音復元の確認: 起動ラウンドの遅延投稿(stagger等)が混ざる場合があるため、
   // 行数が静止するまで待ってから比較する(固定行数assertは並行負荷でフレーキーする)
   {
-    let cur = logLines(demoLog());
-    let last = -1;
-    const deadline = Date.now() + 10000;
-    while (cur !== last && Date.now() < deadline) {
-      last = cur;
-      await new Promise((r) => setTimeout(r, 300));
-      cur = logLines(demoLog());
+    // 2連続同一+約1秒静止(1回目の落ち着き待ちと同じ基準。10秒打ち切りは遅延投稿の
+    // 到着途中で抜ける恐れがあるため静止確認を優先する)
+    let prev2 = -1;
+    let stable2 = 0;
+    for (let i = 0; i < 100; i++) {
+      const c = logLines(demoLog());
+      if (c === prev2 && c > 0) {
+        stable2++;
+        if (stable2 >= 5) break;
+      } else {
+        stable2 = 0;
+      }
+      prev2 = c;
+      await new Promise((r) => setTimeout(r, 200));
     }
   }
   assert.equal(logLines(demoLog()), demoLinesBefore, "無音復元なので投稿が増えない");

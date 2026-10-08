@@ -5,7 +5,7 @@
  * @typedef {{id: string, baseUrl: string, api: string, name?: string, auth?: {type?: string, env?: string, file?: string, value?: string}, params?: {temperature?: number, maxTokens?: number, timeoutMs?: number, contextWindow?: number, reasoningEffort?: string, webSearch?: boolean|object|null}, models?: Array<{id: string, name?: string, contextWindow?: number, maxTokens?: number, reasoning?: boolean, reasoningEffort?: string, cost?: {input?: number, output?: number}|null}>}} ProviderCfg
  * @typedef {{id: string, name?: string, contextWindow?: number, maxTokens?: number, reasoning?: boolean, reasoningEffort?: string, cost?: {input?: number, output?: number, cacheRead?: number, cacheWrite?: number}|null}} ModelRow
  * @typedef {{provider: ProviderCfg, model: {id: string, name: string, contextWindow: number, maxTokens: number, reasoning: boolean, reasoningEffort: string|null, cost: {input?: number, output?: number, cacheRead?: number, cacheWrite?: number}|null}}} ModelSpec
- * @typedef {{default?: string|null, fallbacks?: string[]|null, providers?: Record<string, Object>}} ModelsCfg
+ * @typedef {{default?: string|null, fallbacks?: string[]|null, providers?: Record<string, Object>, routing?: Object}} ModelsCfg
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -14,7 +14,7 @@ import { parseModelRef, formatModelRef } from "./ref.js";
 
 /** 内蔵カタログを土台に設定をマージする。
  * @param {ModelsCfg} [modelsCfg]
- * @returns {{providers: Record<string, ProviderCfg>, defaultRef: string|null, fallbackRefs: string[]}} */
+ * @returns {{providers: Record<string, ProviderCfg>, defaultRef: string|null, fallbackRefs: string[], routing?: {enabled?: boolean, heavyPromptTokens?: number, heavyRoles?: string[], heavyQualityStrikes?: number, heavyTools?: number, heavyModelRef?: string|null, lightModelRef?: string|null}}} */
 export function buildCatalog(modelsCfg = {}) {
   const providers = {};
   for (const [id, p] of Object.entries(BUILTIN_PROVIDERS)) {
@@ -23,7 +23,7 @@ export function buildCatalog(modelsCfg = {}) {
   for (const [id, p] of Object.entries(modelsCfg.providers ?? {})) {
     providers[id] = { ...providers[id], id, ...p, models: (p.models ?? providers[id]?.models ?? []).map((m) => ({ ...m })) };
   }
-  return { providers, defaultRef: modelsCfg.default ?? null, fallbackRefs: modelsCfg.fallbacks ?? [] };
+  return { providers, defaultRef: modelsCfg.default ?? null, fallbackRefs: modelsCfg.fallbacks ?? [], routing: modelsCfg.routing };
 }
 
 /** ベアIDのときの既定プロバイダを推定する(内蔵+設定の一意一致 → 既定ref、の順)。

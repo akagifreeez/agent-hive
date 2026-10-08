@@ -4,6 +4,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runCommand } from "./exec.js";
+import { ensureMainCheckout } from "./branch-guard.js";
 
 // マージ直列化: withMergeLock経由でのみ実行する。promiseチェーンのミューテックス。
 // mergeAgentWorkは内部でこれを使い、tools.js/chat.js等の呼び出し元もこのロックを共有する。
@@ -143,6 +144,11 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
   }
   const branch = `agent/${agent.id}`;
   return queueMerge(async () => {
+    // -0.5) ブランチ漂流ガード: mainワークスペースのチェックアウトがagent/<id>等へ漂流していたら
+    //    安全にmainへ復帰してからマージする(2026-10-07朝の本番実害: 漂流+中断マージで
+    //    マージがagentブランチへ滞留し、起動不能に至った)。復帰できないときは中止して理由を返す。
+    const guard = await ensureMainCheckout({ mainWorkspace, exec });
+    if (!guard.ok) return { ok: false, drift: true, text: guard.reason };
     // 0) 競合マーカーガード: マーカー入りのmainをマージするとmain全体が構文破損する。
     //    main側に既にマーカーがある場合はマージ自体を中止する(r7で実際に発生)
     const mainMarkers = await exec({
@@ -155,23 +161,23 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
       return { ok: false, marker: true, text: `mainに競合マーカーが残っています(${files})。マージを中止しました。先にmain側のマーカーを解消してください。` };
     }
     // 1) worktree側の未コミット変更を確定(変更がなければno-op)。
-    //    #28: add→commitを分解して結果を検査する。pre-commitフック等でcommitが
-    //    空振りしても従来は {ok:true, merged:false} になり、成果がmainに入らないまま
-    //    成功扱いだった(ボード#168で実害再現)。ステージ差分があった=コミットを試みた
-    //    のに失敗したケースは失敗として返す。no-opは従来どおり成功扱い。
+    //    add/commitを個別に検査する(イシュー#28: pre-commitフック等でコミットが空振りしても
+    //    従来は ok:true 扱いになり、成果がmainに入らないまま成功扱いになっていた)。
     const add = await exec({ command: "git add -A", cwd: worktreePath, outputLimit: 2000 });
     if (!add.ok) {
-      return { ok: false, text: `ステージに失敗しました(git add): ${add.text.slice(0, 400)}` };
+      return { ok: false, text: "ステージ(git add)に失敗しました: " + add.text.slice(0, 400) };
     }
-    const stagedEmpty = await exec({ command: "git diff --cached --quiet", cwd: worktreePath, outputLimit: 500 });
-    if (!stagedEmpty.ok) {
-      const commit = await exec({
+    const staged = await exec({ command: "git diff --cached --quiet", cwd: worktreePath, outputLimit: 2000 });
+    let commit = { ok: true, text: "" };
+    if (!staged.ok) {
+      // ステージ差分あり=コミットを試みる。ここで失敗したら成果は確定できていない
+      commit = await exec({
         command: `git -c user.name=${agent.id} -c user.email=${agent.id}@hive.local commit -m 'wip: ${taskId}'`,
         cwd: worktreePath,
-        outputLimit: 4000,
+        outputLimit: 2000,
       });
       if (!commit.ok) {
-        return { ok: false, text: `コミットに失敗しました(pre-commitフック等): ${commit.text.slice(0, 600)}` };
+        return { ok: false, text: "コミットに失敗(pre-commitフック等): " + commit.text.slice(0, 400) + " 変更を確定できるようにしてから再度 finish_task してください。" };
       }
     }
     // 1.5) ブランチ側ガード: このマージで運ばれるファイルにマーカーが入っていれば拒否し、

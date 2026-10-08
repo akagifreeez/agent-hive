@@ -49,27 +49,27 @@ test("McpHost: 起動しないサーバーはok:falseでhiveは止まらない",
   assert.equal(r.ok, false);
 });
 
-test("McpHost: 不存在コマンド(ENOENT)でもuncaughtExceptionで落ちずok:false(#27)", async () => {
+test("McpHost: 不存在コマンド(非同期ENOENT)でもuncaughtExceptionで落ちずok:false相当", async () => {
+  // イシュー#27回帰: spawn自体は成功し、後から 'error' イベント(ENOENT)が飛ぶ。
+  // ハンドラ無しだとUnhandled 'error' eventでプロセスが落ちる。awaitで完結して検証する。
   const bus = new Bus();
-  const failures = [];
-  bus.on("mcp.failed", (p) => failures.push(p));
+  const failed = [];
+  bus.on("mcp.failed", (p) => failed.push(p));
   const host = new McpHost({
-    name: "enoent",
-    command: "definitely-not-exist-xyz-123",
+    name: "noent",
+    command: process.platform === "win32" ? "definitely-not-exist-xyz-123" : "definitely-not-exist-xyz-123",
     args: [],
     bus,
     timeoutMs: 5000,
   });
-  // awaitで完結する検証: start()が例外を外に投げず、ok:falseを返すこと
-  // (子プロセスの非同期errorイベントはUnhandled 'error' eventでプロセスを落としていた回帰)
-  const r = await host.start();
-  assert.equal(r.ok, false);
-  assert.ok(r.error, "エラー理由が返ること");
-  // 失敗がbusへ通知されていること(既存の失敗経路と同じ返却形の流儀)
-  assert.ok(failures.some((p) => p.name === "enoent"), "busへmcp.failedが通知されること");
-  // 切断状態として管理され、後続のrequest()はタイムアウトでなく即reject
-  await assert.rejects(host.request("tools/call", {}), /接続できません/);
-  host.stop(); // 切断後もstop()が例外を投げないこと
+  const r = await host.start(); // 外へ例外を投げない
+  assert.equal(r.ok, false, "start()はok:falseを返す");
+  assert.match(r.error, /ENOENT|起動できません|not found/i);
+  const ok = await waitUntil(() => failed.length > 0, 5000);
+  assert.equal(ok, true, "busへmcp.failedが流れる");
+  assert.equal(failed[0].name, "noent");
+  // 失敗後のrequest()は切断状態として即reject(プロセスは落とさない)
+  await assert.rejects(() => host.request("initialize", {}), /切断|起動できません|接続できません/);
 });
 
 test("runChat: MCPツールがエージェントから使え、cron定期実行が走る", async () => {

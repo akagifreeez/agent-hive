@@ -3,7 +3,7 @@
 // 承認制ゲート(gate)を通す。
 import { statSync, readdirSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, existsSync, renameSync, realpathSync } from "node:fs";
 import { resolve, join, dirname, sep } from "node:path";
-import { runCommand, detectShell } from "./exec.js";
+import { runCommand, detectShell, bashTimeoutConfig } from "./exec.js";
 import { mergeAgentWork } from "./worktree.js";
 import { readMeta, detectTaskOverlap } from "./tasks.js";
 import { noteRejection } from "./model-policy.js";
@@ -503,6 +503,11 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
           return { ok: false, text: "task_idは英小文字数字とハイフンで付けてください。" };
         }
         const dependsOn = Array.isArray(args.depends_on) ? args.depends_on.map((s) => String(s ?? "").trim()).filter(Boolean) : [];
+        // 依存タスクがopenのままなら起票を拒否(fail-fast。依存が全doneになるまで請求不可なのに起票すると永遠に請求できない幽霊タスクになる。イシュー#25)
+        if (dependsOn.length) {
+          const openDeps = tasks.list().open.filter((t) => dependsOn.includes(t.id));
+          if (openDeps.length > 0) return { ok: false, text: `依存タスクが未完了のため起票できません: ${openDeps.map((t) => t.id).join(", ")}。完了を待つか、depends_onを外して再起票してください。` };
+        }
         // 代替モデル指定(#12): 基本は既定モデル。リーダー(スレッド開設権持ち)だけ特例で指定可
         const modelArg = String(args.model ?? "").trim() || null;
         if (modelArg && !threadOpener) {
@@ -772,8 +777,12 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         writeFileSync(p, src.replace(oldText, String(args.new_text ?? "")));
         return { ok: true, text: `${args.path} を編集しました。` };
       }
-      case "bash":
-        return await gatedBash(String(args.command ?? ""), clamp(Number(args.timeout_ms) || maxBashMs, 1000, 120000));
+      case "bash": {
+        // タイムアウトは config.exec.maxBashMs/maxBashCapMs(モジュール既定)→インスタンス既定 の順で解決。
+        // フルスイート(約3.5分)が上限120秒で絶対に通らなかったため上限をconfigへ出した
+        const bt = bashTimeoutConfig();
+        return await gatedBash(String(args.command ?? ""), clamp(Number(args.timeout_ms) || bt.defaultMs || maxBashMs, 1000, bt.capMs || 120000));
+      }
       case "post_to_board": {
 
         const dest = String(args.to_thread ?? "").trim();

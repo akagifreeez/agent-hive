@@ -19,7 +19,7 @@ import { modelStateInfo, resolveDefaultSpec, probeModel, startOpenAIAuth } from 
 import { buildCatalog } from "../model/catalog.js";
 import { spawn } from "node:child_process";
 import { listWorkspaceFiles } from "../engine/tools.js";
-import { aggregateUsage, localDateKey, aggregateCacheHits } from "../engine/usage.js";
+import { aggregateUsage, localDateKey, aggregateCacheHits, CACHE_HIT_LOW_THRESHOLD } from "../engine/usage.js";
 import { summarizeSessionDir } from "../engine/session-report.js";
 
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -104,7 +104,19 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (notifications.length > 30) notifications.length = 30;
     },
   });
-  wireStallNotify(bus, { enabled: config.notify?.stop !== false, stallSec: config.notify?.stallSec ?? 600, onNotify: (n) => { notifications.unshift(n); if (notifications.length > 30) notifications.length = 30; } });
+  // 戻り値はui.close()からunwire()してタイマー/リスナを解放(常駐プロセスの自然終了)
+  /** @type {{unwire: () => void}|null} stall通知の解除ハンドル */
+  const stallNotify = wireStallNotify(bus, { enabled: config.notify?.stop !== false, stallSec: config.notify?.stallSec ?? 600, onNotify: (n) => { notifications.unshift(n); if (notifications.length > 30) notifications.length = 30; } });
+  // モデルルーティングの実効状態(POST直後の同期用)。/api/routing POSTがhive.local.jsonへ
+  // 永続化する際にここへも載せ、GET・/api/models・/api/stateがその値を返す(起動後の変更を
+  // 実行中configへ戻し書きするのと等価。configオブジェクト自体は所与の契約なので触らない)。
+  // 未POSTならnull=実行中configの値(=起動時点のlocal.json反映済み)がそのまま実効状態。
+  /** @type {boolean|null} */
+  let routingEnabledOverride = null;
+  const modelInfoNow = () => {
+    const m = modelStateInfo(config);
+    return routingEnabledOverride === null ? m : { ...m, routing: { ...m.routing, enabled: routingEnabledOverride } };
+  };
   const live = {
     // CLI通知(#11): 最新の通知(承認待ち/マージ完了/長時間タスク完了)。新着順・最大30件
     notifications,
@@ -386,7 +398,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         return;
       }
       // 総件数: チャットモードではディスクが真実。RAMのみのボード(未永続化)はRAM件数で代用
-      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length), budget: budgetState }, workspace: config.workspace, model: modelStateInfo(config), apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, budget: budgetState, mcp: config.mcp?.servers ?? {} });
+      if (url.pathname === "/api/state") return json(res, { live: { ...live, board: [...live.board].sort((a,b)=>a.id-b.id).slice(-200), boardTotal: Math.max(boardStore.total(), live.board.length), budget: budgetState }, workspace: config.workspace, model: modelInfoNow(), apiKey: { set: Boolean(config.model.apiKey), hint: config.model.apiKey ? "…" + String(config.model.apiKey).slice(-4) : null, viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) }, commands: config.commands ?? {}, workflows: onListWorkflows ? onListWorkflows() : [], tasks: tasks.snapshot(), taskList: tasks.list(), files: listWorkspaceFiles(config.workspace), memoryFiles: listMemoryWithExpiry(config.workspace), monitorPort: config.ui.monitorPort ?? null, budget: budgetState, mcp: config.mcp?.servers ?? {} });
       // ボード履歴の頁送り。before=<id> でそのIDより前を返す(未指定は末尾200件)。
       // thread を指定するとそのスレッドのJSONLから直接読む(RAMに無い過去分も。肥大化しても遅くならない)
       // ?q= があるときは全文検索モード(全スレッド横断の本文部分一致)
@@ -408,7 +420,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         });
         return;
       }
-      if (url.pathname === "/api/models") return json(res, { model: modelStateInfo(config) });
+      if (url.pathname === "/api/models") return json(res, { model: modelInfoNow() });
       if (url.pathname === "/api/clear-board" && req.method === "POST") {
         // チャット履歴のクリア(設定ウィンドウ/ヘッダの「履歴クリア」)。タスク・メモリには触らない
         let body = "";
@@ -422,6 +434,37 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
             // runner側のBoardメモリも空にする(次ラウンドの文脈に過去投稿を残さない)
             bus.emit("board.clear", { thread: t });
             json(res, { ok: true, thread: t, clearedPosts: r.count });
+          } catch (err) {
+            json(res, { error: err.message }, 400);
+          }
+        });
+        return;
+      }
+      if (url.pathname === "/api/routing" && req.method === "GET") {
+        // モデルルーティングの実効状態。POST済みの値(=hive.local.jsonへ永続化済み)を最優先し、
+        // 未POSTなら実行中configから取り直す(起動時のlocal.json反映を含む)
+        const m = modelInfoNow();
+        return json(res, { enabled: Boolean(m.routing?.enabled), appliedAt: m.routing?.enabled != null ? "config" : null, reflectTiming: "restart" });
+      }
+      if (url.pathname === "/api/routing" && req.method === "POST") {
+        // モデルルーティングのON/OFF。hive.local.jsonのmodels.routing.enabledへ永続化する
+        // (configとの優先順位: local > config。反映はhiveの再起動後 = モデル実体はラウンド開始時に組立)。
+        // 実効状態もここで同期する(POST直後のGETが同じ値を返す。UIスイッチの再描画で元に戻らない)
+        let body = "";
+        req.on("data", (d) => (body += d));
+        req.on("end", () => {
+          try {
+            const enabled = JSON.parse(body || "{}").enabled;
+            if (typeof enabled !== "boolean") throw new Error("enabledはbooleanで指定してください");
+            const localPath = resolve(dataDir(), "hive.local.json");
+            let local = {};
+            if (existsSync(localPath)) {
+              try { local = JSON.parse(readFileSync(localPath, "utf8")); } catch { /* 壊れていれば新規作成 */ }
+            }
+            local.models = { ...(local.models ?? {}), routing: { ...(local.models?.routing ?? {}), enabled } };
+            writeFileSync(localPath, JSON.stringify(local, null, 1));
+            routingEnabledOverride = enabled;
+            json(res, { ok: true, enabled, note: "保存しました。hiveの再起動で反映されます" });
           } catch (err) {
             json(res, { error: err.message }, 400);
           }
@@ -920,6 +963,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         devserverProc = null;
       }
       server.close();
+      // 静止監視タイマーとbusリスナを解放(close後もプロセスが生き残らないように)
+      stallNotify?.unwire();
     },
     token: uiToken,
   };
@@ -1325,7 +1370,7 @@ function persistUsage(workspace, entry) {
 /**
  * @param {string} workspace
  * @param {{agent?: string|null, fromTurn?: number|string|null, toTurn?: number|string|null, file?: string|null}} [opts] fromTurn/toTurnは文字列(URLクエリ)での指定も受け付ける(内部でNumber化)
- * @returns {{series: Array<{agent: string, points: Array<{ts: string, turn: number, prompt: number, completion: number, reasoning: number, totalTokens: number, tokPerSec: number|null}>, totalTokens: number, tokPerSec: number|null, lastTokPerSec: number|null}>, total: {turns: number, totalTokens: number, byAgent: Record<string, number>, tokPerSec: number|null}, lastTs: string|null, cacheHits: ReturnType<typeof aggregateCacheHits>}}
+ * @returns {{series: Array<{agent: string, points: Array<{ts: string, turn: number, prompt: number, completion: number, reasoning: number, totalTokens: number, tokPerSec: number|null}>, totalTokens: number, tokPerSec: number|null, lastTokPerSec: number|null}>, total: {turns: number, totalTokens: number, byAgent: Record<string, number>, tokPerSec: number|null}, lastTs: string|null, cacheHits: ReturnType<typeof aggregateCacheHits>, cacheHitLowThreshold: number}}
  */
 export function analyzeUsageTrace(workspace, opts = {}) {
   const cacheHitRows = [];
@@ -1394,7 +1439,7 @@ export function analyzeUsageTrace(workspace, opts = {}) {
     if (r.ms > 0) { msSum += r.ms; completionSum += r.completion; }
     if (!lastTs || r.ts > lastTs) lastTs = r.ts;
   }
-  return { series, cacheHits: aggregateCacheHits(cacheHitRows), total: { turns, totalTokens, byAgent: byAgentTotal, tokPerSec: msSum > 0 ? completionSum / (msSum / 1000) : null }, lastTs };
+  return { series, cacheHits: aggregateCacheHits(cacheHitRows), cacheHitLowThreshold: CACHE_HIT_LOW_THRESHOLD, total: { turns, totalTokens, byAgent: byAgentTotal, tokPerSec: msSum > 0 ? completionSum / (msSum / 1000) : null }, lastTs };
 }
 
 // /api/audit: state/audit.jsonl(+1世代前 audit-1.jsonl)の末尾limit件を新着順で返す。
