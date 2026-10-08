@@ -456,7 +456,12 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
               text: `マージが競合しました。あなたの作業ディレクトリで \`git merge main\` を実行し、競合ファイルを編集して解決 → \`git add -A && git commit\` → 再度 finish_task してください。\n\ngitの出力:\n${m.text.slice(0, 1500)}`,
             };
           }
-          if (!m.ok) return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 500)}` };
+          // #28: コミット失敗(pre-commitフック等)は競合と同じく失敗として伝播する。
+          // 成果がmainに入らないまま成功扱いにしない。
+          if (!m.ok) {
+            bus.emit("merge.conflict", { agent: agent.id, taskId });
+            return { ok: false, text: `マージに失敗しました: ${m.text.slice(0, 800)}\n\nタスクは完了していません。原因を取り除いてから再度 finish_task してください。` };
+          }
           bus.emit("merge.completed", { agent: agent.id, taskId, stat: m.stat ?? "", patch: m.patch ?? "", summary: m.summary ?? "" });
           board.post("system", `[マージ] ${agent.displayName}(${agent.id}) がタスク ${taskId} の成果を main へ取り込みました${m.summary ? `(${m.summary})` : ""}。`);
         }
