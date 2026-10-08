@@ -473,6 +473,8 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     mcpList: () => mcpServersInfo(mcpHosts),
     // デバッグ/テスト用: 承認フロー保留 Map(ラウンド末マージ保留判定が本番配線で生きていることの観測点)
     approvalsPending: approvals.pending,
+    // デバッグ/テスト用: スレッド名ごとのChatHost(ラウンド状態の観測点。replyHost等の内部参照用)
+    threadHost: (name) => (name === "__main__" ? leadHost : threads.get(name)?.host ?? null),
     /** @param {{name?: string, command?: string, args?: string[], env?: Object.<string,string>}} o */
     mcpAdd: async ({ name, command, args, env } = {}) => {
       const id = String(name ?? "").trim();
