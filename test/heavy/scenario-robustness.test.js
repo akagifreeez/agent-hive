@@ -12,9 +12,9 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runScenario } from "../src/runner.js";
-import { Board, Bus } from "../src/engine/board.js";
-import { TaskBlackboard } from "../src/engine/tasks.js";
+import { runScenario } from "../../src/runner.js";
+import { Board, Bus } from "../../src/engine/board.js";
+import { TaskBlackboard } from "../../src/engine/tasks.js";
 
 const PERSONA = join(dirname(fileURLToPath(import.meta.url)), "..", "agents", "alpha.md");
 
