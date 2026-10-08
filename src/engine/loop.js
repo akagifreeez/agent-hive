@@ -113,6 +113,8 @@ export async function runAgentLoop({
   peekInput = null, // () => 未処理入力が待っているか(取り出さず覗くだけ)。idle退場の抑制に使う
   claimMissesLimit = 3, // 連続請求ミス何回でidle終了するか(追加ワーカーは1で早期退場)
   checkpointFn = null, // (messages) => void ツール実行済み地点でスナップショットを保存する(イシュー#4)
+  sessionLogKeep = null, // session-logの旧世代保持数(config.sessionLog.keep)。null=既定(3)
+  sessionLogMaxBytes = null, // session-logの1ファイル上限(config.sessionLog.maxBytes)。null=既定(64MB)
 }) {
   if (!messages) {
     const sys = buildSystemPrompt(agent, shellKind);
@@ -149,6 +151,8 @@ export async function runAgentLoop({
   // board persistPathの親配下へ書き、persistPathが無い(単体テスト等)場合はno-op。
   const sessionLog = createSessionLog({
     dir: board.persistPath ? join(dirname(board.persistPath), "session-log") : null,
+    ...(sessionLogKeep != null ? { keep: sessionLogKeep } : {}),
+    ...(sessionLogMaxBytes != null ? { maxBytes: sessionLogMaxBytes } : {}),
   });
   bus.emit("agent.status", { agent: agent.id, status: "working" });
 

@@ -30,6 +30,10 @@
   "compact": {
     "thresholdPercent": 90
   },
+  "sessionLog": {
+    "maxBytes": 67108864,
+    "keep": 5
+  },
   "workspace": "workspace",
   "worktrees": {
     "dir": "worktrees"

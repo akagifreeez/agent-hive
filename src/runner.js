@@ -805,6 +805,8 @@ export async function runScenario({ config, modelFactory, bus = new Bus() }) {
       maxTurns: config.loop.maxTurns, shellKind,
       contextWindow: config.model.contextWindow ?? 200000,
       thresholdPercent: config.compact?.thresholdPercent,
+      sessionLogKeep: config.sessionLog?.keep ?? null,
+      sessionLogMaxBytes: config.sessionLog?.maxBytes ?? null,
       memory: [buildMemoryContext(config.workspace), buildSkillsIndex(config.workspace)].filter(Boolean).join("\n\n") || null,
     });
   })());

@@ -50,6 +50,7 @@ export class ChatHost {
     this.project = project;
     this.autoContinueRounds = autoContinueRounds;
     this.autoResume = normalizeAutoResume(autoResume); // 停止後の自動再開設定(無効時は従来どおり停止)
+    this.sessionLogCfg = config?.sessionLog ?? null; // session-logの世代数/上限(config.sessionLog)
     this.autoResumes = new Map(); // id => 連続自動再開回数(着地で回復・外部起点のwakeでリセット)
     this._autoResumeTimers = new Set(); // 待機中の再開タイマー(disposeで解除)
     this.hooks = hooks;
@@ -330,6 +331,8 @@ export class ChatHost {
             shellKind: this.shellKind,
             contextWindow: this.contextWindow,
             thresholdPercent: this.thresholdPercent,
+            sessionLogKeep: this.sessionLogCfg?.keep ?? null,
+            sessionLogMaxBytes: this.sessionLogCfg?.maxBytes ?? null,
           messages,
           seenBoard: this.seen.get(main.id) ?? null,
           memory: this.memoryFn?.() ?? null, // 圧縮時の権威分離判定に使う
