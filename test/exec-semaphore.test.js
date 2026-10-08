@@ -14,6 +14,7 @@ import {
   getTestMaxConcurrent,
   resetTestSemaphore,
   setSemaphoreSelfBlockGuard,
+  testSemaphoreState,
 } from "../src/engine/test-semaphore.js";
 
 // 並列テストファイル同士でセマフォ状態を持ち越さない。各テストの終了時に必ず戻す。
@@ -167,13 +168,39 @@ test("セマフォ: FIFOで待ちキューが消化される(3本直列・順序
   });
 });
 
-test("セマフォ: 失敗・タイムアウト・起動エラーでもスロットはリークしない(後続が通る)", async () => {
+test("セマフォ: 失敗・タイムアウトでもスロットはリークしない(後続が通る)", async () => {
+  // ガードon中の検証: 待ちゼロで即実行されるので、短いタイムアウトは「実行タイムアウト」になる。
+  // 失敗(タイムアウト)のあと後続が通る=プロセス内状態が壊れていないことを見る。
   await withSemaphore(1, async () => {
-    // タイムアウト誘発も軽量フィクスチャで(フル実行中のnpm testダミーは自縄自縛落ちの元)。
-    // 短すぎるtimeoutMsは「セマフォ待ちタイムアウト」ではなく「実行タイムアウト」になる。
     const bad = await runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 200 });
     assert.equal(bad.ok, false, "200msでは終わらないのでタイムアウト失敗になる");
     const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 });
-    assert.equal(next.ok, true, `スロットがリークして後続が永久待ちになった: ${next.text}`);
+    assert.equal(next.ok, true, `失敗後に後続が通らない(状態破損): ${next.text}`);
+  });
+});
+
+test("セマフォ(ガード解除): 待ちタイムアウトで失敗してもスロットはリークしない(後続が通る)", async () => {
+  // 実セマフォ(ガードoff・上限1)での本番経路検証。軽量フィクスチャでスロットを握り、
+  // 2本目を短い待ちタイムアウトで失敗させ、1本目完了後に3本目が通る=リーク無し。
+  // ガード解除はwithSemaphoreの中で行い、テスト終了時に必ず戻す(finallyで復帰)。
+  await withSemaphore(1, async () => {
+    setSemaphoreSelfBlockGuard(false);
+    try {
+      // slow(1.5秒)を握らせた直後だと、環境によっては runCommandInner の起動が遅れて
+      // 2本目の到着時点でまだ空き扱い(走り出す)ことがある。確実に保持させるため
+      // slow がスロットを掴むのを十分待つ(空き状況はテスト用APIで確認)。
+      const hold = runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000 });
+      for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      const waiter = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 300 });
+      assert.equal(waiter.ok, false, "待ちタイムアウトで失敗するはず");
+      assert.match(waiter.text, /同時実行制限で待機タイムアウト/);
+      await hold;
+      const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 });
+      assert.equal(next.ok, true, `スロットがリークして後続が永久待ちになった: ${next.text}`);
+    } finally {
+      setSemaphoreSelfBlockGuard(true); // ファイル方針へ戻す(withSemaphoreのfinallyでも二重に戻る)
+    }
   });
 });
