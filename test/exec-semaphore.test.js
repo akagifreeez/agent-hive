@@ -128,10 +128,16 @@ test("セマフォ: 上限超過の待ちがタイムアウトを過ぎると教
     // runningが立たず「待ち」が発生しない)。待ちタイムアウトは queueTimeoutMs で明示誘発し、
     // セマフォ既定(10分)固定(2026-10-08 9d35dc4: timeoutMsは実行予算、待ちへ転用しない)のため、
     // 待ちタイムアウト面の検証は runTestCommand 直叩きで行う(検証したい契約の直接経路)。
-    const blocker = runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000 });
+    // スロット保持者(slow fixture)は親のnode:test実行コンテキストを継ぐと
+    // NODE_TEST_CONTEXT付きspawn(実測: 当環境node24では子のnode --testが即帰る
+    // "recursively within a test file"抑止)になるため、env明示で同変数を undefined
+    // 上書きして本物の1.5秒テストとして走らせる(slowが実際に1.5秒スロットを握り、
+    // 2本目の待ちタイムアウト誘発を保証する)。
+    const blocker = runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000, env: { NODE_TEST_CONTEXT: undefined } });
     for (let i = 0; i < 100 && testSemaphoreState().running < 1; i++) {
       await new Promise((r) => setTimeout(r, 10));
     }
+    assert.ok(testSemaphoreState().running >= 1, "ブロッカーがスロットを掴んでいるはず");
     const waiter = await runTestCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000, queueTimeoutMs: 300 }, runCommandInner);
     assert.equal(waiter.ok, false);
     assert.match(waiter.text, /同時実行制限で待機タイムアウト/);
