@@ -1,0 +1,185 @@
+{
+  "models": {
+    "default": "zai/glm-5.3-flash",
+    "fallbacks": [],
+    "providers": {
+      "zai": {
+        "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+        "api": "openai-completions",
+        "auth": { "env": "ZAI_API_KEY", "file": "../../zai.key" },
+        "params": { "temperature": 0.7, "maxTokens": 4000, "timeoutMs": 180000, "reasoningEffort": "high", "webSearch": true },
+        "models": [
+          { "id": "glm-5.3-flash", "name": "GLM-5.3-Flash", "reasoning": true, "contextWindow": 200000, "maxTokens": 4000 },
+          { "id": "glm-5.3", "name": "GLM-5.3", "reasoning": true, "contextWindow": 200000, "maxTokens": 4000 }
+        ]
+      },
+      "bonsai": {
+        "baseUrl": "http://127.0.0.1:8080/v1",
+        "api": "openai-completions",
+        "auth": { "value": "local" },
+        "params": { "temperature": 1.0, "maxTokens": 4096, "timeoutMs": 300000 },
+        "models": [
+          { "id": "bonsai-27b", "name": "Bonsai-27B(ローカル)", "contextWindow": 32768, "maxTokens": 4096 }
+        ]
+      }
+    }
+  },
+  "budget": {
+    "maxTokensPerRun": 2000000
+  },
+  "compact": {
+    "thresholdPercent": 90
+  },
+  "workspace": "workspace",
+  "worktrees": {
+    "dir": "worktrees"
+  },
+  "hierarchy": {
+    "maxDepth": 2,
+    "maxConcurrent": 35
+  },
+  "chat": {
+    "lead": "lead",
+    "workers": [
+      "alpha",
+      "beta",
+      "gamma"
+    ],
+    "mains": [
+      "alpha",
+      "beta",
+      "gamma"
+    ],
+    "maxTurnsPerRound": 20,
+    "autoContinueRounds": 6,
+    "requireSeparateApprove": true,
+    "idleClaimWaitSec": 45,
+    "autoscale": true,
+    "autoscaleIntervalSec": 30,
+    "maxWorkersPerThread": 4
+  },
+    "agents": [
+      {
+        "id": "alpha",
+        "displayName": "アルファ",
+        "role": "impl",
+        "persona": "agents/alpha.md"
+      },
+      {
+        "id": "delta",
+        "displayName": "デルタ",
+        "role": "impl",
+        "persona": "agents/delta.md"
+      },
+      {
+        "id": "beta",
+        "displayName": "ベータ(検証・Flash)",
+        "role": "review",
+        "persona": "agents/beta.md",
+        "model": "zai/glm-5.3-flash"
+      },
+      {
+        "id": "gamma",
+        "displayName": "ガンマ",
+        "role": "lead",
+        "persona": "agents/gamma.md"
+      }
+    ],
+  "loop": {
+    "maxTurns": 40
+  },
+  "exec": {
+    "testMaxConcurrent": 2,
+    "maxBashMs": 60000,
+    "maxBashCapMs": 600000
+  },
+  "runner": {
+    "timeoutSec": 900
+  },
+  "discovery": {
+    "intervalSec": 120,
+    "probes": {
+      "triage": {
+        "mode": "off",
+        "command": "npm test",
+        "timeoutMs": 300000,
+        "knownFailures": [
+          { "file": "test/long-run-resilience.test.js", "name": "ストリーム途中切断(TypeError: terminated)はリトライされて成功する(プロセスは落ちない)", "area": "stream-stall", "note": "TDD途中領域: 非同期後始末の競合。10-04時点の既知失敗" },
+          { "file": "test/long-run-resilience.test.js", "name": "子プロセス: ガード付きはunhandledRejection後に生存しログへ残る", "area": "crash-guard", "note": "TDD途中領域: 子プロセス生存検証" },
+          { "file": "test/long-run-resilience.test.js", "name": "ガードはuncaughtExceptionも捕捉し、必ずログへ残す", "area": "crash-guard", "note": "TDD途中領域: 子プロセス生存検証" },
+          { "file": "test/long-run-resilience.test.js", "name": "異常頻度: 1時間の窓でしきい値超過したら「異常頻度」警告を1回だけ出す", "area": "crash-guard", "note": "TDD途中領域" },
+          { "file": "test/long-run-resilience.test.js", "name": "onEvent/onPostフック経由でbusに流れ、board投稿に使える", "area": "hooks", "note": "TDD途中領域: hooks経路" },
+          { "file": "test/retry.test.js", "name": "chat(stream): stall検知でリトライし、2回目で成功する", "area": "stream-stall", "note": "TDD途中領域: stall検知のタイミング依存" },
+          { "file": "test/model-policy.test.js", "name": "承認フロー競合経路: 差し戻し記録がtools.jsから呼ばれてもReferenceErrorしない(modelPolicy未指定=既定動作)", "area": "approval-conflict", "note": "一時gitリポジトリ初期化の競合" },
+          { "file": "test/cli.test.js", "name": "CLI: cancel/release/reopen/auditが実サーバーに対して動く", "area": "cli", "note": "実サーバー系の負荷依存" }
+        ]
+      }
+    },
+    "testCommand": "npm test"
+  },
+  "permissions": {
+    "askTimeoutSec": 120,
+    "deny": [
+      "rm -rf /",
+      "rm -rf ~",
+      "mkfs",
+      "shutdown",
+      "format ",
+      "del /",
+      ":(){:|:&};:",
+      "curl --upload",
+      "curl -T "
+    ],
+    "ask": [
+      "rm -rf",
+      "git reset --hard",
+      "git clean",
+      "git push",
+      "npm publish",
+      "curl ",
+      "Stop-Process",
+      "taskkill",
+      "kill -9",
+      "pkill",
+      "wmic process delete"
+    ]
+  },
+  "ui": {
+    "port": 7789
+  },
+  "scenario": {
+    "name": "stringutil",
+    "seedFiles": [
+      {
+        "path": "package.json",
+        "content": "{ \"name\": \"hive-workspace\", \"private\": true, \"type\": \"module\", \"scripts\": { \"test\": \"node --test tests/*.test.mjs\" } }\n"
+      },
+      {
+        "path": "tests/upper.test.mjs",
+        "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { toUpperSnake } from \"../src/upper.js\";\n\ntest(\"toUpperSnake: 空文字は空文字\", () => {\n  assert.equal(toUpperSnake(\"\"), \"\");\n});\n\ntest(\"toUpperSnake: スペース区切りは_で繋ぐ\", () => {\n  assert.equal(toUpperSnake(\"hello world\"), \"HELLO_WORLD\");\n});\n\ntest(\"toUpperSnake: ハイフンとキャメルも分割する\", () => {\n  assert.equal(toUpperSnake(\"foo-barBaz\"), \"FOO_BAR_BAZ\");\n});\n\ntest(\"toUpperSnake: 連続区切りは潰す\", () => {\n  assert.equal(toUpperSnake(\"a--b  c\"), \"A_B_C\");\n});\n"
+      },
+      {
+        "path": "tests/pad.test.mjs",
+        "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { padCenter } from \"../src/pad.js\";\n\ntest(\"padCenter: 中央寄せ(偶数余り)\", () => {\n  assert.equal(padCenter(\"ab\", 6), \"  ab  \");\n});\n\ntest(\"padCenter: 長さ超過ならそのまま\", () => {\n  assert.equal(padCenter(\"abcdef\", 3), \"abcdef\");\n});\n\ntest(\"padCenter: 奇数余りは左側が少ない\", () => {\n  assert.equal(padCenter(\"a\", 4), \" a  \");\n});\n"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "impl-upper",
+        "role": "impl",
+        "body": "src/upper.js を実装する。仕様は tests/upper.test.mjs が決める(テストが仕様書)。\n- ESM。`node --test tests/upper.test.mjs` を通すこと。\n- 実行結果をボードへ報告し、finish_task(自動でmainへマージされる)。"
+      },
+      {
+        "id": "impl-pad",
+        "role": "impl",
+        "body": "src/pad.js を実装する。仕様は tests/pad.test.mjs が決める(テストが仕様書)。\n- ESM。`node --test tests/pad.test.mjs` を通すこと。\n- 実行結果をボードへ報告し、finish_task(自動でmainへマージされる)。"
+      },
+      {
+        "id": "summarize-stringutil",
+        "role": "lead",
+        "body": "両implタスクのマージとレビュー状況を wait_for_board で待つ。\n- 自分の作業ディレクトリで `git merge main` してから `node --test tests/*.test.mjs` を実行し、全体が通ることを確認。\n- 全体まとめ(何が作られたか/テスト・レビュー結果/残課題)をボードへ投稿し、finish_task。"
+      }
+    ]
+  }
+
+}
