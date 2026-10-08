@@ -75,7 +75,10 @@ export class McpHost {
     this.spawnError = null;
     this.child.on("error", (err) => {
       this.spawnError = err;
+      this.connected = false; // 切断状態へ(以後のrequestは即reject)
       this.failPending(`MCPサーバー ${this.name} は起動できません: ${err.message}`);
+      // #27: 起動失敗も通知経路へ流す。start()のcatchはspawnErrorを見て二重emitしない
+      this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
     });
     // stdinへの書き込み口のエラーも握り潰す(起動失敗後のEPIPE等でhiveが落ちないように)
     this.child.stdin.on("error", () => {});
@@ -206,14 +209,6 @@ export class McpHost {
     } catch {}
   }
 
-  // 起動失敗・切断時に全pending要求を失敗させる(タイマーも解放)
-  failPending(message) {
-    for (const p of this.pending.values()) {
-      clearTimeout(p.timer);
-      p.reject(new Error(message));
-    }
-    this.pending.clear();
-  }
   stop() {
     try { this.child?.kill(); } catch {}
   }
