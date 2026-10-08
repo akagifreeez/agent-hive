@@ -7,7 +7,7 @@ setTestMaxConcurrent(1);
 setSemaphoreSelfBlockGuard(false);
 
 // blocker: guard off, 直接runTestCommandで走らせる(スロットを掴ませる)
-const blocker = runTestCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000 });
+const blocker = runTestCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 15000 }, runCommandInner);
 for (let i = 0; i < 200 && testSemaphoreState().running < 1; i++) {
   await new Promise((r) => setTimeout(r, 10));
 }
