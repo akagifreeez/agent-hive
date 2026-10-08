@@ -104,7 +104,9 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
       if (notifications.length > 30) notifications.length = 30;
     },
   });
-  wireStallNotify(bus, { enabled: config.notify?.stop !== false, stallSec: config.notify?.stallSec ?? 600, onNotify: (n) => { notifications.unshift(n); if (notifications.length > 30) notifications.length = 30; } });
+  // 戻り値はui.close()からunwire()してタイマー/リスナを解放(常駐プロセスの自然終了)
+  /** @type {{unwire: () => void}|null} stall通知の解除ハンドル */
+  const stallNotify = wireStallNotify(bus, { enabled: config.notify?.stop !== false, stallSec: config.notify?.stallSec ?? 600, onNotify: (n) => { notifications.unshift(n); if (notifications.length > 30) notifications.length = 30; } });
   const live = {
     // CLI通知(#11): 最新の通知(承認待ち/マージ完了/長時間タスク完了)。新着順・最大30件
     notifications,
@@ -920,6 +922,8 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         devserverProc = null;
       }
       server.close();
+      // 静止監視タイマーとbusリスナを解放(close後もプロセスが生き残らないように)
+      stallNotify?.unwire();
     },
     token: uiToken,
   };
