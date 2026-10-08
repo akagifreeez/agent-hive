@@ -33,7 +33,7 @@ function oauthStoreRef(provider) {
  * - ref解決が入る(agent.modelは"provider/model"でもベアIDでもよい)
  * - fallbacksは設定models.fallbacks(ModelRef列)から構築する
  * @param {import("../config.js").HiveConfig} config
- * @returns {(agent?: {model?: string|null, reasoningEffort?: string|null, webSearch?: boolean|object|null}) => OpenAIModel|FallbackModel} */
+ * @returns {(agent?: {model?: string|null, reasoningEffort?: string|null, webSearch?: boolean|object|null, role?: string|null}) => OpenAIModel|FallbackModel|RouterModel} */
 export function createModelFactory(config) {
   const catalog = buildCatalog(config.models);
   const baseDirs = [ROOT, dataDir()];
