@@ -86,7 +86,7 @@ test("セマフォ: 上限1でnpm test系2本の並列実行は直列化され�
     // 直列化の検証要件(2本目が1本目の完了まで走らない+順序)はフィクスチャで満たせる。
     const cmd = "node --test test/fixtures/empty.test.js";
     const log = [];
-    const mk = (name) => runCommand({ command: cmd + " && echo done-" + name, timeoutMs: 15000 }).then((r) => {
+    const mk = (name) => runCommand({ command: cmd + " && echo done-" + name, timeoutMs: 15000, env: { NODE_TEST_CONTEXT: undefined } }).then((r) => {
       if (r.ok && r.text.includes("done-" + name)) log.push(`done-${name}`);
       return r;
     });
@@ -170,7 +170,7 @@ test("セマフォ: 上限2なら2本まで同時に走り、上限のconfig上�
     const cmd = `node --test test/fixtures/empty.test.js test/fixtures/empty.test.js`;
     assert.equal(isTestCommand(cmd), true, "node --test がテスト系判定から漏れた");
     const log = [];
-    const mk = (name) => runCommand({ command: cmd + " && echo done-" + name, timeoutMs: 15000 }).then((r) => {
+    const mk = (name) => runCommand({ command: cmd + " && echo done-" + name, timeoutMs: 15000, env: { NODE_TEST_CONTEXT: undefined } }).then((r) => {
       if (r.ok && r.text.includes("done-" + name)) log.push(`done-${name}`);
       return r;
     });
@@ -188,7 +188,7 @@ test("セマフォ: FIFOで待ちキューが消化される(3本直列・順序
     // 軽量フィクスチャでFIFO順を確認(node --test 1ファイル 約300ms×3直列)
     const cmd = "node --test test/fixtures/empty.test.js";
     const log = [];
-    const mk = (name) => runCommand({ command: cmd + " && echo fin-" + name, timeoutMs: 15000 }).then((r) => {
+    const mk = (name) => runCommand({ command: cmd + " && echo fin-" + name, timeoutMs: 15000, env: { NODE_TEST_CONTEXT: undefined } }).then((r) => {
       if (r.ok) log.push(name);
     });
     const p1 = mk("a");
@@ -204,8 +204,8 @@ test("セマフォ: 失敗・タイムアウトでもスロットはリークし
   // ガードon中の検証: 待ちゼロで即実行されるので、短いタイムアウトは「実行タイムアウト」になる。
   // 失敗(タイムアウト)のあと後続が通る=プロセス内状態が壊れていないことを見る。
   await withSemaphore(1, async () => {
-    const bad = await runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 200 });
-    const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 });
+    const bad = await runCommand({ command: "node --test test/fixtures/slow.test.js", timeoutMs: 200, env: { NODE_TEST_CONTEXT: undefined } });
+    const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 , env: { NODE_TEST_CONTEXT: undefined } });
     assert.equal(next.ok, true, `失敗後に後続が通らない(状態破損): ${next.text}`);
   });
 });
@@ -248,7 +248,7 @@ test("セマフォ(ガード解除): 待ちタイムアウトで失敗しても�
     assert.equal(waiter.ok, false, `待ちタイムアウトで失敗するはず: ${waiter.text.slice(0, 120)}`);
     assert.match(waiter.text, /同時実行制限で待機タイムアウト/);
     await hold;
-    const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 });
+    const next = await runCommand({ command: "node --test test/fixtures/empty.test.js", timeoutMs: 15000 , env: { NODE_TEST_CONTEXT: undefined } });
     assert.equal(next.ok, true, `スロットがリークして後続が永久待ちになった: ${next.text}`);
   });
 });
