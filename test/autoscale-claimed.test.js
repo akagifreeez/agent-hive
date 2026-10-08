@@ -84,15 +84,19 @@ test("autoscale: 請求中(稼働中)タスクがあるスレッドはdesired縮
     );
     // 稼働中のclaimerへタスクを事前請求させる(黒板APIを直接叩いて請求済み状態を作る)
     const claimed = ctl.tasks.claim({ id: claimer, role: "impl" }, { project: "scgtest" });
-    assert.ok(claimed && !claimed.error, "事前請求が成功: " + String(claimed?.error ?? ""));
+    assert.ok(claimed && !claimed.error, "事前請求が成功: " + JSON.stringify(claimed)?.slice(0, 120));
+    console.log("[probe] claimed.id =", claimed?.id, "| task.claimed ev =", JSON.stringify(evLog.filter((e) => e[0]?.startsWith?.("claim:"))));
+
 
     // 縮小ガード(1回目tick): claim直後〜tick直前にラウンドが稼働中であることを保証してからtickする
     assert.ok(
       await waitUntil(() => { try { return host.roundState.get(claimer)?.running === true; } catch { return false; } }),
       "claim直後もclaimerは稼働中(ラウンド実行中)"
     );
+    console.log("[probe] preTick running(claimer) =", host.roundState.get(claimer)?.running);
     await ctl.autoscaleTick();
     const aliveAfter = ctl.aliveWorkersFor("scgtest");
+    console.log("[probe] postTick alive =", [...(aliveAfter ?? [])].join(","));
     assert.ok(aliveAfter, "autoscaleTick後のaliveWorkersを観測できる");
     // 縮小ガード: claimed稼働中があるので desired >= base(2) が維持される。
     // alive は base(2) のまま(増員しない/減らない)
@@ -111,6 +115,7 @@ test("autoscale: 請求中(稼働中)タスクがあるスレッドはdesired縮
     // host無し扱いにはできないので、aliveWorkers実装準拠の別検証: open==0&claimed==0
     // の状況を作るため、scg-b をproject外へ移動してからtickする
     ctl.tasks.setProject("tasks/open/scg-b.md", "elsewhere");
+    console.log("[probe] preTick2 claimed =", JSON.stringify(ctl.tasks.list().claimed.map((t) => t.id)), "status(claimer) =", ctl.tasks.list().claimed.find((t) => t.id === "scg-a") ? "claimed残" : "released");
     await ctl.autoscaleTick();
     const aliveIdle = ctl.aliveWorkersFor("scgtest");
     assert.ok(aliveIdle, "2回目tick後もaliveWorkersを観測できる");
