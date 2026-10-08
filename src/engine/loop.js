@@ -250,6 +250,8 @@ export async function runAgentLoop({
         cached: res.usage?.cachedTokens ?? null,
         ms: chatMs,
         tokPerSec: chatMs > 0 ? (res.usage?.completionTokens ?? 0) / (chatMs / 1000) : null,
+        // モデルルーティングの判定根拠(RouterModel有効時のみセットされる)。無効時は省略(ログ肥大化防止)
+        ...(res.router ? { router: res.router } : {}),
         ctxChars, msgCount: messages.length,
       }) + "\n");
       // UIのリアルタイム表示用(イシュー#17): トレースと同じ値をbusへ流す。
@@ -264,6 +266,8 @@ export async function runAgentLoop({
       response: {
         content: res.content ?? null, reasoning: res.reasoning ?? null,
         toolCalls: res.toolCalls ?? [], usage: res.usage ?? null, searches: res.searches ?? null,
+        // モデルルーティングの判定根拠(選択+"flash"|"5.3"+理由1語)。RouterModel無効時は省略
+        ...(res.router ? { router: res.router } : {}),
       },
       ms: chatMs,
     });
