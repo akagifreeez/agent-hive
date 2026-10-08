@@ -452,6 +452,7 @@ claim_next_task({project: "${name}"}) で仕事を拾い、タスク本文の完
     project: null, // リーダーは請求しないので自動継続は実質発火しない
     autoContinueRounds: config.chat?.autoContinueRounds ?? 3,
     hooks,
+    approvals, // ラウンド末マージの保留判定(イシュー#22)
   });
   leadHost.worktreePaths = leadWt;
   bus.emit("thread.opened", { name: "__main__", goal: "メインチャット(壁打ちと計画)", agents: [{ id: lead.id, displayName: lead.displayName }] });
