@@ -112,7 +112,12 @@ export function scrubEnv(base = process.env, extra = null) {
     if (ENV_SECRET_RE.test(k) && !allowed.has(k)) continue;
     out[k] = v;
   }
-  return extra ? { ...out, ...extra } : out;
+  if (!extra) return out;
+  for (const [k, v] of Object.entries(extra)) {
+    if (v === undefined) delete out[k]; // undefined値は"未指定"として扱う(削除)
+    else out[k] = v;
+  }
+  return out;
 }
 
 export async function detectShell() {
