@@ -61,7 +61,7 @@ export class UsageLedger {
 // state/usage.json(usage.round/usage.summaryの運用履歴)から
 // 日別・スレッド別・日別xスレッドの集計ビューを作る(GitHubイシュー#6)。
 // 壊れた行・旧形式(thread無し)も無視せず集計に含める(thread無しは__main__扱い)。
-// @param {Array<{at?: string, thread?: string, agent?: string, totals?: {calls?: number, promptTokens?: number, completionTokens?: number, reasoningTokens?: number, costUsd?: number}}|null>} history
+// @param {Array<{at?: string, thread?: string, agent?: string, totals?: {calls?: number, promptTokens?: number, completionTokens?: number, reasoningTokens?: number, costUsd?: number}, delta?: {calls?: number, promptTokens?: number, completionTokens?: number, reasoningTokens?: number, costUsd?: number}|null}|null>} history deltaはラウンド単位の消費(usage.roundの新契約)。無い行はtotals(旧形式)で集計
 // @param {{days?: number}} [opts] days: 集計対象日数(既定14)。0で全期間
 // @returns {{byDate: Array<{date: string, calls: number, promptTokens: number, completionTokens: number, reasoningTokens: number, costUsd: number}>, byThread: Array<{thread: string, calls: number, promptTokens: number, completionTokens: number, reasoningTokens: number, costUsd: number, agentIds: string[]}>, matrix: Array<{date: string, thread: string, calls: number, costUsd: number}>}}
 export function aggregateUsage(history, opts = {}) {
@@ -81,7 +81,9 @@ export function aggregateUsage(history, opts = {}) {
     if (typeof h.agent !== "string" || !h.agent) continue;
     const date = localDateKey(d); // ローカル日付基準(ユーザー視点の「日別」。深夜帯の前日バケット落ちを防ぐ)
     const thread = resolveThread(h);
-    const t = h.totals ?? {};
+    // ラウンド単位のdelta(イシュー#33)を優先。旧形式(delta無し)は従来どおりtotals加算:
+    // totalsはセッション累積のため、delta無しの旧履歴だけが加算対象になる(新旧混在でも二重計上しない)
+    const t = h.delta ?? h.totals ?? {};
     const calls = Number(t.calls ?? 0);
     const pt = Number(t.promptTokens ?? 0);
     const ct = Number(t.completionTokens ?? 0);

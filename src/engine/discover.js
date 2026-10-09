@@ -31,7 +31,7 @@ const SMOKE_TEST_FILE = "test/exec.test.js"; // 高速(2秒前後)・依存ゼ�
  * @param {import("./board.js").Bus} o.bus
  * @param {number} [o.intervalSec]
  * @param {string|null} [o.testCommand] テストプローブのコマンド(未指定なら既定スモーク)
- * @param {{tests?: "smoke"|"full"|"off"}} [o.probes] プローブ種別(discovery.probes)
+ * @param {{tests?: "smoke"|"full"|"off", triage?: {mode?: string, command?: string, timeoutMs?: number, knownFailures?: Array<{file: string, name: string, area: string}>}}} [o.probes] プローブ種別(discovery.probes)
  * @param {(o: any) => Promise<{ok: boolean, text: string}>} [o.exec]
  */
 export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCommand, probes = null, exec = runCommand }) {
