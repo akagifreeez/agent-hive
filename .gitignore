@@ -12,3 +12,6 @@ smoke-result.txt
 memory/.distilled
 dist/
 tmp-verify/
+
+# worktree退避物(attic)が将来のadd -Aマージで混入しないように
+attic/
