@@ -52,11 +52,10 @@ export class McpHost {
     this.tools = [];
     this.nextId = 1;
     this.pending = new Map(); // id => {resolve, reject, timer}
-    this.spawnError = null; // 起動時の非同期エラー(ENOENT等)。テスト・診断用に記録する
+    this.spawnError = null; // 起動時の非同期エラー(ENOENT等)。catchでの二重emit防止フラグも兼ねる
     this.buf = "";
     /** @type {string | null} 起動失敗(子のerrorイベント)の記録。失敗後のrequestは即座に拒否する */
     this.childError = null;
-    this.spawnError = null; // spawn由来の失敗通知済みフラグ(catchの二重emit防止)
   }
 
   async start() {
@@ -113,15 +112,6 @@ export class McpHost {
       }
     });
     this.child.stderr.on("data", () => {}); // サーバーのログは捨てる
-    // イシュー#27: spawnの非同期error(ENOENT等)を捕捉する。未処理のまま放置すると
-    // Unhandled error eventでhiveプロセス全体が落ちる。ここでは失敗を記録し、
-    // pending要求を全てrejectして、以後のrequestは切断状態として即座に失敗させる。
-    this.child.on("error", (err) => {
-      this.spawnError = err;
-      this.bus?.emit("mcp.failed", { name: this.name, error: err.message });
-      this.failPending(new Error(`MCPサーバー ${this.name} に接続できません: ${err.message}`));
-    });
-    this.child.stdin?.on("error", () => {}); // EPIPE等を握りつぶす(子はもう死んでいる)
 
     // 子のstdioパイプがイベントループを握ってプロセスが終わらなくならないようにする
     this.child.unref?.();
@@ -199,6 +189,7 @@ export class McpHost {
         ? new Error(`MCPサーバー ${this.name} に接続できません(${this.spawnError.message})`)
         : new Error(`MCPサーバー ${this.name} に接続できません(切断状態)`);
       return Promise.reject(e);
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
