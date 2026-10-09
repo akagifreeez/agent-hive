@@ -15,3 +15,4 @@ tmp-verify/
 
 # worktree退避物(attic)が将来のadd -Aマージで混入しないように
 attic/
+tmp/
