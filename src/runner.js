@@ -302,7 +302,15 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   bus.on("agent.status", (ev) => {
     agentStatus.set(ev.agent, ev.status);
     const th = threadOfAgent.get(ev.agent);
-    if (th && ["done", "error", "budget-stop"].includes(ev.status)) aliveWorkers.get(th)?.delete(ev.agent);
+    if (th && ["done", "error", "budget-stop"].includes(ev.status)) {
+      // 常設メイン(mains)はラウンド間の一時的なdone(turn-limit終了後の待機等)でも
+      // aliveWorkersから削除しない。削除するとautoscaleの縮小判定でbaseが割れ、
+      // 稼働中スレッドのワーカーが欠損する(autoscale-claimedテストの再現経路)。
+      // 削除対象はスポーンした追加ワーカーのみ。
+      const mains = threads.get(th)?.host?.mains;
+      const isMain = Array.isArray(mains) && mains.some((m) => m.id === ev.agent);
+      if (!isMain) aliveWorkers.get(th)?.delete(ev.agent);
+    }
   });
   bus.on("thread.closed", (p) => {
     for (const [id, th] of [...threadOfAgent]) if (th === p.name) threadOfAgent.delete(id);
