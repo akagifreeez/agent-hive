@@ -209,15 +209,18 @@ export class TaskBlackboard {
   claimedBy(agentId) {
     const files = readdirSync(this.claimed).filter((f) => f.startsWith(`${agentId}--`) && f.endsWith(".md"));
     return files.map((f) => {
+      const raw = readFileSync(join(this.claimed, f), "utf8");
       const meta = readMeta(join(this.claimed, f));
       return {
         id: f.replace(/\.md$/, "").slice(agentId.length + 2),
+        // bodyは従来どおり全文(meta行込み。loop.jsのautocompact文脈/tools.jsのacceptance抽出が依存)
+        body: raw,
+        // メタ(project/role等)も公開。finish_taskの検証タスク起票がprojectを引き継ぐのに使う(#22)
         role: meta.role,
         project: meta.project,
         acceptance: meta.acceptance ?? "",
         dependsOn: meta.dependsOn ?? [],
         model: meta.model ?? null,
-        body: readFileSync(join(this.claimed, f), "utf8"),
       };
     });
   }
