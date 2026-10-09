@@ -182,7 +182,14 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
     }
     // 1.5) ブランチ側ガード: このマージで運ばれるファイルにマーカーが入っていれば拒否し、
     //      作業者へ返送する(マーカー入りの確定をmainに作らない)
-    const dirty = await exec({ command: `git diff --name-only main...agent/${agent.id}`, cwd: mainWorkspace, outputLimit: 4000 });
+    //      diff起点は「先に固定したマージベースSHA」(3ドット相当)。`main...`リビジョン式は
+    //      実行時にmain参照を再読み替えするため、別スレッドのmainマージ進行中にmain移動を
+    //      拾って無関係ファイルを「運ばれるファイル」と誤認し誤拒否した実績がある
+    //      (review-175: 実測マーカー0・差分ゼロで拒否→再試行成功)。参照は1回だけ読む。
+    const mb = await exec({ command: `git merge-base main agent/${agent.id}`, cwd: mainWorkspace, outputLimit: 200 });
+    const mergeBase = mb.ok ? (mb.text.split("\n")[1] ?? "").trim() : "";
+    const diffBase = mergeBase || "main"; // merge-base取得失敗時は従来式へフォールバック
+    const dirty = await exec({ command: `git diff --name-only ${diffBase} agent/${agent.id}`, cwd: mainWorkspace, outputLimit: 4000 });
     const changed = dirty.ok ? dirty.text.split("\n").map((f) => f.trim()).filter(Boolean) : [];
     if (changed.length) {
       const q = changed.map((f) => `"${f}"`).join(" ");
@@ -193,7 +200,12 @@ export function mergeAgentWork({ mainWorkspace, worktreePath, agent, taskId, exe
       });
       if (wtMarkers.ok && wtMarkers.text.trim()) {
         const files = wtMarkers.text.trim().split("\n").map((f) => f.replace(/^[^:]+:/, "").trim()).join(", ");
-        return { ok: false, marker: true, text: `worktree側の変更に競合マーカーが含まれています(${files})。マージを中止しました。worktree内でマーカーを削除してコミットしてから再度 finish_task してください。` };
+        const diag = [
+          `merge-base=${mergeBase || "(取得失敗)"}`,
+          `diff一覧(${diffBase}..agent/${agent.id}): ${changed.join(", ")}`,
+          `grep対象: ${q}`,
+        ].join(" / ");
+        return { ok: false, marker: true, text: `worktree側の変更に競合マーカーが含まれています(${files})。マージを中止しました。worktree内でマーカーを削除してコミットしてから再度 finish_task してください。[診断] ${diag}` };
       }
     }
     // 2) mainのマージ前位置を控える(マージ後のdiffはここからの差分)
