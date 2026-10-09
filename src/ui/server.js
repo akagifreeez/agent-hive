@@ -876,7 +876,7 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
         req.on("end", async () => {
           try {
             const parsed = JSON.parse(body || "{}");
-            const r = handleDevserver({ method: "POST", body: parsed, workspace: config.workspace, uiPort: config.ui.port });
+            const r = await handleDevserver({ method: "POST", body: parsed, workspace: config.workspace, uiPort: config.ui.port });
             // 起動成功時のブラウザオープンは明示要求(open:true)のときだけ。
             // デフォルトで開くとテストやAPI呼び出しのたびに標準ブラウザのタブが量産される
             if (r.status === 200 && r.body?.ok && !r.body.alreadyRunning && parsed.open === true && typeof r.body.url === "string") {

@@ -302,7 +302,15 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
   bus.on("agent.status", (ev) => {
     agentStatus.set(ev.agent, ev.status);
     const th = threadOfAgent.get(ev.agent);
-    if (th && ["done", "error", "budget-stop"].includes(ev.status)) aliveWorkers.get(th)?.delete(ev.agent);
+    if (th && ["done", "error", "budget-stop"].includes(ev.status)) {
+      // 常設メイン(mains)はラウンド間の一時的なdone(turn-limit終了後の待機等)でも
+      // aliveWorkersから削除しない。削除するとautoscaleの縮小判定でbaseが割れ、
+      // 稼働中スレッドのワーカーが欠損する(autoscale-claimedテストの再現経路)。
+      // 削除対象はスポーンした追加ワーカーのみ。
+      const mains = threads.get(th)?.host?.mains;
+      const isMain = Array.isArray(mains) && mains.some((m) => m.id === ev.agent);
+      if (!isMain) aliveWorkers.get(th)?.delete(ev.agent);
+    }
   });
   bus.on("thread.closed", (p) => {
     for (const [id, th] of [...threadOfAgent]) if (th === p.name) threadOfAgent.delete(id);
@@ -332,10 +340,14 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       const th = threads.get(name);
       // host無しスレッド(ディスカッション等・タスク請求なし)は増員対象外
       if (!th || !th.host || th.host.paused) continue; // 停止中スレッドは増員しない
+      // host.mains が実際に稼働中(ラウンド実行中)なら縮小しない: agentStatus/claimed依存の
+      // 判定は scripted応答などの即完了ラウンドで取りこぼす(statusがworkingに戻る前の
+      // tickで縮小判定→alive削除済み)ため、ラウンド稼働を直接観測するガードを併設する。
+      const anyMainRunning = (th.host?.mains ?? []).some((m) => th.host?.roundState?.get(m.id)?.running === true);
       const nOpen = open.filter((t) => (t.project || "") === name).length;
       const nClaimedMine = list.claimed.filter((t) => (t.project || "") === name && agentStatus.get(t.agent) === "working").length;
       // 請求中(稼働中)の仕事があるスレッドは縮小しない(open==0でも作業進行中ならbase維持)
-      const desired = nOpen === 0 && nClaimedMine === 0 ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil((nOpen + nClaimedMine) / 2));
+      const desired = nOpen === 0 && nClaimedMine === 0 && !anyMainRunning ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil((nOpen + nClaimedMine) / 2));
       if (alive.size >= desired || manager.live.size >= globalCap) continue;
       const member = th.host?.mains?.[0];
       if (!member) continue;

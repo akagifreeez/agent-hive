@@ -2677,6 +2677,8 @@ $("saytext").addEventListener("paste", (e) => {
 });
 for (const b of document.querySelectorAll("#ctx-tabs .ct")) {
   b.onclick = () => { ctxTab = b.dataset.tab; renderCtx(lastState); };
+}
+
 
 // 日別・スレッド別の消費集計ビュー(GitHubイシュー#6)を描画する。
 // データ源は /api/usage の aggregate(aggregateUsage: byDate/byThread/matrix)。
@@ -2739,7 +2741,6 @@ async function renderUsageAggregate(box) {
   sum.className = "hint";
   sum.textContent = "集計期間内の合計: " + money(total) + " / " + agg.byThread.length + "スレッド";
   byThread.appendChild(sum);
-}
 }
 refresh();
 setInterval(refresh, 5000);

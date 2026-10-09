@@ -1,59 +1,97 @@
 // プロセス死からの自動再起動ウォッチドッグ(long-run-resilience)の検証。
-// 疎通(probe)/marker判定/起動処理(spawn)は全て注入可能なので、実プロセスを立てずに固定する。
-import { test } from "node:test";
+// 受け入れ基準:
+//  (1) 「ダウン+marker有り」で起動処理を呼び、「稼働中/marker無し」で何もしない(テスト固定・疎通先差し替え可能)
+//  (2) 再起動ログ(state/watchdog.log相当)が残る
+//  (3) marker切替手段(on/off)が動く
+// 外部に実アクセスしない(疎通先はローカルhttpサーバー、起動処理はspawnFn差し替えで固定)。
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { startIfNeeded, probeAlive, isWatchdogEnabled } from "../scripts/watchdog.mjs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { checkOnce, setWatchdog, watchdogEnabled } from "../src/engine/watchdog.js";
 
-function mktmp() {
-  return mkdtempSync(join(tmpdir(), "hive-watchdog-"));
+const here = dirname(fileURLToPath(import.meta.url));
+const tmp = mkdtempSync(join(tmpdir(), "watchdog-"));
+after(() => { try { rmSync(tmp, { recursive: true, force: true }); } catch {} });
+
+/** 疎通用のローカルサーバー(死活=応答あり)。 */
+function startUpServer() {
+  return new Promise((resolve) => {
+    const s = createServer((req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end("{}"); });
+    s.listen(0, "127.0.0.1", () => resolve({ server: s, url: "http://127.0.0.1:" + s.address().port + "/api/state" }));
+  });
 }
 
-test("watchdog: ダウン+marker有り → 起動処理を呼び、ログが残る", async () => {
-  const ws = mktmp();
-  const marker = join(ws, "state", "watchdog-on");
-  const log = join(ws, "state", "watchdog.log");
+function baseOpts(dir) {
+  return {
+    url: "http://127.0.0.1:1/no-such-port", // 既定では誰も listen していない番ポート=ダウン
+    workspace: dir,
+    markerPath: join(dir, "watchdog-on"),
+    logPath: join(dir, "watchdog.log"),
+    spawnFn: null, // 各テストで差し替え
+  };
+}
+
+test("稼働中(疎通OK)なら何もしない(spawnFn不呼び)", async () => {
+  const { server, url } = await startUpServer();
   try {
-    writeFileSync(marker, "on\n");
-    let spawned = null;
-    const r = await startIfNeeded({
-      probe: async () => false, // ダウン
-      enabled: () => existsSync(marker),
-      spawn: (cmd) => { spawned = cmd; },
-    });
-    assert.equal(r, "started");
-    assert.match(String(spawned), /src[\\\/]index\.js.*--chat/);
-    // ログはstartIfNeeded内部の固定パスに書かれるため、ここでは分岐とspawn引数だけ検証
-  } finally {
-    rmSync(ws, { recursive: true, force: true });
-  }
+    const dir = mkdtempSync(join(tmpdir(), "wd-up-"));
+    writeFileSync(join(dir, "watchdog-on"), "");
+    let spawned = 0;
+    const r = await checkOnce({ ...baseOpts(dir), url, spawnFn: () => { spawned++; return { pid: 1 }; } });
+    assert.equal(r.action, "none");
+    assert.equal(r.reason, "up");
+    assert.equal(spawned, 0, "稼働中は起動しない");
+    rmSync(dir, { recursive: true, force: true });
+  } finally { server.close(); }
 });
 
-test("watchdog: 稼働中 → 何もしない", async () => {
-  let called = 0;
-  const r = await startIfNeeded({ probe: async () => true, spawn: () => { called++; } });
-  assert.equal(r, "up");
-  assert.equal(called, 0);
+test("ダウン+marker無しなら何もしない(意図的停止を尊重)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "wd-nomk-"));
+  let spawned = 0;
+  const r = await checkOnce({ ...baseOpts(dir), spawnFn: () => { spawned++; return { pid: 1 }; } });
+  assert.equal(r.action, "none");
+  assert.equal(r.reason, "no-marker");
+  assert.equal(spawned, 0);
+  rmSync(dir, { recursive: true, force: true });
 });
 
-test("watchdog: ダウン+marker無し → 何もしない(勝手に起こさない)", async () => {
-  let called = 0;
-  const r = await startIfNeeded({ probe: async () => false, enabled: () => false, spawn: () => { called++; } });
-  assert.equal(r, "no-marker");
-  assert.equal(called, 0);
+test("ダウン+marker有りで起動処理を呼び、再起動ログが残る", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "wd-down-"));
+  writeFileSync(join(dir, "watchdog-on"), "");
+  const calls = [];
+  const r = await checkOnce({
+    ...baseOpts(dir),
+    spawnFn: (cmd, args, opts2) => { calls.push({ cmd, args, opts2 }); return { pid: 4242 }; },
+  });
+  assert.equal(r.action, "respawn");
+  assert.equal(calls.length, 1, "起動処理が1回呼ばれる");
+  assert.match(calls[0].args.join(" "), /--chat/, "起動は --chat(常駐モード)");
+  const log = readFileSync(join(dir, "watchdog.log"), "utf8");
+  assert.match(log, /respawn/);
+  assert.match(log, /4242/);
+  rmSync(dir, { recursive: true, force: true });
 });
 
-test("watchdog: marker切替ヘルパーが動く(en/disable/isEnabled)", async () => {
-  const ws = mktmp();
-  // enable/disableはENV経由でSTATE_DIRを差し替えられない(モジュール定数)ため、
-  // 実挙動は「関数が存在し、marker有無の判定が真偽を返す」ことまで。実パスへの書き込みは回避
-  assert.equal(typeof isWatchdogEnabled(), "boolean");
+test("marker切替: setWatchdog(true/false)でstate/watchdog-onが付く/消える", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "wd-mk-"));
+  const mk = join(dir, "state", "watchdog-on");
+  assert.equal(watchdogEnabled(dir), false, "初期状態はOFF");
+  setWatchdog(true, dir);
+  assert.equal(existsSync(mk), true, "ONでmarker作成");
+  assert.equal(watchdogEnabled(dir), true);
+  setWatchdog(false, dir);
+  assert.equal(existsSync(mk), false, "OFFでmarker削除");
+  assert.equal(watchdogEnabled(dir), false);
+  rmSync(dir, { recursive: true, force: true });
 });
 
-test("watchdog: probeAliveは応答しないURLでfalse(タイムアウト短縮)", async () => {
-  // 存在しないポートへ: 接続拒否は即false
-  const ok = await probeAlive("http://localhost:9/hive-watchdog-probe", 1000);
-  assert.equal(ok, false);
+test("ウォッチドッグ実装が依存ゼロ(node:組み込みのみimport)", async () => {
+  const src = readFileSync(join(here, "..", "src", "engine", "watchdog.js"), "utf8");
+  const imports = [...src.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(imports.length > 0, "importが存在する");
+  for (const imp of imports) assert.match(imp, /^node:/, "外部依存は無し: " + imp);
 });
