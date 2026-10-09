@@ -68,6 +68,8 @@ function isFree() {
 function drain() {
   while (queue.length > 0 && running < limit) {
     const next = queue.shift();
+    running += 1; // この分のスロットをここで確保(待ち側は加算しない設計のため必須)
+    runningIds.add(next.label);
     next.resolve();
   }
 }
