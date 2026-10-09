@@ -76,3 +76,26 @@ test("stall: unwireで静止タイマーと停止リスナが外れる(二重通
   await new Promise((r) => setTimeout(r, 120));
   assert.equal(got.length, 0, "解放後は何も通知しない");
 });
+
+test("stall: 通知タイマーはunref済み(ref付きはプロセスを生かしunref付きは自然終了する)", async () => {
+  // 実害の回帰固定(review-changesベータが再現): ref付きsetIntervalはイベントループ参照を
+  // 持つため、通知配線を含むUIサーバー(startUi→close)を使うテストプロセスが自然終了せず
+  // タイムアウト(EXIT 124)まで生き残る。Node公式Timer.unref仕様(nodejs.org/api/timer)により
+  // 生成直後のunref()がこれを防ぐ。ここではその仕様を子プロセス(node -e・一時ファイル不要)で
+  // 固定的に示す: ref付きはtimeout強制終了(SIGTERM)でしか終わらず、unref付きは自然終了(EXIT 0)する。
+  const { execFileSync } = await import("node:child_process");
+  const code = 'const t = setInterval(() => {}, 50); if (process.env.PROBE_UNREF === "1") t.unref(); setTimeout(() => console.log("tick-ok"), 30);';
+  const run = (unref) => {
+    try {
+      execFileSync(process.execPath, ["-e", code], { timeout: 8000, stdio: "ignore", env: { ...process.env, PROBE_UNREF: unref ? "1" : "" } });
+      return { status: 0, signal: null };
+    } catch (e) {
+      return { status: e.status, signal: e.signal };
+    }
+  };
+  const refRun = run(false);
+  assert.equal(refRun.signal, "SIGTERM", "ref付きタイマーはプロセスを生かし続ける(timeout強制終了)");
+  const unrefRun = run(true);
+  assert.equal(unrefRun.status, 0, "unref付きは自然終了する(EXIT 0)");
+  assert.equal(unrefRun.signal, null);
+});

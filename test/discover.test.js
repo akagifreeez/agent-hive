@@ -116,6 +116,30 @@ test("プローブ既定はスモーク(フルスイートを回さない)・ful
   d2.stop();
   rmTree(ws);
 });
+test("スモーク既定でも検出能力を維持: 失敗したらfixタスクが立ち、通れば自動解決する", async () => {
+  const ws = makeWorkspace();
+  const { bus, tasks } = makeEnv(ws);
+  let fail = true;
+  const fakeExec = async (o) => {
+    if (o.command.startsWith("git ")) return { ok: true, text: "exit=0" };
+    return fail ? { ok: false, text: "exit=1\n... 4 tests, 1 failure ..." } : { ok: true, text: "exit=0" };
+  };
+  // 既定(スモーク)のまま: プローブ失敗の検出→fix-test-failures起票(検出能力の維持)
+  const d = startDiscovery({ workspace: ws, tasks, bus, intervalSec: 3600, exec: fakeExec });
+  await d.tick();
+  assert.equal(tasks.existsOpenOrClaimed("fix-test-failures"), true);
+  const body = readFileSync(join(ws, "tasks", "open", "fix-test-failures.md"), "utf8");
+  assert.match(body, /テストが失敗している/);
+  assert.match(body, /1 failure/);
+  assert.match(body, /node --test /); // 起票されたfixタスクはスモークコマンドで修正確認する
+  // 復旧→自動解決(既存テストと同じ対称性)
+  fail = false;
+  await d.tick();
+  assert.equal(tasks.existsOpenOrClaimed("fix-test-failures"), false);
+  d.stop();
+  rmTree(ws);
+});
+
 
 test("impl等の通常タスクが残っている間はテスト失敗を仕事化しない", async () => {
   const ws = makeWorkspace();
