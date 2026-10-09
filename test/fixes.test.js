@@ -339,3 +339,14 @@ test("runAgentLoop: claimMissesLimit=1なら請求ミス1回でidle終了(追加
   assert.equal(calls, 1); // ミス1回で打ち切り(既定3なら2回目の呼出が発生する)
   rmTree(ws);
 });
+
+
+test("releaseOne: 空agentIdの解放要求はfalseで拒否(claimed/<agent>--<id>.mdが成り立たず、べき等経路で誤ってtrueになるのを防ぐ)", () => {
+  const ws = mktmp();
+  const tasks = new TaskBlackboard(ws);
+  assert.equal(tasks.releaseOne("", "t-x", "n"), false);
+  assert.equal(tasks.releaseOne("  ", "t-x", "n"), false);
+  assert.equal(tasks.releaseOne(null, "t-x", "n"), false);
+  assert.equal(tasks.releaseOne(undefined, "t-x", "n"), false);
+  rmTree(ws);
+});

@@ -80,18 +80,13 @@ test("runner: say(text, thread)はstagger遅延なしで全メインへ注入さ
       );
     }
     const startObservedAt = Date.now(); // 全員の開始を観測した時点(say→開始の遅延計測終点)
-    // ラウンド完走を待つ(テスト終了時の残留タイマー防止)。
-    // ただし完走待ちは断言にしない: フルスイート698件の並列負荷下では完走に
-    // 114〜125秒かかることがあり(隔離実行は13.5秒で緑)、完走の速さは本テストの
-    // 論理対象ではない(stagger遅延の検出は下の開始観測断言とstaggerMs===0断言で担保)。
-    // できた範囲で静かになるのを待って後片付けし、完走しないまま抜けても
-    // ランナー側(--test-force-exit)が残留タイマーを回収する。
-    await waitUntil(() =>
-      ["saystagger-alpha", "saystagger-beta", "saystagger-gamma"].every(
-        (id) => host.roundState.get(id)?.running === false
-      ),
-      180000
-    );
+    // ラウンド完走は待つが断言にはしない(タイマー掃除目的)。
+    // フルスイート698件の並列負荷下では実測114〜125秒かかり、60秒待ちは
+    // 負荷揺れで確実に落ちる。遅延検出能力は上の開始観測(5秒/員)と
+    // say→全員開始の10秒閾値で温存されているため、完走は待つだけでよい。
+    for (const id of ["saystagger-alpha", "saystagger-beta", "saystagger-gamma"]) {
+      await waitUntil(() => host.roundState.get(id)?.running === false, 180000);
+    }
     // 計測は「say→全員開始」区間に限定する(負荷で揺れる完走待ちを含めない)。
     // stagger遅延が復活するとベータ+3秒/ガンマ+6秒 → 開始観測が10秒を超える。
     const elapsed = startObservedAt - t0;

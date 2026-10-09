@@ -956,7 +956,7 @@ async function renderUsageTrace(body) {
   const tbl = document.createElement("table");
   tbl.className = "usage-tbl";
   tbl.style.cssText = "margin-top:6px;";
-  tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th><th>tok/s</th><th>ヒット率</th></tr></thead>";
+  tbl.innerHTML = "<thead><tr><th>ワーカー</th><th>turns</th><th>合計tokens</th><th>tok/s</th><th title='usage-traceのcached÷prompt(未報告行は除外)'>キャッシュ命中率</th></tr></thead>";
   const tb = document.createElement("tbody");
   const hitByAgent = new Map((data.cacheHits?.byAgent ?? []).map((a) => [a.agent, a]));
   for (const s of data.series) {
@@ -971,46 +971,54 @@ async function renderUsageTrace(body) {
     const tp = document.createElement("td");
     tp.textContent = fmtTps(s.tokPerSec);
     tp.title = "直近 " + fmtTps(s.lastTokPerSec) + " tok/s";
-    // キャッシュヒット率(エージェント別)。cached未報告のみのワーカーは集計外「-」
-    const hit = hitByAgent.get(s.agent);
-    const th = document.createElement("td");
-    th.textContent = hit && hit.hitRatio != null ? Math.round(hit.hitRatio * 100) + "%" : "-";
-    if (hit?.low) { th.style.color = "var(--red, #e5484d)"; th.title = "閾値未満の低ヒット"; }
-    tr.append(nm, tn, tt, tp, th);
+    const tc = document.createElement("td");
+    const hit = data.cacheHits && data.cacheHits.byAgent ? data.cacheHits.byAgent.find((h) => h.agent === s.agent) : null;
+    tc.textContent = hit && hit.hitRatio != null ? Math.round(hit.hitRatio * 100) + "%" : "—";
+    if (hit && hit.low) { tc.style.color = "var(--warn)"; tc.title = "ヒット率が低い(集計閾値未満)ワーカー"; }
+    tr.append(nm, tn, tt, tp, tc);
     tb.appendChild(tr);
   }
   tbl.appendChild(tb);
   view.appendChild(tbl);
-  // キャッシュヒット率(cache-hit-rate): 全体+日別(低い日は警告。cached未報告行は集計外なので「-」や除外はaggregateCacheHitsの規則による)
+  // キャッシュヒット率サマリ(cache-hit-rate): 日別ヒット率と低ヒットワーカーの一覧。
+  // 集計は /api/usage-trace の cacheHits(usage.jsの純関数 aggregateCacheHits)。
   const ch = data.cacheHits;
-  if (ch && (ch.byDate.length || ch.total.calls)) {
-    const hitBox = document.createElement("div");
-    hitBox.className = "usage-trace-hits";
-    const hs = document.createElement("div");
-    hs.className = "sec";
-    hs.textContent = "キャッシュヒット率(cached÷prompt・閾値" + Math.round((ch.cacheHitLowThreshold ?? 0.5) * 100) + "%未満を警告)";
-    hitBox.appendChild(hs);
-    const ht = document.createElement("table");
-    ht.className = "usage-tbl";
-    ht.innerHTML = "<thead><tr><th>対象</th><th>calls</th><th>prompt</th><th>cached</th><th>ヒット率</th></tr></thead>";
-    const hb = document.createElement("tbody");
-    const hitCell = (r) => {
-      const x = document.createElement("td");
-      x.textContent = r.hitRatio != null ? Math.round(r.hitRatio * 100) + "%" : "-";
-      if (r.low) { x.style.color = "var(--red, #e5484d)"; x.title = "閾値未満の低ヒット"; }
-      return x;
-    };
-    const hitRow = (label, r) => {
+  if (ch && (ch.byDate.length || ch.byAgent.length)) {
+    const hitTxt = (v) => v == null ? "—" : Math.round(v * 100) + "%";
+    const sec = document.createElement("div");
+    sec.style.cssText = "margin-top:8px;font-size:11px;";
+    const h = document.createElement("div");
+    h.className = "hint";
+    h.textContent = "キャッシュ命中率(cached÷prompt・未報告行は除く)";
+    sec.appendChild(h);
+    const stbl = document.createElement("table");
+    stbl.className = "usage-tbl";
+    stbl.innerHTML = "<thead><tr><th>日付</th><th>ターン数</th><th>prompt</th><th>cached</th><th>命中率</th></tr></thead>";
+    const stb = document.createElement("tbody");
+    for (const d of ch.byDate) {
       const tr = document.createElement("tr");
-      const c = (t) => { const x = document.createElement("td"); x.textContent = t; return x; };
-      tr.append(c(label), c(String(r.calls ?? 0)), c((r.prompt ?? 0).toLocaleString()), c((r.cached ?? 0).toLocaleString()), hitCell(r));
-      return tr;
-    };
-    hb.appendChild(hitRow("全体", ch.total));
-    for (const d of ch.byDate) hb.appendChild(hitRow(d.date, d));
-    ht.appendChild(hb);
-    hitBox.appendChild(ht);
-    body.appendChild(hitBox);
+      const td = (t) => { const c = document.createElement("td"); c.textContent = t; return c; };
+      tr.append(td(d.date), td(String(d.calls)), td(d.prompt.toLocaleString()), td(d.cached.toLocaleString()));
+      const hr = td(hitTxt(d.hitRatio));
+      if (d.low) hr.style.color = "var(--warn)";
+      tr.appendChild(hr);
+      stb.appendChild(tr);
+    }
+    const tot = ch.total;
+    const trow = document.createElement("tr");
+    trow.className = "total";
+    trow.append(td("合計"), td(String(tot.calls)), td(tot.prompt.toLocaleString()), td(tot.cached.toLocaleString()), td(hitTxt(tot.hitRatio)));
+    stb.appendChild(trow);
+    stbl.appendChild(stb);
+    sec.appendChild(stbl);
+    const lowAgents = ch.byAgent.filter((a) => a.low);
+    if (lowAgents.length) {
+      const warn = document.createElement("div");
+      warn.style.cssText = "color:var(--warn);margin-top:3px;";
+      warn.textContent = "⚠ 命中率が低いワーカー: " + lowAgents.map((a) => a.agent + "(" + hitTxt(a.hitRatio) + ")").join(", ");
+      sec.appendChild(warn);
+    }
+    view.appendChild(sec);
   }
   body.appendChild(view);
 }
@@ -2677,6 +2685,8 @@ $("saytext").addEventListener("paste", (e) => {
 });
 for (const b of document.querySelectorAll("#ctx-tabs .ct")) {
   b.onclick = () => { ctxTab = b.dataset.tab; renderCtx(lastState); };
+}
+
 
 // 日別・スレッド別の消費集計ビュー(GitHubイシュー#6)を描画する。
 // データ源は /api/usage の aggregate(aggregateUsage: byDate/byThread/matrix)。
@@ -2739,7 +2749,6 @@ async function renderUsageAggregate(box) {
   sum.className = "hint";
   sum.textContent = "集計期間内の合計: " + money(total) + " / " + agg.byThread.length + "スレッド";
   byThread.appendChild(sum);
-}
 }
 refresh();
 setInterval(refresh, 5000);

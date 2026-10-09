@@ -50,6 +50,51 @@ test("worktree汚染: ブランチ側の変更にマーカーがあるときは�
   assert.equal(m.marker, true);
   assert.match(m.text, /worktree側の変更に競合マーカー/);
   assert.match(m.text, /finish_task/);
+  // 診断ログ(review-175誤拒否の調査用): マージベースSHAと3ドット相当の差分一覧が拒否文に載る
+  assert.match(m.text, /\[診断\] merge-base=[0-9a-f]{7,40}/);
+  assert.match(m.text, new RegExp("diff一覧\\([0-9a-f]{7,40}\\.\\.agent/beta\\)","u"));
+  assert.match(m.text, /grep対象: /);
   assert.equal(existsSync(join(ws, MARKER_FILE)), false, "汚染ファイルはmainに入らない");
   rmTree(ws); rmTree(root);
+});
+
+test("1.5ガード診断: 拒否ログにマージベースSHAと差分一覧が出る", async () => {
+  const ws = mkdtempSync(join(tmpdir(), "hive-mg-"));
+  await ensureGitRepo(ws);
+  const root = `${ws}-wt`;
+  const paths = await setupWorktrees({ mainWorkspace: ws, worktreeRoot: root, agents: [{ id: "gamma" }] });
+
+  // worktree側だけ汚して確定
+  writeFileSync(join(paths.gamma, MARKER_FILE), MARKER_BODY);
+  await gitCommitAll(paths.gamma, "contaminate branch");
+
+  // マージベース(main側HEAD)を先に控える — これが診断に出るべきSHA
+  const pre = await runCommand({ command: "git rev-parse main", cwd: ws, outputLimit: 200 });
+  const expectedBase = pre.text.split("\n")[1].trim();
+
+  const m = await mergeAgentWork({ mainWorkspace: ws, worktreePath: paths.gamma, agent: { id: "gamma" }, taskId: "t-diag" });
+  assert.equal(m.ok, false);
+  assert.equal(m.marker, true);
+  // 診断: マージベースSHA
+  assert.match(m.text, new RegExp(`merge-base=${expectedBase}`), "診断にマージベースSHAが含まれる");
+  // 診断: 3ドット相当の差分一覧(broken.jsが運ばれるファイルとして挙がる)
+  assert.match(m.text, /diff一覧\([^)]*agent\/gamma\): .*broken\.js/, "診断に差分一覧が含まれる");
+  assert.match(m.text, /broken\.js/, "差分一覧にマーカー入りファイルが出る");
+  // 診断: grep対象
+  assert.match(m.text, /grep対象/, "診断にgrep対象が含まれる");
+  rmTree(ws); rmTree(root);
+});
+
+test("1.5ガード排他: マージ中のmain参照移動をガードdiffが拾わない(SHA固定の根拠)", async () => {
+  // コード読解根拠: worktree.js mergeAgentWorkはqueueMerge(=withMergeLockのpromiseミューテックス)
+  // で全体が直列化され、ガードdiff(diffBase固定。L188-192)はmerge-base SHAを1回だけ読んで
+  // `git diff --name-only <sha> agent/<id>` とする。`main...`リビジョン式(実行時main再読み替え)
+  // を使わないため、マージ中に他ブランチのマージでmain参照が移動してもdiff集合は不変=混入しない。
+  // ここでは排他プリミティブの性質(逐次実行)を実動作で確認する。
+  const { withMergeLock } = await import("../src/engine/worktree.js");
+  const order = [];
+  const t1 = withMergeLock(async () => { order.push("A1"); await new Promise((r) => setTimeout(r, 30)); order.push("A2"); });
+  const t2 = withMergeLock(async () => { order.push("B1"); });
+  await Promise.all([t1, t2]);
+  assert.deepEqual(order, ["A1", "A2", "B1"], "ロック内処理は並走せず直列に走る");
 });

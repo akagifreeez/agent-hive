@@ -135,7 +135,9 @@ export class ChatHost {
     if (!t && !/^(fix-|review-|distill-)/.test(taskId)) return;
     if (t && (t.project || "") !== this.project) return;
     for (const m of this.mains) {
-      this.wake(m, `[システム] タスク ${taskId} がopenへ戻りました。claim_next_task で請求を検討してください。`, 300);
+      const st = this.roundState.get(m.id);
+      if (st?.running) continue; // 自分の実行中ラウンド由来の解放(宙吊り返却)は起こさない
+      this.wake(m, "[システム] タスク " + taskId + " がopenへ戻りました。claim_next_task で請求を検討してください。", 300);
     }
   }
 

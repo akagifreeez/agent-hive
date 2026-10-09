@@ -41,8 +41,9 @@ export function isTestCommand(command) {
   //   - testの直前が区切りでないパターン(npmtest / npm audit / npm run lint test)は不該当
   //   - test[:接尾](test:smoke等)と後続引数(npm test -- tests/x.js)は許容
   //   - node --test: node[フラグ群] --test(test-force-exit等の追加フラグ可)
+  //   - test:coverage はカバレッジ計測(派生スクリプト)なのでセマフォ対象外
   const seg = "(^|[;&|(]\\s*)";
-  return new RegExp(seg + "npm\\s+(--[^\\s;&|()]+\\s+)*(run\\s+)?(--[^\\s;&|()]+\\s+)*(run\\s+)?test(?::[A-Za-z0-9._-]+)?([\\s]|$)").test(c)
+  return new RegExp(seg + "npm\\s+(--[^\\s;&|()]+\\s+)*(run\\s+)?(--[^\\s;&|()]+\\s+)*(run\\s+)?test(?!:coverage)(?::[A-Za-z0-9._-]+)?([\\s]|$)").test(c)
     || new RegExp(seg + "npm\\s+(--[^\\s;&|()]+\\s+)*--test([\\s]|$)").test(c)
     || new RegExp(seg + "node\\s+(--[^\\s;&|()]+\\s+)*--test([\\s]|$)").test(c);
 }
@@ -67,7 +68,7 @@ function isFree() {
 function drain() {
   while (queue.length > 0 && running < limit) {
     const next = queue.shift();
-    running += 1;
+    running += 1; // この分のスロットをここで確保(待ち側は加算しない設計のため必須)
     runningIds.add(next.label);
     next.resolve();
   }
