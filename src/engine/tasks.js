@@ -308,6 +308,9 @@ export class TaskBlackboard {
 
   // 1件だけ解放(claimed→open)。UIからの個別解放用(releaseは担当者の全件)
   releaseOne(agentId, taskId, note = null) {
+    // 担当者なし(空agentId)の解放要求は拒否: claimed/<agent>--<id>.md の形が成り立たず
+    // 「既に無い=べき等成功」経路で誤ってtrueになり、UI/CLIの「解放できません」契約が空洞化する。
+    if (!String(agentId ?? "").trim()) return false;
     const src = join(this.claimed, `${agentId}--${taskId}.md`);
     const dst = join(this.open, `${taskId}.md`);
     try {
