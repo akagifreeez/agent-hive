@@ -86,12 +86,8 @@ export function newUiToken() {
  */
 export async function startUi({ config, modelFactory, bus, autoStart = true, onSay = null, onAttach = null, onThread = null, onCloseThread = null, onFolder = null, onModel = null, onPermMode = null, onWorkflow = null, onListWorkflows = null, onFeedback = null, onThreadPause = null, onMcpList = null, onMcpAdd = null, onMcpRemove = null, onDiscuss = null }) {
   const startedAt = Date.now();
-<<<<<<< HEAD
   // UIトークン。環境変数 HIVE_UI_TOKEN(CLI等の外部クライアント用)で上書きできる
   const uiToken = process.env.HIVE_UI_TOKEN || newUiToken();
-=======
-  const uiToken = config.ui.token ?? newUiToken();
->>>>>>> agent/polish-r4-beta
   // /api/exec(開発用シェル)もエージェントと同じPermissionGateを通す(UIからの任意コマンド実行を承認制に)
   const execGate = new PermissionGate({ bus, ...(config.permissions ?? {}) });
   // ボード履歴はディスクから直接頁送りする(BoardStore)。RAMには末尾だけ持つ(肥大化対策)
@@ -959,7 +955,6 @@ export async function startUi({ config, modelFactory, bus, autoStart = true, onS
     // 待ち受けを邪魔しない走行
     runScenario({ config, modelFactory, bus }).catch((err) => console.error("scenario error:", err.message));
   }
-<<<<<<< HEAD
   return {
     close: () => {
       // 起動中のdevserverがあれば停止(UI終了時に子プロセスを残さない)
@@ -1032,9 +1027,6 @@ function saveApiKey(body, config) {
   writeFileSync(target, key + "\n");
   if (!pid) config.model.apiKey = key; // 次に生成されるモデルから即時有効
   return { ok: true, hint: "…" + key.slice(-4), viaEnv: Boolean(process.env[config.model.apiKeyEnv ?? "OPENAI_API_KEY"]) };
-=======
-  return { close: () => { if (devserverProc) { try { if (process.platform === "win32") runCommand({ command: `taskkill /PID ${devserverProc.pid} /T /F`, timeoutMs: 5000, outputLimit: 1000 }); else process.kill(-devserverProc.pid, "SIGTERM"); } catch { /* 無視 */ } } server.close(); }, token: uiToken };
->>>>>>> agent/polish-r4-beta
 }
 
 function json(res, obj, status = 200) {
