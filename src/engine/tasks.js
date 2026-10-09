@@ -50,7 +50,6 @@ export class TaskBlackboard {
   // 発見器などが直接タスクを投入する。projectは文脈(=どの取り組みの仕事か)のタグ。
   // acceptanceは受け入れ基準(完了とみなす条件)。途中参加するワーカーでも完成形を誤解しないようにする
   create({ id, role, body, project = "", acceptance = "", dependsOn = [], createdBy = null, model = null }) {
-<<<<<<< HEAD
     // 一意性はopenとclaimedの両方で守る(イシュー#30)。openだけだと請求中のIDを
     // 別本文で再createでき、2人のagentが同じIDを同時請求できてしまう。
     // doneは参照しないので「完了済みIDの再利用(自動再投入等)」は従来どおり許可。
@@ -63,14 +62,6 @@ export class TaskBlackboard {
     // done済みIDの再createは許可(自動再投入・reopen運用の後方互換)。seed再実行での再起票防止は
     // seed()側のdone参照で防御(blog lab実害: dependsOn依存解決の永久ブロック)。
     const f = join(this.open, `${key}.md`);
-=======
-    // ID一意性はopenとclaimedの両方で見る(イシュー#30): claimed中のIDを別本文で
-    // 再createすると2人のagentが同じIDを同時請求できてしまう。doneは許可する
-    // (自動再投入・タスクボードの正常な再利用経路。IDの衝突ではなく再生産)。
-    if (this.existsOpenOrClaimed(id)) return false;
-    const f = join(this.open, `${id}.md`);
-    if (existsSync(f)) return false;
->>>>>>> agent/impl-76
     const meta = metaLines(project, role, acceptance, dependsOn, model);
     writeFileSync(f, `${meta}\n${body ?? ""}\n`);
     if (createdBy) this.createdBy.set(key, createdBy);
