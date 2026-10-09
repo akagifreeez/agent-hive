@@ -85,7 +85,7 @@ test("runner: say(text, thread)はstagger遅延なしで全メインへ注入さ
     // 負荷揺れで確実に落ちる。遅延検出能力は上の開始観測(5秒/員)と
     // say→全員開始の10秒閾値で温存されているため、完走は待つだけでよい。
     for (const id of ["saystagger-alpha", "saystagger-beta", "saystagger-gamma"]) {
-      await waitUntil(() => host.roundState.get(id)?.running === false, 60000);
+      await waitUntil(() => host.roundState.get(id)?.running === false, 180000);
     }
     // 計測は「say→全員開始」区間に限定する(負荷で揺れる完走待ちを含めない)。
     // stagger遅延が復活するとベータ+3秒/ガンマ+6秒 → 開始観測が10秒を超える。
