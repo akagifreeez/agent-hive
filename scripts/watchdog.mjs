@@ -1,113 +1,62 @@
 #!/usr/bin/env node
-// プロセス死からの自動再起動ウォッチドッグ(long-run-resilience)。
+// プロセス死からの自動再起動ウォッチドッグ(1分間隔の外部トリガから呼ぶ想定)。
+// 使い方:
+//   node scripts/watchdog.mjs            1回チェック(ダウン+marker有りなら再起動)
+//   node scripts/watchdog.mjs --once     同上(明示)
+//   node scripts/watchdog.mjs --loop     常駐(60秒間隔でチェック)
+//   node scripts/watchdog.mjs on|off     自動再起動のON/OFF(state/watchdog-on marker)
 //
-// 使い方(手動):
-//   node scripts/watchdog.mjs --once     1回だけ判定して終了(テスト/タスクスケジューラ両用)
-//   node scripts/watchdog.mjs --loop     常駐して60秒間隔で判定(Ctrl+Cまで)
+// 疎通先はUIポート(HIVE_UI_PORT環境変数、既定7789)の /api/state。
+// ダウン AND state/watchdog-on 有り のときだけ node src/index.js --chat をデタッチ起動する。
 //
-// Windowsタスクスケジューラ登録(ユーザーレベル・管理者不要。README「自動再起動ウォッチドッグ」参照):
-//   schtasks /create /tn "AgentHiveWatchdog" /tr "node <絶対パス>scripts\watchdog.mjs --once" /sc minute /mo 1 /f
-//
-// 挙動:
-//   - UIポート(既定7789/HIVE_UI_PORT)へ疎通 → 稼働中なら何もしない
-//   - ダウン AND marker(state/watchdog-on)有り → `node src/index.js --chat` をデタッチ起動し、
-//     state/watchdog.log へ記録
-//   - marker無し → 何もしない(ユーザーが意図的に止めているケースを起こさない)
-//
-// 疎通先の差し替え: probeUrl env(例: HIVE_WATCHDOG_URL=http://localhost:7789/api/state)。
-// テストでは判定部(startIfNeeded)をモジュールから呼び出して固定する。
-
+// Windowsタスクスジューラへの登録(ユーザーレベル・README手順):
+//   schtasks /create /tn "agent-hive-watchdog" /tr "node <絶対パス>\scripts\watchdog.mjs" /sc minute /mo 1 /f
+// 解除:
+//   schtasks /delete /tn "agent-hive-watchdog" /f
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, appendFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { get } from "node:http";
-import { dirname, join, resolve } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkOnce, setWatchdog, watchdogEnabled } from "../src/engine/watchdog.js";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, "..");
-const STATE_DIR = process.env.HIVE_DATA ? resolve(process.env.HIVE_DATA, "state") : join(ROOT, "state");
-const MARKER = join(STATE_DIR, "watchdog-on");
-const LOG = join(STATE_DIR, "watchdog.log");
-const PORT = Number(process.env.HIVE_UI_PORT) || 7789;
-const PROBE_URL = process.env.HIVE_WATCHDOG_URL || `http://localhost:${PORT}/api/state`;
-const INTERVAL_MS = Number(process.env.HIVE_WATCHDOG_INTERVAL_MS) || 60_000;
-const SPAWN_CMD = process.env.HIVE_WATCHDOG_SPAWN || `node ${JSON.stringify(join(ROOT, "src", "index.js"))} --chat`;
+const here = dirname(fileURLToPath(import.meta.url));
+const workspace = resolve(here, "..");
+const uiPort = Number(process.env.HIVE_UI_PORT) || 7789;
+const url = `http://127.0.0.1:${uiPort}/api/state`;
 
-function logLine(text) {
-  const ts = new Date().toISOString();
-  try {
-    mkdirSync(STATE_DIR, { recursive: true });
-    appendFileSync(LOG, `[${ts}] ${text}\n`);
-  } catch {}
-}
-
-/** 疎通確認。稼働中=true。5秒で諦める(ウォッチドッグは中断が正義) */
-export function probeAlive(url = PROBE_URL, timeoutMs = 5000) {
-  return new Promise((resolveOk) => {
-    let done = false;
-    const finish = (v) => { if (!done) { done = true; resolveOk(v); } };
-    try {
-      const req = get(url, { timeout: timeoutMs }, (r) => { r.resume(); finish(true); });
-      req.on("error", () => finish(false));
-      req.on("timeout", () => { req.destroy(); finish(false); });
-    } catch { finish(false); }
-  });
-}
-
-/** marker(state/watchdog-on)を作る。戻り値: 切替後の状態 */
-export function enableWatchdog() {
-  mkdirSync(STATE_DIR, { recursive: true });
-  writeFileSync(MARKER, new Date().toISOString() + "\n");
-  return true;
-}
-
-export function disableWatchdog() {
-  try { unlinkSync(MARKER); } catch {}
-  return false;
-}
-
-export function isWatchdogEnabled() {
-  return existsSync(MARKER);
-}
-
-/**
- * 判定の本体(テストから直接呼べるようprobeとspawnerを差し替え可能にした)
- * @param {{probe?: () => Promise<boolean>, spawn?: (cmd: string) => void, enabled?: () => boolean, note?: string}} [opts]
- * @returns {Promise<"up"|"no-marker"|"started">} 何をしたか
- */
-export async function startIfNeeded(opts = {}) {
-  const probe = opts.probe ?? (() => probeAlive());
-  const doSpawn = opts.spawn ?? ((cmd) => {
-    // デタッチ起動: 親(watchdog)が死んでも子は生き続ける。Windowsはshell経由でなくてもdetachedでOK
-    const parts = cmd.split(" ");
-    const child = spawn(parts[0], parts.slice(1), {
-      cwd: ROOT,
-      detached: true,
-      stdio: "ignore",
-      shell: process.platform === "win32",
-    });
-    child.unref();
-  });
-  const enabled = opts.enabled ?? isWatchdogEnabled;
-  if (await probe()) return "up";
-  if (!enabled()) return "no-marker";
-  logLine(`down & marker有り → 再起動: ${SPAWN_CMD}`);
-  doSpawn(SPAWN_CMD);
-  return "started";
-}
-
-// CLI本体
-const arg = process.argv[2] ?? "--once";
-if (arg === "--once") {
-  const r = await startIfNeeded();
-  if (r === "started") console.log("agent-hiveを再起動しました(watchdog.logを参照)");
+const arg = process.argv[2] ?? "";
+if (arg === "on" || arg === "off") {
+  const r = setWatchdog(arg === "on", workspace);
+  console.log(`watchdog: 自動再起動を ${r.enabled ? "ON" : "OFF"} にしました(state/watchdog-on ${r.enabled ? "作成" : "削除"})`);
   process.exit(0);
-} else if (arg === "--loop") {
-  console.log(`watchdog常駐開始(${INTERVAL_MS}ms間隔, marker=${MARKER})`);
-  // ループ開始時にも一度判定(起動直後の取りこぼしを防ぐ)
-  await startIfNeeded();
-  setInterval(() => { void startIfNeeded(); }, INTERVAL_MS);
+}
+if (arg === "status") {
+  console.log(`watchdog: ${watchdogEnabled(workspace) ? "ON" : "OFF"} (marker: state/watchdog-on)`);
+  process.exit(0);
+}
+
+const isLoop = arg === "--loop";
+const runOnce = async () => {
+  const r = await checkOnce({
+    url,
+    workspace,
+    spawnFn: (cmd, args, opts) => {
+      const child = spawn(cmd, args, { ...opts, cwd: workspace });
+      child.unref(); // デタッチ(監視側の寿命に紐付けない)
+      return { pid: child.pid };
+    },
+  });
+  if (r.action === "respawn") {
+    console.log(`[${new Date().toISOString()}] hiveがダウンしていたため再起動しました(pid=${r.pid}) → state/watchdog.log`);
+  }
+  return r;
+};
+
+if (isLoop) {
+  // 常駐モード: 60秒間隔。タスクスジューラが使えない環境での代替(手動起動)。
+  console.log(`watchdog: ループ開始(${url} を60秒間隔で監視)`);
+  await runOnce();
+  setInterval(() => { runOnce().catch(() => {}); }, 60_000);
 } else {
-  console.error("使い方: node scripts/watchdog.mjs --once | --loop");
-  process.exit(2);
+  const r = await runOnce();
+  process.exit(0); // ダウンでも監視スクリプト自体は成功扱い(タスクスジューラのエラー通知を避ける)
 }

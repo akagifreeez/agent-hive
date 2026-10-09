@@ -11,3 +11,4 @@ hive.local.json
 smoke-result.txt
 memory/.distilled
 dist/
+tmp-verify/

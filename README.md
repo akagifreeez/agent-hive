@@ -25,6 +25,7 @@ node bin/hive.js chat [--thread 名前]  対話モード。入力した行がそ
 node bin/hive.js feedback <taskId> <コメント>  マージ済み差分への修正依頼を送る
 node bin/hive.js pause <スレッド> / resume <スレッド>  スレッドの一時停止/再開
 node bin/hive.js audit             監査台帳(state/audit.jsonl)の直近記録を見る(-n 件数、既定30)
+node bin/hive.js session           裏ログ(state/session-log/)の直近集計をエージェント別に見る(G2)
 node bin/hive.js notify            通知(承認待ち/マージ/長時間タスク完了)の最新を監視から見る
 node bin/hive.js usage             トークン消費の直近サマリ
 ```
@@ -49,6 +50,7 @@ node bin/hive.js usage             トークン消費の直近サマリ
 ## セーフティ
 
 - 権限モード(normal=要承認 / auto)+ 破壊的コマンドのパターン拒否 + 承認要求のデスクトップ通知
+- 停止系通知: 自動継続停止・ツール失敗停止・予算停止と全エージェント無音の「ラウンド静止」(既定10分、1回だけ)をCLI通知へ配信。`hive.config.json` の `notify.stop: false` で止める(`notify.stallSec` で静止閾値秒を変更)
 - **PC操作制限8か条**を全エージェントのシステムプロンプトへ常時注入(最小権限/state/への接触禁止/外部送信禁止など)
 - state/へのエージェント書き込みは`safeWritePath`で構造的に拒否(シンボリックリンクや大小文字の回避も含め`test/state-guard.test.js`で検証)
 - 監査台帳(`state/audit.jsonl`): 全ツール実行をagent/tool/所要ms/応答brief付きで記録(5MBローテート)
@@ -99,6 +101,15 @@ npm start              # ブラウザUIのみ(http://localhost:7789)
 - `hive.local.json`: ワークスペース位置などのローカル上書き(git除外対象)
 - ポート: UI=7789 / モニタ=7791。`HIVE_UI_PORT` / `HIVE_MONITOR_PORT` 環境変数で変更
 - ワークスペース: 既定はリポジトリ直下。梱包実行時はuserData配下(`HIVE_DATA`で上書き)
+- 自動再起動ウォッチドッグ(Windows・任意): `scripts/watchdog.mjs` を同梱。UIプロセスが死んだとき、marker(`state/watchdog-on`)が有り且つユーザーがONにしているときだけ `node src/index.js --chat` をデタッチ起動し、`state/watchdog.log` へ記録。切替は `node scripts/watchdog.mjs --once|--loop` は判定/常駐モードで、marker作成/削除は `enableWatchdog()`/`disableWatchdog()`(または state/watchdog-on ファイルの作削除)で行う。常駐代替: `node scripts/watchdog.mjs --loop`(60秒間隔)。Windowsタスクスケジューラ登録(ユーザーレベル・管理者権限不要。実登録はシステム設定変更のため自動では行わない):
+
+  ```bat
+  rem 登録
+  schtasks /create /tn "agent-hive-watchdog" /tr "node C:\path\to\agent-hive\scripts\watchdog.mjs --once" /sc minute /mo 1 /f
+  rem 解除
+  schtasks /delete /tn "agent-hive-watchdog" /f
+  ```
+
 
 ### CLI(稼働中のhiveを端末から操作・依存ゼロ)
 
@@ -111,10 +122,32 @@ node bin/hive.js pause <スレッド> / resume <スレッド>   # トークン�
 node bin/hive.js feedback <taskId> <コメント>          # マージ済み差分への修正依頼
 ```
 
+### 自動再起動ウォッチドッグ(Windows・任意)
+
+hiveプロセスが死んだときに自動で再起動する監視スクリプト(`scripts/watchdog.mjs`)を同梱しています。
+再起動は**ユーザーがONにしているときだけ**動きます(marker: `state/watchdog-on`。UIからは `watchdog_toggle` ツール、CLIからは `node scripts/watchdog.mjs on|off|status` で切替)。
+
+Windowsタスクスケジューラへの**ユーザーレベル登録**手順(管理者権限不要):
+
+```bat
+rem 登録
+schtasks /create /tn "agent-hive-watchdog" /tr "node C:\path\to\agent-hive\scripts\watchdog.mjs" /sc minute /mo 1 /f
+rem 解除
+schtasks /delete /tn "agent-hive-watchdog" /f
+```
+
+- 疎通先はUIポート(`HIVE_UI_PORT`環境変数、既定7789)の `/api/state`。稼働中なら何もしない
+- ダウン + marker有り のときだけ `node src/index.js --chat` をデタッチ起動し、`state/watchdog.log` へ1行JSONで記録
+- タスクスケジューラが使えない環境は `node scripts/watchdog.mjs --loop`(常駐・60秒間隔)で代替可
+- 実登録はシステム設定変更に当たるため**自動では行いません**。上記コマンドをユーザー自身が実行してください
+
+
+
 ## 開発
 
 ```bash
-npm test             # 全テスト(node --test。ランタイム依存ゼロなので直接実行できる)
+npm test             # 既定スイート(node --test。ランタイム依存ゼロなので直接実行できる。test/heavy/ は除外)
+npm run test:heavy   # 重い統合テストのみ(test/heavy/。実サーバ起動・worktree作成を伴い数分かかる)
 npm run typecheck    # JSDoc契約の静的検査(tsc --checkJs。noEmit)
 npm run desktop:dist # インストーラ+ポータブルexeのビルド
 npm run desktop:smoke # 梱包・起動の疎通確認

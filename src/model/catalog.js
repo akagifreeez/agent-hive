@@ -14,7 +14,7 @@ import { parseModelRef, formatModelRef } from "./ref.js";
 
 /** 内蔵カタログを土台に設定をマージする。
  * @param {ModelsCfg} [modelsCfg]
- * @returns {{providers: Record<string, ProviderCfg>, defaultRef: string|null, fallbackRefs: string[]}} */
+ * @returns {{providers: Record<string, ProviderCfg>, defaultRef: string|null, fallbackRefs: string[], routing?: {enabled?: boolean, heavyPromptTokens?: number, heavyRoles?: string[], heavyQualityStrikes?: number, heavyTools?: number, heavyModelRef?: string|null, lightModelRef?: string|null}}} */
 export function buildCatalog(modelsCfg = {}) {
   const providers = {};
   for (const [id, p] of Object.entries(BUILTIN_PROVIDERS)) {
@@ -23,7 +23,7 @@ export function buildCatalog(modelsCfg = {}) {
   for (const [id, p] of Object.entries(modelsCfg.providers ?? {})) {
     providers[id] = { ...providers[id], id, ...p, models: (p.models ?? providers[id]?.models ?? []).map((m) => ({ ...m })) };
   }
-  return { providers, defaultRef: modelsCfg.default ?? null, fallbackRefs: modelsCfg.fallbacks ?? [] };
+  return { providers, defaultRef: modelsCfg.default ?? null, fallbackRefs: modelsCfg.fallbacks ?? [], routing: modelsCfg.routing };
 }
 
 /** ベアIDのときの既定プロバイダを推定する(内蔵+設定の一意一致 → 既定ref、の順)。

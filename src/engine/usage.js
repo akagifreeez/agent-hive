@@ -8,6 +8,9 @@ export class UsageLedger {
     // 速度集計の実データ(agentId -> { ms, completion })。avgTokPerSecの算出元で、
     // 未計測呼出のトークンを混ぜないためエントリのcompletionTokensとは別に持つ
     this.tps = new Map();
+    // 最終snapshotDelta(agentId -> 数値)。lastSnapshotDelta(agentId)が前回呼ばれた時点からの
+    // 差分(ラウンド消費)を出すための基準点(イシュー#33)。
+    this.lastSnap = new Map();
   }
 
   add(agentId, usage, opts = {}) {
@@ -34,6 +37,21 @@ export class UsageLedger {
     return this.byAgent.get(agentId) ?? { calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0, msSum: 0, avgTokPerSec: null };
   }
 
+  // 前回呼び出しからの差分(ラウンド消費)を返す(イシュー#33)。usage.roundのペイロード用:
+  // totalsは台帳のセッション累積(予算アラート等の参照用にそのまま維持)、deltaは前回からの増分。
+  // 初回(基準が無い)・resetSnapshotDelta()後は全量(=その時点までの累積)を差分として返す。
+  // 累積が動いていない状態で続けて呼ぶと全項目0になる(加算しても集計を汚さない)。
+  lastSnapshotDelta(agentId) {
+    const keys = ["calls", "promptTokens", "completionTokens", "reasoningTokens", "costUsd", "msSum"];
+    const cur = this.agent(agentId);
+    const prev = this.lastSnap.get(agentId);
+    const delta = {};
+    for (const k of keys) delta[k] = (cur[k] ?? 0) - (prev?.[k] ?? 0);
+    delta.avgTokPerSec = cur.avgTokPerSec ?? null;
+    this.lastSnap.set(agentId, { ...cur }); // 今回を次の基準にする
+    return { totals: { ...cur }, delta };
+  }
+
   totals() {
     const t = { calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costUsd: 0, msSum: 0, avgTokPerSec: null };
     let tpsMs = 0, tpsCompletion = 0;
@@ -56,12 +74,19 @@ export class UsageLedger {
   snapshot() {
     return Object.fromEntries(this.byAgent);
   }
+
+  // 差分の基準点を捨てる(再起動後の初回ラウンドなど、その時点までの全量を差分として配りたいとき)。
+  // 次のlastSnapshotDelta(agentId)は現累積−基準(無し)=全量を返す。
+  resetSnapshotDelta(agentId = null) {
+    if (agentId == null) this.lastSnap.clear();
+    else this.lastSnap.delete(agentId);
+  }
 }
 
 // state/usage.json(usage.round/usage.summaryの運用履歴)から
 // 日別・スレッド別・日別xスレッドの集計ビューを作る(GitHubイシュー#6)。
 // 壊れた行・旧形式(thread無し)も無視せず集計に含める(thread無しは__main__扱い)。
-// @param {Array<{at?: string, thread?: string, agent?: string, totals?: {calls?: number, promptTokens?: number, completionTokens?: number, reasoningTokens?: number, costUsd?: number}}|null>} history
+// @param {Array<{at?: string, thread?: string, agent?: string, totals?: {calls?: number, promptTokens?: number, completionTokens?: number, reasoningTokens?: number, costUsd?: number}, delta?: {calls?: number, promptTokens?: number, completionTokens?: number, reasoningTokens?: number, costUsd?: number}|null}|null>} history deltaはラウンド単位の消費(usage.roundの新契約)。無い行はtotals(旧形式)で集計
 // @param {{days?: number}} [opts] days: 集計対象日数(既定14)。0で全期間
 // @returns {{byDate: Array<{date: string, calls: number, promptTokens: number, completionTokens: number, reasoningTokens: number, costUsd: number}>, byThread: Array<{thread: string, calls: number, promptTokens: number, completionTokens: number, reasoningTokens: number, costUsd: number, agentIds: string[]}>, matrix: Array<{date: string, thread: string, calls: number, costUsd: number}>}}
 export function aggregateUsage(history, opts = {}) {
@@ -81,7 +106,9 @@ export function aggregateUsage(history, opts = {}) {
     if (typeof h.agent !== "string" || !h.agent) continue;
     const date = localDateKey(d); // ローカル日付基準(ユーザー視点の「日別」。深夜帯の前日バケット落ちを防ぐ)
     const thread = resolveThread(h);
-    const t = h.totals ?? {};
+    // ラウンド単位のdelta(イシュー#33)を優先。旧形式(delta無し)は従来どおりtotals加算:
+    // totalsはセッション累積のため、delta無しの旧履歴だけが加算対象になる(新旧混在でも二重計上しない)
+    const t = h.delta ?? h.totals ?? {};
     const calls = Number(t.calls ?? 0);
     const pt = Number(t.promptTokens ?? 0);
     const ct = Number(t.completionTokens ?? 0);
@@ -106,6 +133,14 @@ export function aggregateUsage(history, opts = {}) {
     byThread: [...byThread.values()].sort((a, b) => b.costUsd - a.costUsd),
     matrix: [...matrix.values()].sort((a, b) => dateDesc(a, b) || (a.thread < b.thread ? -1 : 1)),
   };
+}
+
+// delta(ラウンド差分)が「有効な集計対象」か: オブジェクトで、集計キーのどれかが正の数。
+// delta: null/delta: {}(旧データや空ラウンド)は集計対象外 → aggregateUsageが旧totalsへフォールバックする。
+function isNonEmptyDelta(delta) {
+  if (!delta || typeof delta !== "object") return false;
+  return ["calls", "promptTokens", "completionTokens", "reasoningTokens", "costUsd"]
+    .some((k) => Number(delta[k] ?? 0) > 0);
 }
 
 
