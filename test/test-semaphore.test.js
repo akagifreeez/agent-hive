@@ -52,7 +52,8 @@ test("isTestCommand: npm test系・node --testにマッチし、非テストコ�
 
 test("isTestCommand: 文中のtest語に誤反応しない", () => {
   for (const c of [
-        "node build/test-helper.js",
+    "npm run test:coverage",
+    "node build/test-helper.js",
     "git show main:test/discover.test.js",
   ]) {
     assert.equal(isTestCommand(c), false, `should not match: ${c}`);

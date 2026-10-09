@@ -50,6 +50,10 @@ test("worktree汚染: ブランチ側の変更にマーカーがあるときは�
   assert.equal(m.marker, true);
   assert.match(m.text, /worktree側の変更に競合マーカー/);
   assert.match(m.text, /finish_task/);
+  // 診断ログ(review-175誤拒否の調査用): マージベースSHAと3ドット相当の差分一覧が拒否文に載る
+  assert.match(m.text, /\[診断\] merge-base=[0-9a-f]{7,40}/);
+  assert.match(m.text, new RegExp("diff一覧\\([0-9a-f]{7,40}\\.\\.agent/beta\\)","u"));
+  assert.match(m.text, /grep対象: /);
   assert.equal(existsSync(join(ws, MARKER_FILE)), false, "汚染ファイルはmainに入らない");
   rmTree(ws); rmTree(root);
 });
