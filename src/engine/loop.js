@@ -455,6 +455,13 @@ export async function runAgentLoop({
     return { ok: true, finalText, seenBoard: seen, usage: { ...runUsage } };
   }
 
+  // turn-limitも「担当者が消える終わり方」: 仕掛かり中タスクを宙吊りにせずopenへ戻す。
+  // 実例(blog lab): impl-ogp完了後にimpl-pagefindを請求→turn-limit到達で担い手不在に。
+  // 予算停止と同じ導線(ボード報告+releaseClaims)で、誰でも再請求できる状態で抜ける。
+  if (tasks && tasks.claimedBy(agent.id).length > 0) {
+    board.post(agent.id, `[ターン上限] ターン上限(${maxTurns})に達したため終了します。仕掛かり中タスクをopenへ戻します(宙吊り防止)。`);
+    releaseClaims("ターン上限");
+  }
   bus.emit("agent.status", { agent: agent.id, status: "turn-limit" });
   return { ok: false, endedBy: "turn-limit", error: `ターン上限(${maxTurns})に達しました`, seenBoard: seen, usage: { ...runUsage } };
 }
