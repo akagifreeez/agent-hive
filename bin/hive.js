@@ -66,8 +66,14 @@ async function getToken(port, fallback) {
 
 async function api(port, path, body = null, token = null) {
   let res;
+  const headers = { "content-type": "application/json" };
+  // CSRFトークン(サーバー起動時にHIVE_UI_TOKENへ設定されている場合は付与)
+  if (process.env.HIVE_UI_TOKEN) headers["x-hive-token"] = process.env.HIVE_UI_TOKEN;
   try {
+<<<<<<< HEAD
     const headers = { "content-type": "application/json", origin: "http://localhost", "x-hive-token": await getToken(port, token) };
+=======
+>>>>>>> agent/polish-r4-beta
     res = await fetch(base(port) + path, body ? { method: "POST", headers, body: JSON.stringify(body) } : undefined);
   } catch {
     console.error(`hive本体に接続できません(${base(port)})。先に desktop(npm run desktop)か node src/index.js --chat で起動してください。`);

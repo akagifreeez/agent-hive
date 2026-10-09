@@ -3,7 +3,7 @@ import { createModelFactory } from "./model/factory.js";
 import { applyTestSemaphoreConfig, applyBashTimeoutConfig } from "./engine/exec.js";
 import { runScenario, runChat } from "./runner.js";
 import { Bus } from "./engine/board.js";
-import { startUi } from "./ui/server.js";
+import { startUi, newUiToken } from "./ui/server.js";
 import { chatUiHandlers } from "./ui/chat-wiring.js";
 import { wireConsoleLog } from "./log.js";
 import { wireCliNotify, wireStallNotify, printNotifyLine } from "./notify.js";
@@ -54,12 +54,20 @@ async function main() {
   }
 
   if (args.includes("--chat")) {
+<<<<<<< HEAD
     // デスクトップ殻と同じ順(UIの待ち受けを先に立ててからrunChat)。
     // 逆だとリーダーの登録イベント(thread.opened)がUI立ち上がり前に消える。
     // controllerは後から入るのでgetterで渡す
     let controller = null;
     await startUi({ config, bus, autoStart: false, ...chatUiHandlers(() => controller) });
     controller = await runChat({ config, bus });
+=======
+    const controller = await runChat({ config, bus });
+    // UIサーバー起動ごとのCSRFトークンをCLI用に共有(bin/hive.js は HIVE_UI_TOKEN を付与)
+    config.ui.token ??= newUiToken();
+    process.env.HIVE_UI_TOKEN = config.ui.token;
+    await startUi({ config, bus, autoStart: false, ...chatUiHandlers(controller) });
+>>>>>>> agent/polish-r4-beta
     return;
   }
 

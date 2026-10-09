@@ -58,9 +58,14 @@ export function loadConfig(configPath) {
     agents: (raw.agents ?? []).map((a) => ({ ...a, personaPath: resolve(ROOT, a.persona ?? `agents/${a.id}.md`) })),
     loop: { maxTurns: 30, ...(raw.loop ?? {}) },
     runner: { timeoutSec: 480, ...(raw.runner ?? {}) },
+<<<<<<< HEAD
     ui: { port: 7789, monitorPort: 7791, monitorHost: "0.0.0.0", ...(raw.ui ?? {}) },
     discovery: { intervalSec: 30, testCommand: null, probes: { tests: "smoke" }, ...(raw.discovery ?? {}) },
     exec: { testMaxConcurrent: 1, ...(raw.exec ?? {}) },
+=======
+    ui: { port: 7789, monitorPort: 7791, monitorHost: "0.0.0.0", token: process.env.HIVE_UI_TOKEN ?? null, ...(raw.ui ?? {}) },
+    discovery: { intervalSec: 30, testCommand: null, ...(raw.discovery ?? {}) },
+>>>>>>> agent/polish-r4-beta
     permissions: {
       askTimeoutSec: 120,
       ...(raw.permissions ?? {}),
