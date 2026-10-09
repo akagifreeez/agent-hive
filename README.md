@@ -25,6 +25,7 @@ node bin/hive.js chat [--thread 名前]  対話モード。入力した行がそ
 node bin/hive.js feedback <taskId> <コメント>  マージ済み差分への修正依頼を送る
 node bin/hive.js pause <スレッド> / resume <スレッド>  スレッドの一時停止/再開
 node bin/hive.js audit             監査台帳(state/audit.jsonl)の直近記録を見る(-n 件数、既定30)
+node bin/hive.js session           裏ログ(state/session-log/)の直近集計をエージェント別に見る(G2)
 node bin/hive.js notify            通知(承認待ち/マージ/長時間タスク完了)の最新を監視から見る
 node bin/hive.js usage             トークン消費の直近サマリ
 ```
@@ -120,6 +121,27 @@ node bin/hive.js tasks | threads | usage | audit
 node bin/hive.js pause <スレッド> / resume <スレッド>   # トークン消費ゼロで休む
 node bin/hive.js feedback <taskId> <コメント>          # マージ済み差分への修正依頼
 ```
+
+### 自動再起動ウォッチドッグ(Windows・任意)
+
+hiveプロセスが死んだときに自動で再起動する監視スクリプト(`scripts/watchdog.mjs`)を同梱しています。
+再起動は**ユーザーがONにしているときだけ**動きます(marker: `state/watchdog-on`。UIからは `watchdog_toggle` ツール、CLIからは `node scripts/watchdog.mjs on|off|status` で切替)。
+
+Windowsタスクスケジューラへの**ユーザーレベル登録**手順(管理者権限不要):
+
+```bat
+rem 登録
+schtasks /create /tn "agent-hive-watchdog" /tr "node C:\path\to\agent-hive\scripts\watchdog.mjs" /sc minute /mo 1 /f
+rem 解除
+schtasks /delete /tn "agent-hive-watchdog" /f
+```
+
+- 疎通先はUIポート(`HIVE_UI_PORT`環境変数、既定7789)の `/api/state`。稼働中なら何もしない
+- ダウン + marker有り のときだけ `node src/index.js --chat` をデタッチ起動し、`state/watchdog.log` へ1行JSONで記録
+- タスクスケジューラが使えない環境は `node scripts/watchdog.mjs --loop`(常駐・60秒間隔)で代替可
+- 実登録はシステム設定変更に当たるため**自動では行いません**。上記コマンドをユーザー自身が実行してください
+
+
 
 ## 開発
 
