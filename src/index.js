@@ -3,7 +3,7 @@ import { createModelFactory } from "./model/factory.js";
 import { applyTestSemaphoreConfig, applyBashTimeoutConfig } from "./engine/exec.js";
 import { runScenario, runChat } from "./runner.js";
 import { Bus } from "./engine/board.js";
-import { startUi } from "./ui/server.js";
+import { startUi, newUiToken } from "./ui/server.js";
 import { chatUiHandlers } from "./ui/chat-wiring.js";
 import { wireConsoleLog } from "./log.js";
 import { wireCliNotify, wireStallNotify, printNotifyLine } from "./notify.js";

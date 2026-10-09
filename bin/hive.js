@@ -66,6 +66,9 @@ async function getToken(port, fallback) {
 
 async function api(port, path, body = null, token = null) {
   let res;
+  const headers = { "content-type": "application/json" };
+  // CSRFトークン(サーバー起動時にHIVE_UI_TOKENへ設定されている場合は付与)
+  if (process.env.HIVE_UI_TOKEN) headers["x-hive-token"] = process.env.HIVE_UI_TOKEN;
   try {
     const headers = { "content-type": "application/json", origin: "http://localhost", "x-hive-token": await getToken(port, token) };
     res = await fetch(base(port) + path, body ? { method: "POST", headers, body: JSON.stringify(body) } : undefined);
