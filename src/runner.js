@@ -332,10 +332,14 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       const th = threads.get(name);
       // host無しスレッド(ディスカッション等・タスク請求なし)は増員対象外
       if (!th || !th.host || th.host.paused) continue; // 停止中スレッドは増員しない
+      // host.mains が実際に稼働中(ラウンド実行中)なら縮小しない: agentStatus/claimed依存の
+      // 判定は scripted応答などの即完了ラウンドで取りこぼす(statusがworkingに戻る前の
+      // tickで縮小判定→alive削除済み)ため、ラウンド稼働を直接観測するガードを併設する。
+      const anyMainRunning = (th.host?.mains ?? []).some((m) => th.host?.roundState?.get(m.id)?.running === true);
       const nOpen = open.filter((t) => (t.project || "") === name).length;
       const nClaimedMine = list.claimed.filter((t) => (t.project || "") === name && agentStatus.get(t.agent) === "working").length;
       // 請求中(稼働中)の仕事があるスレッドは縮小しない(open==0でも作業進行中ならbase維持)
-      const desired = nOpen === 0 && nClaimedMine === 0 ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil((nOpen + nClaimedMine) / 2));
+      const desired = nOpen === 0 && nClaimedMine === 0 && !anyMainRunning ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil((nOpen + nClaimedMine) / 2));
       if (alive.size >= desired || manager.live.size >= globalCap) continue;
       const member = th.host?.mains?.[0];
       if (!member) continue;
