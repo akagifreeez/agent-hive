@@ -68,8 +68,6 @@ function isFree() {
 function drain() {
   while (queue.length > 0 && running < limit) {
     const next = queue.shift();
-    running += 1;
-    runningIds.add(next.label);
     next.resolve();
   }
 }
