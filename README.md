@@ -25,6 +25,7 @@ node bin/hive.js chat [--thread 名前]  対話モード。入力した行がそ
 node bin/hive.js feedback <taskId> <コメント>  マージ済み差分への修正依頼を送る
 node bin/hive.js pause <スレッド> / resume <スレッド>  スレッドの一時停止/再開
 node bin/hive.js audit             監査台帳(state/audit.jsonl)の直近記録を見る(-n 件数、既定30)
+node bin/hive.js session           裏ログ(state/session-log/)の直近集計をエージェント別に見る(G2)
 node bin/hive.js notify            通知(承認待ち/マージ/長時間タスク完了)の最新を監視から見る
 node bin/hive.js usage             トークン消費の直近サマリ
 ```
