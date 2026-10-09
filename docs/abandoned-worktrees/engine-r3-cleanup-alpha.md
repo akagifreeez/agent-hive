@@ -2,20 +2,30 @@
 
 ## 結論: 放棄(mainマージ不採用)
 
-## ブランチ残差の精査結果(2ファイル)
-1. **src/ui/server.js**: devserver起動時のブラウザオープンを「デフォルトで開く(body.open===falseで抑止)」
-   に変更する変更。しかしmain側はその後、**逆方向の設計判断**として「明示要求(open===true)のときだけ
-   開く」方針で実装済み(server.js 880-884行、コメントに「デフォルトで開くとテストやAPI呼び出しのたびに
-   標準ブラウザのタブが量産される」と明記)。ブランチ版をマージするとこの量産問題を再導入する。
-2. **test/browser-open.test.js**: 上記ブランチ設計前提のテスト追加(既定openでopenedがbool返却)。
-   main側の open===true 方針とは不整合。
+## ブランチ残差の精査結果(2ファイル、wip 4件)
+1. **src/ui/server.js**: handleDevserver を async 化し、devserver起動時に
+   **既定でブラウザを開く**(open:false で抑止)実装 + POST経路の待ち合わせ改善
+   (started.ok かつ !alreadyRunning 条件の緩和、waitForPort後のurl反映)。
+2. **test/browser-open.test.js**: 既定オープンを検証するテスト追記。
+
+## main側の現行仕様(採用済みの別解)
+- main は既に `/api/devserver` POST で await handleDevserver + ブラウザオープン対応済み
+  (server.js 879-883行)。ただし設計は逆で、**open:true 明示時だけ**開く
+  (テストやAPI呼び出しのたびに標準ブラウザのタブが量産されるのを防ぐ意図のコメント付き)。
+- ブランチ側は既定オープンのため、マージするとタブ量産の設計判断を覆す。
+- さらに waitForPort 前提の URL 確定ロジックは main の現行経路(handleDevserver 内で
+  url を即返す)と干渉し、devserver.test.js / browser-open.test.js の
+  現行6テストが緑で稼働している実績を壊すリスクがある。
 
 ## 判断
-- ブランチの核変更はmainの最新設計判断(明示オープンのみ)と正反対。マージはリグレッション。
-- main HEADで browser-open テスト 5/5 緑を確認済み。
-- wipコミット4件のみで完了しない作業。要件対立のため放棄が正。
+- 目的(起動時のブラウザオープン)は main 側に別設計で着地済み。
+- ブランチ側は「既定で開く」仕様で main と真逆。タブ量産を防ぐ main の判断を優先し、
+  マージせず放棄する。
+
+## 検証
+- main HEAD: test/devserver.test.js + test/browser-open.test.js → 6/6 緑。
 
 ## 記録
-- ブランチ: agent/engine-r3-cleanup-alpha(4コミット: 6501c7c/b282076/6d500de/d1b03df)
-- 判断者: クラッシュ復旧担当(このセッション)
-- 影響: なし。mainの現行設計(明示要求時のみブラウザオープン)を維持。
+- ブランチ: agent/engine-r3-cleanup-alpha(worktree worktrees/engine-r3-cleanup-alpha)
+- 判断者: クラッシュ復旧担当(リーダー)
+- 影響: なし。
