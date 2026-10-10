@@ -8,11 +8,16 @@
 //    workspace/memory/ へ知見を抽出する)。完了時にエンジンが処理済みマーカーを進める。
 // ④ READMEプローブ: コードからREADMEの自動セクション(readme-auto.js)を再生成し、
 //    差分があればupdate-readmeタスク起票。マーカー外(人間の手書き部分)は構造的に触らない。
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// ⑤ トリアージプローブ: フルスイートの失敗を既知/新規へ分類し、新規だけをfix候補へ(probes.triage)。
+// ⑥ 教訓プローブ: 監査ログ(state/audit.jsonl)の失敗を時間窓で解析し、繰り返す同型失敗を
+//    distill-lesson-<slug> タスクへ起票する(証跡付き)。distill-接頭辞は共通仕事なので誰でも請求でき、
+//    検収を経てmainへマージされた教訓はmemory/経由で次ラウンドから全エージェントへ注入される。
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "./exec.js";
 import { parseTap, classifyFailures, buildFixCandidates, deriveArea } from "./test-triage.js";
 import { detectStaleSections, genCliCommands, genRepoLayout, extractHelp } from "./readme-auto.js";
+import { analyzeAuditFailures } from "./lessons.js";
 
 export const FIX_TASK_ID = "fix-test-failures";
 export const REVIEW_TASK_ID = "review-changes";
@@ -31,7 +36,7 @@ const SMOKE_TEST_FILE = "test/exec.test.js"; // 高速(2秒前後)・依存ゼ�
  * @param {import("./board.js").Bus} o.bus
  * @param {number} [o.intervalSec]
  * @param {string|null} [o.testCommand] テストプローブのコマンド(未指定なら既定スモーク)
- * @param {{tests?: "smoke"|"full"|"off", triage?: {mode?: string, command?: string, timeoutMs?: number, knownFailures?: Array<{file: string, name: string, area: string}>}}} [o.probes] プローブ種別(discovery.probes)
+ * @param {{tests?: "smoke"|"full"|"off", lessons?: {mode?: "on"|"off", minCount?: number, windowHours?: number}, triage?: {mode?: string, command?: string, timeoutMs?: number, knownFailures?: Array<{file: string, name: string, area: string}>}}} [o.probes] プローブ種別(discovery.probes)
  * @param {(o: any) => Promise<{ok: boolean, text: string}>} [o.exec]
  */
 export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCommand, probes = null, exec = runCommand }) {
@@ -193,6 +198,60 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
     return genCliCommands(extractHelp(readFileSync(hivePath, "utf8")));
   }
 
+  // ⑥ 教訓プローブ: 監査ログの同型失敗を教訓タスクへ(distill-lesson-<slug>)。
+  //    証跡(件数+代表例)を本文に載せ、ワーカーが原因分析→memory/への教訓1条追記までを行う。
+  //    教訓は検収マージを経てmemory/へ入るため、system promptへの自動注入は既存のmemoryFn経路で効く。
+  let lessonsMtimeMs = -1; // 前回解析時のaudit.jsonl mtime(変化なしのティックは解析を飛ばす)
+  async function probeLessons() {
+    const cfg = probes?.lessons ?? {};
+    if (String(cfg.mode ?? "on") === "off") return;
+    const minCount = Math.max(2, Number(cfg.minCount ?? 5));
+    const windowHours = Math.max(1, Number(cfg.windowHours ?? 24));
+    const snap = tasks.snapshot();
+    // 教訓タスクは1件ずつ(動いている間は次を出さない=起票の自己増殖を構造的に避ける)
+    const inFlight = [...snap.open, ...snap.claimed].some((f) => f.includes("distill-lesson-"));
+    if (inFlight) return;
+    const file = join(workspace, "state", "audit.jsonl");
+    if (!existsSync(file)) return;
+    const mtime = statSync(file).mtimeMs;
+    if (mtime === lessonsMtimeMs) return;
+    lessonsMtimeMs = mtime;
+    let entries = [];
+    try {
+      entries = readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => {
+        try { return JSON.parse(l); } catch { return null; }
+      }).filter(Boolean);
+    } catch {
+      return;
+    }
+    const report = analyzeAuditFailures({ entries, windowMs: windowHours * 3600 * 1000, minCount });
+    const top = report[0];
+    if (!top) return;
+    const id = `distill-lesson-${top.slug}`;
+    // 同じ失敗パターンは1度だけ教訓化(done参照の恒久クールダウン。教訓の更新は
+    // distill-learnings(③)の定期保守に任せる)
+    if (snap.done.some((f) => f.endsWith(`--${id}.md`) || f === `${id}.md`)) return;
+    tasks.create({
+      id,
+      acceptance: "memory/配下の教訓ファイルに症状/原因/ルール/証跡を1条として記録するか、既存ルールで済むことを根拠1行付きで報告すること",
+      body: `監査ログ(state/audit.jsonl)で同型の失敗が繰り返されている。原因を分析し、再発防止の教訓を永続記憶へ反映せよ。
+
+## 発見器が検出した失敗パターン(証跡)
+- ツール: ${top.tool} / 直近${windowHours}時間で${top.count}件
+- 代表例(教師文面の先頭):
+${top.examples.map((x) => `  - ${x}`).join("\n")}
+
+## 手順
+- まず bash で \`git merge main\` して最新mainを取り込む。
+- state/audit.jsonl から該当失敗(ok: false)を読み、共通の原因を特定する。
+- 教訓は memory/lessons.md(無ければ新規作成)へ追記する。形式は短いルール1条: **症状 / 原因 / ルール(次に同じ場面で何をすべきか1文) / 証跡(件数+代表例)**。長い物語にしない(このファイルは全エージェントのシステムプロンプトへ注入される)。
+- 原因が既存のルール(TEST_EXECUTION_RULESやmemory/constraints.md等)で既に扱われているなら、追記は不要。その根拠を1行ボードへ報告して finish_task してよい。
+- ハーネス自体のコード修正が必要な規模の問題なら、修正はせずその旨をボードへ報告して完了してよい(コード変更は人間の判断を待つ)。
+- 終わったら post_to_board で要点を報告し finish_task。`,
+    });
+    bus.emit("discovery.created", { taskId: id });
+  }
+
   async function tick() {
     if (busy || stopped) return false;
     busy = true;
@@ -202,6 +261,7 @@ export function startDiscovery({ workspace, tasks, bus, intervalSec = 30, testCo
       await probeMemory();
       await probeReadme();
       await probeTriage();
+      await probeLessons();
       return true;
     } catch (err) {
       bus.emit("discovery.error", { error: err.message });

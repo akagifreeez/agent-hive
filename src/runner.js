@@ -27,6 +27,7 @@ import { hasOAuthEntry } from "./model/openai-auth.js";
 export { createModelFactory };
 import { SpawnManager } from "./engine/spawn.js";
 import { ChatHost, normalizeAutoResume } from "./engine/chat.js";
+import { createTaskBudget } from "./engine/task-budget.js";
 import { buildMemoryContext, ensurePcRules } from "./engine/memory.js";
 import { buildSkillsIndex } from "./engine/skills.js";
 import { McpHost, mcpServersInfo } from "./engine/mcp.js";
@@ -136,6 +137,14 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     },
   };
 
+  // 起票予算(正則化): エージェント経由のcreate_taskに時間窓あたりの上限を課す。
+  // 着地(タスク完了/マージ)で上限が全回復し、着地ゼロのラウンド停止(round.stalled)で半減する。
+  // 自己増殖(掃除→起票→検収→また起票)の恒久抑止。max=0設定で無効。
+  const taskBudget = createTaskBudget(config.chat?.taskCreationBudget);
+  bus.on("merge.completed", () => taskBudget.noteLanding());
+  bus.on("task.finished", () => taskBudget.noteLanding());
+  bus.on("round.stalled", () => taskBudget.noteStall());
+
   // 実行時のモデル/思考レベル切替(/model・/effortコマンドやUIから)。nullならconfigどおり
   const runtime = { model: null, effort: null };
   const modelFor = (agent) => {
@@ -190,8 +199,9 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0,
     approvals,
     modelPolicy: readModelPolicy(config),
+    taskBudget,
   });
-  const mcpTo = (extra) => ({ ...extra, mcpHosts, hooks, idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0, modelPolicy: readModelPolicy(config) });
+  const mcpTo = (extra) => ({ ...extra, mcpHosts, hooks, idleClaimWaitSec: config.chat?.idleClaimWaitSec ?? 0, modelPolicy: readModelPolicy(config), taskBudget });
 
   // サブスレッド: project名=スレッド名。3ワーカー( personas: workers )が専用ボードで並行作業
   const threads = new Map();
@@ -320,6 +330,8 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
     const base = (config.chat?.workers ?? config.chat?.mains ?? ["alpha", "beta", "gamma"]).length;
     const max = config.chat?.maxWorkersPerThread ?? 4;
     const globalCap = config.hierarchy?.maxConcurrent ?? 6;
+    // 検証滞留の自動増員しきい値(chat.reviewBacklogThreshold・0で無効)。0/未設定時の既定は3
+    const reviewThreshold = config.chat?.reviewBacklogThreshold === 0 ? 0 : Math.max(1, Math.floor(Number(config.chat?.reviewBacklogThreshold ?? 3)));
     const list = tasks.list();
     // 再起動などで担当者が停止したままの請求を解放(作業が凍結するのを防ぐ)
     // ChatHostラウンド実行中の担当者は稼働中とみなす(agent.status workingの発火が
@@ -346,6 +358,41 @@ export async function runChat({ config, bus = new Bus(), modelFactory = null }) 
       const anyMainRunning = (th.host?.mains ?? []).some((m) => th.host?.roundState?.get(m.id)?.running === true);
       const nOpen = open.filter((t) => (t.project || "") === name).length;
       const nClaimedMine = list.claimed.filter((t) => (t.project || "") === name && agentStatus.get(t.agent) === "working").length;
+      // 検証滞留の自動増員(検証役の単点故障対策): role:review固定のタスク(verify-*等)が
+      // しきい値以上滞留し、reviewロールの稼働者がいなければ検証専用ワーカーを1体起こす。
+      // 構造原因=実装役betaの検収後退出×autoscaleはimplしか起こさない×リーダーは自分から
+      // 検証係を起こさない(2026-10-08の実incident: verify30本以上が宙吊り)。
+      // impl/leadのラウンド稼働は増員を妨げない(検証が溜まるのは稼働ピーク時だから)。
+      if (reviewThreshold > 0) {
+        const projKey = name === "__main__" ? "" : name; // リーダースレッドのタスクはproject無し
+        const nReviewOpen = open.filter((t) => t.role === "review" && (t.project || "") === projKey).length;
+        if (nReviewOpen >= reviewThreshold) {
+          const reviewBusy = (th.host?.mains ?? []).some((m) => m.role === "review" && th.host?.roundState?.get(m.id)?.running === true)
+            || [...alive].some((id) => {
+              const v = manager.live.get(id);
+              return v?.role === "review" && v?.status === "working";
+            });
+          if (!reviewBusy && manager.live.size < globalCap) {
+            const member = th.host?.mains?.[0];
+            if (member) {
+              const r = await manager.spawn({
+                parent: { id: `${name}-scale`, displayName: `スレッド ${name}`, depth: 1 },
+                board: th.board,
+                displayName: `検証係(${name})`,
+                role: "review",
+                project: projKey,
+                brief: `[自動増員(検証)] 検証タスク(role: review)が${nReviewOpen}件滞留しています。claim_next_task で検証タスク(verify-*)を請求し、差分レビューと動作確認(関連テストの実行)を行い、finish_task で検証完了(承認マージ)まで進めてください。本文に[軽量検証可]があるものはその注記に従って軽量に判定してよい。検証タスクが無くなったら終了してください(請求ミス3回で退場)。`,
+              });
+              if (!r.error) {
+                threadOfAgent.set(r.id, name);
+                alive.add(r.id);
+                bus.emit("autoscale.review", { thread: name, backlog: nReviewOpen, agent: r.id });
+                break; // 1tickにつき1体まで(急増防止)
+              }
+            }
+          }
+        }
+      }
       // 請求中(稼働中)の仕事があるスレッドは縮小しない(open==0でも作業進行中ならbase維持)
       const desired = nOpen === 0 && nClaimedMine === 0 && !anyMainRunning ? Math.min(base, alive.size) : Math.min(max, base + Math.ceil((nOpen + nClaimedMine) / 2));
       if (alive.size >= desired || manager.live.size >= globalCap) continue;

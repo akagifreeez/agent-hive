@@ -24,7 +24,7 @@ const BASH_OUTPUT_LIMIT = 8 * 1024;
  * @property {boolean} [claimMiss] 請求ミスのときtrue(idle退場判定で連続回数を数える)
  */
 
-export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null, approvals = null, modelPolicy = null }) {
+export function createTools({ agent, workspace, mainWorkspace = null, board, tasks, bus, gate = null, spawner = null, maxBashMs = 30000, threadOpener = null, threadCloser = null, mcpHosts = null, hooks = null, idleClaimWaitSec = 0, crossPoster = null, resolveBoard = null, approvals = null, modelPolicy = null, taskBudget = null }) {
 
   const mcpList = mcpHosts ?? [];
   const mcpSpecs = mcpList.flatMap((h) => h.specs());
@@ -525,6 +525,14 @@ export function createTools({ agent, workspace, mainWorkspace = null, board, tas
         if (dependsOn.length) {
           const openDeps = tasks.list().open.filter((t) => dependsOn.includes(t.id));
           if (openDeps.length > 0) return { ok: false, text: `依存タスクが未完了のため起票できません: ${openDeps.map((t) => t.id).join(", ")}。完了を待つか、depends_onを外して再起票してください。` };
+        }
+        // 起票予算(正則化): エージェント経由の起票にのみ適用する。finish_taskの検証タスク起票や
+        // 発見器などハーネス内部のtasks.createは対象外なので、検収パイプラインが詰まることはない。
+        if (taskBudget) {
+          const b = taskBudget.tryConsume();
+          if (!b.ok) {
+            return { ok: false, text: `起票予算を使い切りました(${taskBudget.windowSec}秒の時間窓で上限${taskBudget.cap}件・あと約${b.retryInSec}秒で枠が回復。タスク完了やマージ(着地)でも枠が回復します)。既存タスクの消化・完了処理を優先してください。どうしても新規起票が必要なら、その根拠をボードへ投稿して割り当てを待ってください。上限は設定のchat.taskCreationBudgetで調整できます。` };
+          }
         }
         // 代替モデル指定(#12): 基本は既定モデル。リーダー(スレッド開設権持ち)だけ特例で指定可
         const modelArg = String(args.model ?? "").trim() || null;

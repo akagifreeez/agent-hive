@@ -16,14 +16,14 @@ import { legacyModelSection } from "./model/catalog.js";
  * @property {{maxTurns?: number}} loop
  * @property {{timeoutSec?: number}} runner
  * @property {{port: number, monitorPort: number, monitorHost: string}} ui UI/モニタのポート(HIVE_UI_PORT/HIVE_MONITOR_PORTで上書き可)
- * @property {{intervalSec?: number, testCommand?: string|null, probes?: {tests?: "smoke"|"full"|"off"}}} discovery 発見器(テストプローブ等)の設定。testCommand省略時は軽量スモーク(単一テスト)を回す。probes.tests="full"でフルスイート(旧挙動=テストコマンド明示と同義)、"off"で停止
+ * @property {{intervalSec?: number, testCommand?: string|null, probes?: {tests?: "smoke"|"full"|"off", lessons?: {mode?: "on"|"off", minCount?: number, windowHours?: number}}}} discovery 発見器(テストプローブ等)の設定。testCommand省略時は軽量スモーク(単一テスト)を回す。probes.tests="full"でフルスイート(旧挙動=テストコマンド明示と同義)、"off"で停止。probes.lessonsは監査ログの失敗パターン解析→教訓タスク(distill-lesson-*)起票の設定(既定on・minCount=5件/windowHours=24時間)
  * @property {{testMaxConcurrent?: number}} exec テスト実行系の設定。testMaxConcurrentはテスト系コマンドのプロセス横断同時実行上限(既定1=直列)。複数ワーカーの検証+発見器プローブの重なりでマシンが飽和するのを防ぐ
  * @property {{askTimeoutSec?: number}} permissions
  * @property {{maxTokensPerRun?: number}} budget 1ランあたりのトークン上限
  * @property {{thresholdPercent?: number, keepRecentToolResults?: number}} compact 圧縮の設定
  * @property {{longTaskSec?: number, stop?: boolean, stallSec?: number}} notify CLI通知(#11)の設定。longTaskSecは長時間タスク完了通知の閾値秒(既定600)。stop=falseで停止系通知(自動継続停止/ツール失敗/予算/ラウンド静止)を止める(既定true)。stallSecはラウンド静止検出の無活動秒(既定600)
  * @property {{maxDepth?: number, maxConcurrent?: number}} hierarchy
- * @property {{lead?: string, workers?: string[], mains?: string[], idleClaimWaitSec?: number, autoscale?: boolean, autoscaleIntervalSec?: number, maxWorkersPerThread?: number, maxTurnsPerRound?: number, autoContinueRounds?: number, staggerMs?: number, memMaxMessages?: number, schedules?: Array<{everyMinutes: number, text: string, thread?: string}>, budgetAlertUsd?: number, requireSeparateApprove?: boolean}} chat チャット運用の設定(予算アラートは累積コストがこのしきい値を超えると1回告知。requireSeparateApprove=trueでfinish_task時に実装者以外の検証タスクを起票し、approve_taskでの承認済みタスクだけをマージする)
+ * @property {{lead?: string, workers?: string[], mains?: string[], idleClaimWaitSec?: number, autoscale?: boolean, autoscaleIntervalSec?: number, maxWorkersPerThread?: number, maxTurnsPerRound?: number, autoContinueRounds?: number, staggerMs?: number, memMaxMessages?: number, schedules?: Array<{everyMinutes: number, text: string, thread?: string}>, budgetAlertUsd?: number, requireSeparateApprove?: boolean, reviewBacklogThreshold?: number, taskCreationBudget?: {max?: number, windowSec?: number}}} chat チャット運用の設定(予算アラートは累積コストがこのしきい値を超えると1回告知。requireSeparateApprove=trueでfinish_task時に実装者以外の検証タスクを起票し、approve_taskでの承認済みタスクだけをマージする。reviewBacklogThresholdは検証タスク(role:review)の滞留件数がこの数を超えたら検証係を自動増員(既定3・0で無効)。taskCreationBudgetはcreate_taskの起票予算(正則化)=時間窓windowSec秒あたりmax件まで・着地で回復/停滞で逓減(既定max12/windowSec600・max0で無効))
  * @property {{servers: Object.<string, Object>}} mcp
  * @property {Object} hooks
  * @property {Object} commands

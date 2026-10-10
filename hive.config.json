@@ -61,7 +61,9 @@
     "idleClaimWaitSec": 45,
     "autoscale": true,
     "autoscaleIntervalSec": 30,
-    "maxWorkersPerThread": 4
+    "maxWorkersPerThread": 4,
+    "reviewBacklogThreshold": 3,
+    "taskCreationBudget": { "max": 12, "windowSec": 600 }
   },
     "agents": [
       {
@@ -104,6 +106,7 @@
   "discovery": {
     "intervalSec": 120,
     "probes": {
+      "lessons": { "mode": "on", "minCount": 5, "windowHours": 24 },
       "triage": {
         "mode": "off",
         "command": "npm test",

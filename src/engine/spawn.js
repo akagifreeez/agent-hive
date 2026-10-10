@@ -44,9 +44,11 @@ export class SpawnManager {
     idleClaimWaitSec = 0, // 請求ミス時に新着タスクを待つ秒数(トークン消費ゼロの待ち行)
     approvals = null, // 実装者≠検証者の強制(#3)用の共有コンテキスト
     modelPolicy = null, // モデル選択ポリシー(readModelPolicy(config)の結果)
+    taskBudget = null, // 起票予算(正則化)。nullで無効
   }) {
     this.approvals = approvals;
     this.modelPolicy = modelPolicy;
+    this.taskBudget = taskBudget;
     this.mainWorkspace = mainWorkspace;
     this.worktreeRoot = worktreeRoot;
     this.board = board;
@@ -117,7 +119,7 @@ export class SpawnManager {
       scenarioName: "chat",
       expendable: Boolean(expendable), // trueなら請求ミス1回で早期退場(自動増員ワーカー用)
     };
-    this.live.set(id, { displayName: dn, depth, parent: parent.id, status: "working", model: model ?? null });
+    this.live.set(id, { displayName: dn, depth, parent: parent.id, status: "working", model: model ?? null, role: agent.role });
     // ブリーフ=このエージェントの請求済みタスク。finish_taskで完了→main自動マージまで繋がる
     const projNote = project ? `文脈(project): ${project} — 追加のタスクを請求するときは project: ${project} で絞ること。\n\n` : "";
     this.tasks.assign({ agentId: id, taskId: `spawn-${id}`, project, model, body: `${projNote}スポーン元: ${parent.displayName}(${parent.id})\nロール: ${role ?? "impl"}\n\n${brief.trim()}` });
@@ -148,6 +150,7 @@ export class SpawnManager {
       hooks: this.hooks,
       idleClaimWaitSec: this.idleClaimWaitSec,
       modelPolicy: this.modelPolicy,
+      taskBudget: this.taskBudget,
     });
     const shellKind = await tools.detectShell();
     const mem = this.memoryFn?.() ?? "";
