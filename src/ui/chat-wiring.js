@@ -5,8 +5,18 @@
 // は () => controller の関数を渡す。値渡しするとnullが固定されてしまう)。
 export function chatUiHandlers(getController) {
   const c = () => (typeof getController === "function" ? getController() : getController);
+  // UI立ち上げが先・controller(runChatの戻り値)は後から入るため、接続までの間
+  // /api/sayはok:trueだけ返して入力を黙って捨てていた。queueに貯め、controller代入後に
+  // 呼び出し側がflushPendingSay()で配信する(起動直後の「送ったのに届かない」対策)。
+  const pending = [];
+  const PENDING_CAP = 50;
   return {
-    onSay: (text, thread) => c()?.say(text, thread),
+    onSay: (text, thread) => {
+      const ctl = c();
+      if (ctl) return ctl.say(text, thread);
+      if (pending.length >= PENDING_CAP) pending.shift(); // 溢れたら最古を落とす(controllerが一度も入らない起動失敗でも無限に育てない)
+      pending.push({ text, thread });
+    },
     onAttach: (path, dataUrl, note, thread) => c()?.attachImage(note, dataUrl, thread, path),
     onThread: (req) => c()?.openThread(req),
     onDiscuss: (req) => c()?.runDiscussion(req),
@@ -21,5 +31,18 @@ export function chatUiHandlers(getController) {
     onMcpList: () => c()?.mcpList() ?? [],
     onMcpAdd: (req) => c()?.mcpAdd(req),
     onMcpRemove: (req) => c()?.mcpRemove(req),
+    // controller(runChat)完了の直後に呼ぶ。接続前にqueueされた入力を到着順で配信する
+    flushPendingSay: () => {
+      const ctl = c();
+      if (!ctl) return 0;
+      let n = 0;
+      while (pending.length) {
+        const { text, thread } = pending.shift();
+        ctl.say(text, thread);
+        n++;
+      }
+      return n;
+    },
+    pendingSayCount: () => pending.length,
   };
 }

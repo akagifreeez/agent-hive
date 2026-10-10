@@ -98,15 +98,18 @@ async function bootstrap() {
       } catch { /* コントローラ未初期化時は投稿先なし(イベントとログだけ流れる) */ }
       return boards;
     };
+    const wiring = chatUiHandlers(() => controller);
     await startUi({
       config, bus, autoStart: false,
-      ...chatUiHandlers(() => controller),
+      ...wiring,
     });
     installProcessGuard(bus, {
       notify: (line) => { try { notify("プロセス警告", line, config.ui.port); } catch { /* UI未起動時は無視 */ } },
     });
     wireProcessErrorToBoards(bus, { getBoards: listGuardBoards });
     controller = await runChat({ config, bus });
+    // 起動完了前に届いた入力はqueueされている。捨てずにここで配信する
+    wiring.flushPendingSay();
   }
 
   win = new BrowserWindow({

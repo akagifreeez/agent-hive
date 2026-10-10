@@ -58,8 +58,12 @@ async function main() {
     // 逆だとリーダーの登録イベント(thread.opened)がUI立ち上がり前に消える。
     // controllerは後から入るのでgetterで渡す
     let controller = null;
-    await startUi({ config, bus, autoStart: false, ...chatUiHandlers(() => controller) });
+    const wiring = chatUiHandlers(() => controller);
+    await startUi({ config, bus, autoStart: false, ...wiring });
     controller = await runChat({ config, bus });
+    // 起動完了前に届いた入力はqueueされている。捨てずにここで配信する
+    const queued = wiring.flushPendingSay();
+    if (queued) console.log(`起動完了前に届いた入力 ${queued}件を配信しました。`);
     return;
   }
 

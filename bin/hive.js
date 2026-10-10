@@ -5,6 +5,7 @@
 // 使い方: node bin/hive.js <コマンド> [--port 7789] [--thread 名前]
 import { stdin, stdout, argv, env, exit } from "node:process";
 import { createInterface } from "node:readline";
+import { readFile } from "node:fs/promises";
 
 const ACCENT = env.NO_COLOR ? "" : "\x1b[38;5;209m";
 const DIM = env.NO_COLOR ? "" : "\x1b[2m";
@@ -18,7 +19,9 @@ const HELP = `agent-hive CLI — 稼働中のhiveを端末から操作する
   status                    稼働状態(モデル/タスク/スレッド/エージェント)を一覧
   threads                   スレッド一覧(フォルダ・停止中表示つき)
   tasks [open|claimed|done] タスク一覧(省略時は未着手+作業中)
-  say <テキスト>            メインチャットへ発言(--thread でスレッド指定)
+  say <テキスト>            メインチャットへ発言(--thread でスレッド指定。
+                            --file <パス> でUTF-8ファイルから、- で標準入力から。
+                            端末経由で日本語が化ける環境(cp932等)はこちらを使う)
   board [-n 件数]           最近のボード投稿を見る(既定30件)
   watch                     ボードの新着をリアルタイムで流し見(Ctrl+Cで終了)
   chat [--thread 名前]      対話モード。入力した行がそのまま発言になる
@@ -33,13 +36,14 @@ const HELP = `agent-hive CLI — 稼働中のhiveを端末から操作する
 `;
 
 function parseGlobalArgs(argv) {
-  const opts = { port: Number(env.HIVE_UI_PORT) || 7789, thread: null, limit: 30, token: env.HIVE_UI_TOKEN || null };
+  const opts = { port: Number(env.HIVE_UI_PORT) || 7789, thread: null, limit: 30, token: env.HIVE_UI_TOKEN || null, file: null };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--port") opts.port = Number(argv[++i]);
     else if (a === "--thread" || a === "-t") opts.thread = argv[++i];
     else if (a === "-n") opts.limit = Math.max(1, Number(argv[++i]) || 30);
+    else if (a === "--file" || a === "-f") opts.file = argv[++i];
     else rest.push(a);
   }
   return { opts, rest };
@@ -157,15 +161,32 @@ async function cmdBoard(o) {
   if (!shown.length) console.log("(投稿なし)");
 }
 
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 async function cmdSay(o, text) {
-  const body = { text: text.join(" ") };
-  if (o.thread) body.thread = o.thread;
-  if (!body.text.trim()) {
-    console.error("言うことがありません。hive say \"テキスト\" の形で指定してください。");
+  let body = text.join(" ");
+  let via = "";
+  // 引数が「-」のみ、または --file - のときは標準入力から読む。
+  // 端末の文字コード(cp932等)を通る引数は日本語が化けるため、UTF-8のファイル・stdin経由を用意した
+  if (o.file === "-" || (text.length === 1 && text[0] === "-")) {
+    body = await readStdin();
+    via = " (stdinから)";
+  } else if (o.file) {
+    body = await readFile(o.file, "utf8");
+    via = ` (${o.file}から)`;
+  }
+  const payload = { text: body };
+  if (o.thread) payload.thread = o.thread;
+  if (!payload.text || !payload.text.trim()) {
+    console.error("言うことがありません。hive say \"テキスト\" / hive say --file <パス> / hive say - (標準入力) のいずれかで指定してください。");
     exit(1);
   }
-  await api(o.port, "/api/say", body, o.token);
-  console.log(`送信しました${o.thread ? ` (${o.thread})` : ""}。`);
+  await api(o.port, "/api/say", payload, o.token);
+  console.log(`送信しました${via}${o.thread ? ` (${o.thread})` : ""}。`);
 }
 
 async function cmdFeedback(o, args) {
