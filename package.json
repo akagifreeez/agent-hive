@@ -19,10 +19,11 @@
     "desktop:smoke": "electron . --smoke",
     "desktop:pack": "electron-builder --dir",
     "desktop:dist": "electron-builder",
-    "test": "node --test --test-force-exit \"test/*.test.js\" --ignore \"test/heavy/*.test.js\"",
+    "test": "node scripts/clean-temp.mjs --quiet && node --test --test-force-exit \"test/*.test.js\" --ignore \"test/heavy/*.test.js\"",
     "doctor": "node scripts/doctor.js",
     "typecheck": "tsc -p tsconfig.json",
-    "test:heavy": "node --test --test-force-exit \"test/heavy/*.test.js\""
+    "clean-temp": "node scripts/clean-temp.mjs",
+    "test:heavy": "node scripts/clean-temp.mjs --quiet && node --test --test-force-exit \"test/heavy/*.test.js\""
   },
   "build": {
     "appId": "io.github.agent-hive.desktop",
